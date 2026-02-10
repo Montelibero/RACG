@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -96,6 +97,57 @@ func (s *Store) GetRequest(ctx context.Context, requestID string) (Request, erro
 	}
 	r.CreatedAt = tm
 	return r, nil
+}
+
+func (s *Store) ListRequestsByStatus(ctx context.Context, statuses []string, limit int) ([]Request, error) {
+	if len(statuses) == 0 {
+		return nil, fmt.Errorf("statuses required")
+	}
+	if limit <= 0 {
+		limit = 1000
+	}
+
+	placeholders := make([]string, 0, len(statuses))
+	args := make([]any, 0, len(statuses)+1)
+	for _, st := range statuses {
+		placeholders = append(placeholders, "?")
+		args = append(args, st)
+	}
+	args = append(args, limit)
+
+	q := fmt.Sprintf(
+		`SELECT request_id, session_id, client_id, status, op_json, risk_flags_json, created_at
+		   FROM requests
+		  WHERE status IN (%s)
+		  ORDER BY created_at ASC
+		  LIMIT ?`,
+		strings.Join(placeholders, ","),
+	)
+
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Request
+	for rows.Next() {
+		var r Request
+		var created string
+		if err := rows.Scan(&r.ID, &r.SessionID, &r.ClientID, &r.Status, &r.OpJSON, &r.RiskFlagsJSON, &created); err != nil {
+			return nil, err
+		}
+		tm, err := time.Parse(time.RFC3339Nano, created)
+		if err != nil {
+			return nil, err
+		}
+		r.CreatedAt = tm
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (s *Store) UpdateRequestStatus(ctx context.Context, requestID string, status string) error {

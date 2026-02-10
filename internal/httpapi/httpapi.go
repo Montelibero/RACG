@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"embed"
 	"encoding/json"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -130,6 +131,100 @@ type resultRecord struct {
 	StderrTruncated bool   `json:"stderr_truncated"`
 	StdoutSHA256    string `json:"stdout_sha256"`
 	StderrSHA256    string `json:"stderr_sha256"`
+}
+
+// RehydrateFromStore loads persisted requests into memory so they are visible to TUI and HTTP endpoints
+// after a restart. MVP policy: do not resume executions; RUNNING requests are marked FAILED.
+func (a *API) RehydrateFromStore(ctx context.Context) error {
+	if a.st == nil {
+		return nil
+	}
+
+	reqs, err := a.st.ListRequestsByStatus(ctx, []string{"PENDING_APPROVAL", "APPROVED", "RUNNING"}, 5000)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now().UTC()
+
+	a.reqsMu.Lock()
+	defer a.reqsMu.Unlock()
+
+	for _, r := range reqs {
+		status := r.Status
+		var res *resultRecord
+
+		// Option 1: never resume. Mark RUNNING as FAILED and write an execution row if missing.
+		if status == "RUNNING" {
+			status = "FAILED"
+			_ = a.st.UpdateRequestStatus(ctx, r.ID, "FAILED")
+			if _, err := a.st.GetExecution(ctx, r.ID); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					msg := "server restarted"
+					_ = a.st.InsertExecution(ctx, store.Execution{
+						RequestID:        r.ID,
+						StartedAt:        now,
+						FinishedAt:       now,
+						DurationMs:       0,
+						ExitCode:         -1,
+						Status:           "FAILED",
+						Stdout:           "",
+						Stderr:           msg,
+						StdoutTruncated:  false,
+						StderrTruncated:  false,
+						StdoutSHA256:     sha256Hex(nil),
+						StderrSHA256:     sha256Hex([]byte(msg)),
+					})
+				}
+			}
+		}
+
+		var op rules.Op
+		_ = json.Unmarshal([]byte(r.OpJSON), &op)
+
+		var riskFlags []string
+		_ = json.Unmarshal([]byte(r.RiskFlagsJSON), &riskFlags)
+
+		rec := requestRecord{
+			ID:        r.ID,
+			Status:    status,
+			Op:        json.RawMessage(r.OpJSON),
+			RiskFlags: riskFlags,
+			SessionID: r.SessionID,
+			ClientID:  r.ClientID,
+			CreatedAt: r.CreatedAt.UTC().Format(time.RFC3339Nano),
+		}
+
+		if d, err := a.st.GetDecision(ctx, r.ID); err == nil {
+			rec.Decision = &decisionRecord{
+				Decision:       d.Decision,
+				DecisionSource: d.DecisionSource,
+				DecidedAt:      d.DecidedAt.UTC().Format(time.RFC3339Nano),
+				RuleID:         d.RuleID,
+			}
+		}
+
+		if e, err := a.st.GetExecution(ctx, r.ID); err == nil {
+			res = &resultRecord{
+				StartedAt:       e.StartedAt.UTC().Format(time.RFC3339Nano),
+				FinishedAt:      e.FinishedAt.UTC().Format(time.RFC3339Nano),
+				DurationMs:      e.DurationMs,
+				ExitCode:        e.ExitCode,
+				Status:          e.Status,
+				Stdout:          e.Stdout,
+				Stderr:          e.Stderr,
+				StdoutTruncated: e.StdoutTruncated,
+				StderrTruncated: e.StderrTruncated,
+				StdoutSHA256:    e.StdoutSHA256,
+				StderrSHA256:    e.StderrSHA256,
+			}
+			rec.Result = res
+		}
+
+		a.reqs[r.ID] = rec
+	}
+
+	return nil
 }
 
 func New(cfg config.Config, opts ...Option) *API {

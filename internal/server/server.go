@@ -55,6 +55,10 @@ func New(cfg config.Config) (*Server, error) {
 	}
 
 	api := httpapi.New(cfg, httpapi.WithRulesEngine(re), httpapi.WithStore(st))
+	if err := api.RehydrateFromStore(context.Background()); err != nil {
+		_ = st.Close()
+		return nil, fmt.Errorf("store rehydrate: %w", err)
+	}
 	handler := api.Handler()
 
 	return &Server{
