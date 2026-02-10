@@ -9,25 +9,29 @@ import (
 )
 
 type Config struct {
-	ListenAddr           string
-	Port                 int
-	DefaultTimeoutSec    int
-	MaxOutputBytes       int
-	MaxConcurrency       int
+	ListenAddr            string
+	Port                  int
+	DefaultTimeoutSec     int
+	MaxOutputBytes        int
+	MaxConcurrency        int
 	PairingCodeTTLSeconds int
 
-	LockFirstClientAddr  bool
+	LockFirstClientAddr     bool
+	AllowAlwaysForDangerous bool
+	KillGraceSec            int
 }
 
 func Defaults() Config {
 	return Config{
-		ListenAddr:           "127.0.0.1",
-		Port:                 8777,
-		DefaultTimeoutSec:    120,
-		MaxOutputBytes:       1 * 1024 * 1024,
-		MaxConcurrency:       3,
-		PairingCodeTTLSeconds: 180,
-		LockFirstClientAddr:  false,
+		ListenAddr:              "127.0.0.1",
+		Port:                    8777,
+		DefaultTimeoutSec:       120,
+		MaxOutputBytes:          1 * 1024 * 1024,
+		MaxConcurrency:          3,
+		PairingCodeTTLSeconds:   180,
+		LockFirstClientAddr:     false,
+		AllowAlwaysForDangerous: false,
+		KillGraceSec:            5,
 	}
 }
 
@@ -82,6 +86,18 @@ func ApplyTOMLSimple(cfg *Config, r io.Reader) error {
 				return fmt.Errorf("line %d: lock_first_client_addr: %w", lineNo, err)
 			}
 			cfg.LockFirstClientAddr = b
+		case "allow_always_for_dangerous":
+			b, err := strconv.ParseBool(val)
+			if err != nil {
+				return fmt.Errorf("line %d: allow_always_for_dangerous: %w", lineNo, err)
+			}
+			cfg.AllowAlwaysForDangerous = b
+		case "kill_grace_sec":
+			n, err := strconv.Atoi(val)
+			if err != nil {
+				return fmt.Errorf("line %d: kill_grace_sec: %w", lineNo, err)
+			}
+			cfg.KillGraceSec = n
 		default:
 			// Ignore unknown keys in MVP.
 		}

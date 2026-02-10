@@ -45,8 +45,12 @@ func WithRulesEngine(e *rules.Engine) Option {
 	return func(a *API) { a.rules = e }
 }
 
-func WithExecutor(x *executor.Executor) Option {
+func WithExecutor(x CmdRunner) Option {
 	return func(a *API) { a.exec = x }
+}
+
+type CmdRunner interface {
+	Run(ctx context.Context, s executor.Spec) executor.Result
 }
 
 type API struct {
@@ -56,7 +60,7 @@ type API struct {
 	tokens  *auth.TokenManager
 	hub     *events.Hub
 	rules   *rules.Engine
-	exec    *executor.Executor
+	exec    CmdRunner
 	sem     chan struct{}
 
 	mu             sync.Mutex
@@ -73,6 +77,8 @@ type requestRecord struct {
 
 	Decision *decisionRecord `json:"decision,omitempty"`
 	Result   *resultRecord   `json:"result,omitempty"`
+
+	RiskFlags []string `json:"risk_flags,omitempty"`
 }
 
 type decisionRecord struct {
@@ -105,7 +111,7 @@ func New(cfg config.Config, opts ...Option) *API {
 	a.rules = rules.NewEngine()
 	a.exec = executor.New(executor.Options{
 		MaxOutputBytes: cfg.MaxOutputBytes,
-		KillGrace:      3 * time.Second,
+		KillGrace:      time.Duration(cfg.KillGraceSec) * time.Second,
 	})
 	a.sem = make(chan struct{}, cfg.MaxConcurrency)
 
@@ -254,7 +260,13 @@ func (a *API) handleSessionMe(w http.ResponseWriter, r *http.Request, c auth.Cla
 }
 
 func (a *API) handleRequests(w http.ResponseWriter, r *http.Request, c auth.Claims) {
-	if r.Method != http.MethodPost {
+	switch r.Method {
+	case http.MethodPost:
+		// continue
+	case http.MethodGet:
+		a.handleRequestsList(w, r, c)
+		return
+	default:
 		writeError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "", "")
 		return
 	}
@@ -277,7 +289,7 @@ func (a *API) handleRequests(w http.ResponseWriter, r *http.Request, c auth.Clai
 	}
 
 	id := uuid.NewString()
-	rec := requestRecord{ID: id, Status: "PENDING_APPROVAL", Op: mustJSON(req.Op)}
+	rec := requestRecord{ID: id, Status: "PENDING_APPROVAL", Op: mustJSON(req.Op), RiskFlags: riskFlags(req.Op)}
 	respStatus := rec.Status
 
 	a.reqsMu.Lock()
@@ -328,6 +340,27 @@ func (a *API) handleRequests(w http.ResponseWriter, r *http.Request, c auth.Clai
 
 	resp := map[string]any{"request_id": id, "status": respStatus}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (a *API) handleRequestsList(w http.ResponseWriter, r *http.Request, c auth.Claims) {
+	status := strings.TrimSpace(r.URL.Query().Get("status"))
+	if status == "" {
+		status = "PENDING_APPROVAL"
+	}
+	limit := 100
+
+	a.reqsMu.Lock()
+	defer a.reqsMu.Unlock()
+	var out []requestRecord
+	for _, rec := range a.reqs {
+		if rec.Status == status {
+			out = append(out, rec)
+			if len(out) >= limit {
+				break
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"requests": out})
 }
 
 func mustJSON(v any) json.RawMessage {
@@ -433,6 +466,198 @@ func (a *API) executeApprovedRequest(requestID string, c auth.Claims, op rules.O
 	})
 }
 
+func (a *API) handleDecision(w http.ResponseWriter, r *http.Request, c auth.Claims, requestID string) {
+	var req struct {
+		Decision string `json:"decision"`
+	}
+	if err := decodeJSON(r.Body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", err.Error(), requestID)
+		return
+	}
+
+	req.Decision = strings.TrimSpace(req.Decision)
+	if req.Decision == "" {
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "decision is required", requestID)
+		return
+	}
+
+	a.reqsMu.Lock()
+	rec, ok := a.reqs[requestID]
+	if !ok {
+		a.reqsMu.Unlock()
+		writeError(w, http.StatusNotFound, "REQUEST_NOT_FOUND", "request not found", requestID)
+		return
+	}
+	if rec.Status != "PENDING_APPROVAL" {
+		a.reqsMu.Unlock()
+		writeError(w, http.StatusConflict, "REQUEST_NOT_PENDING", "request is not pending approval", requestID)
+		return
+	}
+	var op rules.Op
+	_ = json.Unmarshal(rec.Op, &op)
+	dangerous := isDangerous(rec.RiskFlags)
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	dec := &decisionRecord{
+		Decision:       req.Decision,
+		DecisionSource: "tui",
+		DecidedAt:      now,
+	}
+
+	switch req.Decision {
+	case "DENY":
+		rec.Status = "DENIED"
+		rec.Decision = dec
+		a.reqs[requestID] = rec
+		a.reqsMu.Unlock()
+
+		a.hub.Publish(events.Event{
+			Type:      "request.decision",
+			RequestID: requestID,
+			SessionID: c.SessionID,
+			ClientID:  c.ClientID,
+			Data: map[string]any{
+				"decision":        "DENY",
+				"decision_source": "tui",
+				"status":          "DENIED",
+			},
+		})
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+
+	case "ALLOW_ONCE", "ALLOW_SESSION", "ALLOW_ALWAYS":
+		// Gate allow-always for dangerous requests unless explicitly enabled.
+		if req.Decision == "ALLOW_ALWAYS" && dangerous && !a.cfg.AllowAlwaysForDangerous {
+			a.reqsMu.Unlock()
+			writeError(w, http.StatusForbidden, "ALLOW_ALWAYS_NOT_PERMITTED", "allow always not permitted for dangerous requests", requestID)
+			return
+		}
+
+		// Record approval.
+		rec.Status = "APPROVED"
+		rec.Decision = dec
+		a.reqs[requestID] = rec
+		a.reqsMu.Unlock()
+
+		// Optionally add rule for session/always (exact match by default).
+		if req.Decision == "ALLOW_SESSION" || req.Decision == "ALLOW_ALWAYS" {
+			ruleID := uuid.NewString()
+			r, ok := ruleFromOpExact(ruleID, op)
+			if ok {
+				if req.Decision == "ALLOW_SESSION" {
+					a.rules.AddSession(c.SessionID, r)
+				} else {
+					a.rules.AddAlways(r)
+				}
+			}
+		}
+
+		a.hub.Publish(events.Event{
+			Type:      "request.decision",
+			RequestID: requestID,
+			SessionID: c.SessionID,
+			ClientID:  c.ClientID,
+			Data: map[string]any{
+				"decision":        req.Decision,
+				"decision_source": "tui",
+				"status":          "APPROVED",
+			},
+		})
+
+		go a.executeApprovedRequest(requestID, c, op)
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	default:
+		a.reqsMu.Unlock()
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "unknown decision", requestID)
+		return
+	}
+}
+
+func ruleFromOpExact(ruleID string, op rules.Op) (rules.Rule, bool) {
+	switch op.Type {
+	case "cmd.run":
+		var p struct {
+			Argv []string `json:"argv"`
+		}
+		if err := json.Unmarshal(op.Payload, &p); err != nil || len(p.Argv) == 0 {
+			return rules.Rule{}, false
+		}
+		return rules.Rule{ID: ruleID, OpType: "cmd.run", Cmd: &rules.CmdRule{ArgvPrefix: p.Argv}}, true
+	case "fs.read":
+		var p struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal(op.Payload, &p); err != nil || p.Path == "" {
+			return rules.Rule{}, false
+		}
+		return rules.Rule{ID: ruleID, OpType: "fs.read", Path: &rules.PathRule{Exact: p.Path}}, true
+	default:
+		return rules.Rule{}, false
+	}
+}
+
+func riskFlags(op rules.Op) []string {
+	var flags []string
+	switch op.Type {
+	case "cmd.run":
+		var p struct {
+			Argv []string `json:"argv"`
+		}
+		_ = json.Unmarshal(op.Payload, &p)
+		if len(p.Argv) > 0 {
+			bin := p.Argv[0]
+			switch bin {
+			case "iptables", "nft", "ufw":
+				flags = append(flags, "FIREWALL")
+			case "rm", "/bin/rm":
+				flags = append(flags, "DESTRUCTIVE_FS")
+			}
+			if bin == "apt" || bin == "apt-get" {
+				for _, a := range p.Argv[1:] {
+					if a == "remove" || a == "purge" {
+						flags = append(flags, "APT_REMOVE")
+						break
+					}
+					if a == "install" {
+						flags = append(flags, "APT_INSTALL")
+					}
+				}
+			}
+			if bin == "systemctl" {
+				for i := 1; i < len(p.Argv); i++ {
+					if (p.Argv[i] == "stop" || p.Argv[i] == "disable") && i+1 < len(p.Argv) {
+						unit := p.Argv[i+1]
+						if strings.Contains(unit, "ssh") {
+							flags = append(flags, "SERVICE_SSH_RISK")
+							break
+						}
+					}
+				}
+			}
+		}
+	case "fs.patch_unified", "conf.set_kv":
+		var p struct {
+			Path string `json:"path"`
+		}
+		_ = json.Unmarshal(op.Payload, &p)
+		if strings.HasPrefix(p.Path, "/etc/") {
+			flags = append(flags, "WRITE_ETC")
+		}
+	}
+	return flags
+}
+
+func isDangerous(flags []string) bool {
+	for _, f := range flags {
+		switch f {
+		case "WRITE_ETC", "APT_REMOVE", "FIREWALL", "DESTRUCTIVE_FS", "SERVICE_SSH_RISK":
+			return true
+		}
+	}
+	return false
+}
+
 func (a *API) handleEventsWS(w http.ResponseWriter, r *http.Request) {
 	_, ok := a.mustAuth(w, r)
 	if !ok {
@@ -469,26 +694,42 @@ func (a *API) handleEventsWS(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleRequestByID(w http.ResponseWriter, r *http.Request, c auth.Claims) {
-	if r.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "", "")
-		return
-	}
-	id := strings.TrimPrefix(r.URL.Path, "/v1/requests/")
-	if id == "" || strings.Contains(id, "/") {
+	rest := strings.TrimPrefix(r.URL.Path, "/v1/requests/")
+	parts := strings.Split(rest, "/")
+	if len(parts) == 0 || parts[0] == "" {
 		writeError(w, http.StatusNotFound, "REQUEST_NOT_FOUND", "request not found", "")
 		return
 	}
+	id := parts[0]
+	if len(parts) == 1 {
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "", "")
+			return
+		}
 
-	a.reqsMu.Lock()
-	rec, ok := a.reqs[id]
-	a.reqsMu.Unlock()
-	if !ok {
-		writeError(w, http.StatusNotFound, "REQUEST_NOT_FOUND", "request not found", id)
+		a.reqsMu.Lock()
+		rec, ok := a.reqs[id]
+		a.reqsMu.Unlock()
+		if !ok {
+			writeError(w, http.StatusNotFound, "REQUEST_NOT_FOUND", "request not found", id)
+			return
+		}
+
+		// In MVP we don't filter by session/client; token possession is sufficient.
+		writeJSON(w, http.StatusOK, rec)
 		return
 	}
 
-	// In MVP we don't filter by session/client; token possession is sufficient.
-	writeJSON(w, http.StatusOK, rec)
+	if len(parts) == 2 && parts[1] == "decision" {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "", "")
+			return
+		}
+		a.handleDecision(w, r, c, id)
+		return
+	}
+
+	writeError(w, http.StatusNotFound, "REQUEST_NOT_FOUND", "request not found", id)
 }
 
 type authHandler func(http.ResponseWriter, *http.Request, auth.Claims)

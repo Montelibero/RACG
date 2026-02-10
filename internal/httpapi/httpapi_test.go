@@ -202,3 +202,60 @@ func TestRequestsGetByID(t *testing.T) {
 		t.Fatalf("get status=%d body=%s", getRw.Code, getRw.Body.String())
 	}
 }
+
+func TestDecisionDeny(t *testing.T) {
+	cfg := config.Defaults()
+	clk := auth.NewFakeClock(time.Unix(1000, 0).UTC())
+	pair := auth.NewPairing(6, 3*time.Minute, clk)
+	tm := auth.NewTokenManager(clk)
+
+	api := New(cfg, WithPairing(pair), WithTokenManager(tm))
+
+	open := []byte(`{"client_id":"codex-home","pairing_code":"` + pair.Code() + `"}`)
+	rwOpen := httptest.NewRecorder()
+	api.Handler().ServeHTTP(rwOpen, httptest.NewRequest(http.MethodPost, "http://example/v1/session/open", bytes.NewReader(open)))
+	if rwOpen.Code != 200 {
+		t.Fatalf("open status=%d body=%s", rwOpen.Code, rwOpen.Body.String())
+	}
+	var openResp struct {
+		SessionToken string `json:"session_token"`
+	}
+	_ = json.Unmarshal(rwOpen.Body.Bytes(), &openResp)
+
+	createBody := []byte(`{"op":{"type":"cmd.run","payload":{"argv":["/bin/echo","hi"]}}}`)
+	createReq := httptest.NewRequest(http.MethodPost, "http://example/v1/requests", bytes.NewReader(createBody))
+	createReq.Header.Set("Authorization", "Bearer "+openResp.SessionToken)
+	createReq.Header.Set("Content-Type", "application/json")
+	createRw := httptest.NewRecorder()
+	api.Handler().ServeHTTP(createRw, createReq)
+	if createRw.Code != 200 {
+		t.Fatalf("create status=%d body=%s", createRw.Code, createRw.Body.String())
+	}
+	var created struct {
+		RequestID string `json:"request_id"`
+	}
+	_ = json.Unmarshal(createRw.Body.Bytes(), &created)
+
+	decBody := []byte(`{"decision":"DENY"}`)
+	decReq := httptest.NewRequest(http.MethodPost, "http://example/v1/requests/"+created.RequestID+"/decision", bytes.NewReader(decBody))
+	decReq.Header.Set("Authorization", "Bearer "+openResp.SessionToken)
+	decReq.Header.Set("Content-Type", "application/json")
+	decRw := httptest.NewRecorder()
+	api.Handler().ServeHTTP(decRw, decReq)
+	if decRw.Code != 200 {
+		t.Fatalf("dec status=%d body=%s", decRw.Code, decRw.Body.String())
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "http://example/v1/requests/"+created.RequestID, nil)
+	getReq.Header.Set("Authorization", "Bearer "+openResp.SessionToken)
+	getRw := httptest.NewRecorder()
+	api.Handler().ServeHTTP(getRw, getReq)
+	if getRw.Code != 200 {
+		t.Fatalf("get status=%d body=%s", getRw.Code, getRw.Body.String())
+	}
+	var rec map[string]any
+	_ = json.Unmarshal(getRw.Body.Bytes(), &rec)
+	if rec["status"] != "DENIED" {
+		t.Fatalf("status=%v", rec["status"])
+	}
+}
