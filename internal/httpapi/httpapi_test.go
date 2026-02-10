@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/itolstov/racg/internal/auth"
 	"github.com/itolstov/racg/internal/config"
+	"github.com/itolstov/racg/internal/executor"
 	"github.com/itolstov/racg/internal/rules"
 )
 
@@ -258,4 +260,68 @@ func TestDecisionDeny(t *testing.T) {
 	if rec["status"] != "DENIED" {
 		t.Fatalf("status=%v", rec["status"])
 	}
+}
+
+type fakeRunner struct {
+	started chan struct{}
+	done    chan struct{}
+}
+
+func (f *fakeRunner) Run(ctx context.Context, s executor.Spec) executor.Result {
+	close(f.started)
+	<-ctx.Done()
+	close(f.done)
+	return executor.Result{Status: "KILLED", ExitCode: -1}
+}
+
+func TestKillRunningRequest(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.DefaultTimeoutSec = 10
+
+	clk := auth.NewFakeClock(time.Unix(1000, 0).UTC())
+	pair := auth.NewPairing(6, 3*time.Minute, clk)
+	tm := auth.NewTokenManager(clk)
+
+	fr := &fakeRunner{started: make(chan struct{}), done: make(chan struct{})}
+
+	re := rules.NewEngine()
+	re.AddAlways(rules.Rule{ID: "allow-sleep", OpType: "cmd.run", Cmd: &rules.CmdRule{ArgvPrefix: []string{"/bin/sleep"}}})
+
+	api := New(cfg, WithPairing(pair), WithTokenManager(tm), WithRulesEngine(re), WithExecutor(fr))
+
+	open := []byte(`{"client_id":"codex-home","pairing_code":"` + pair.Code() + `"}`)
+	rwOpen := httptest.NewRecorder()
+	api.Handler().ServeHTTP(rwOpen, httptest.NewRequest(http.MethodPost, "http://example/v1/session/open", bytes.NewReader(open)))
+	if rwOpen.Code != 200 {
+		t.Fatalf("open status=%d body=%s", rwOpen.Code, rwOpen.Body.String())
+	}
+	var openResp struct {
+		SessionToken string `json:"session_token"`
+	}
+	_ = json.Unmarshal(rwOpen.Body.Bytes(), &openResp)
+
+	createBody := []byte(`{"op":{"type":"cmd.run","payload":{"argv":["/bin/sleep","2"]}}}`)
+	createReq := httptest.NewRequest(http.MethodPost, "http://example/v1/requests", bytes.NewReader(createBody))
+	createReq.Header.Set("Authorization", "Bearer "+openResp.SessionToken)
+	createReq.Header.Set("Content-Type", "application/json")
+	createRw := httptest.NewRecorder()
+	api.Handler().ServeHTTP(createRw, createReq)
+	if createRw.Code != 200 {
+		t.Fatalf("create status=%d body=%s", createRw.Code, createRw.Body.String())
+	}
+	var created struct {
+		RequestID string `json:"request_id"`
+	}
+	_ = json.Unmarshal(createRw.Body.Bytes(), &created)
+
+	<-fr.started
+
+	killReq := httptest.NewRequest(http.MethodPost, "http://example/v1/requests/"+created.RequestID+"/kill", nil)
+	killReq.Header.Set("Authorization", "Bearer "+openResp.SessionToken)
+	killRw := httptest.NewRecorder()
+	api.Handler().ServeHTTP(killRw, killReq)
+	if killRw.Code != 200 {
+		t.Fatalf("kill status=%d body=%s", killRw.Code, killRw.Body.String())
+	}
+	<-fr.done
 }

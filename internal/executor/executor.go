@@ -109,7 +109,18 @@ func (e *Executor) Run(ctx context.Context, s Spec) Result {
 		errCh <- capRes{text: txt, hashHex: h, truncated: trunc}
 	}()
 
+	// If the context is canceled/deadline-exceeded, attempt to kill the whole process group ASAP.
+	killOnce := make(chan struct{})
+	go func() {
+		select {
+		case <-tctx.Done():
+			_ = killProcessGroup(cmd.Process.Pid, e.opts.KillGrace)
+		case <-killOnce:
+		}
+	}()
+
 	waitErr := cmd.Wait()
+	close(killOnce)
 
 	// If context deadline hit, ensure the whole process group is dead.
 	if tctx.Err() != nil {
@@ -129,7 +140,11 @@ func (e *Executor) Run(ctx context.Context, s Spec) Result {
 	res.DurationMs = time.Since(start).Milliseconds()
 
 	if tctx.Err() != nil {
-		res.Status = "TIMED_OUT"
+		if errors.Is(tctx.Err(), context.Canceled) {
+			res.Status = "KILLED"
+		} else {
+			res.Status = "TIMED_OUT"
+		}
 		res.ExitCode = -1
 		return res
 	}

@@ -41,6 +41,23 @@ func TestTimeout(t *testing.T) {
 	}
 }
 
+func TestKill(t *testing.T) {
+	if _, err := exec.LookPath("/bin/sleep"); err != nil {
+		t.Skip("/bin/sleep not found")
+	}
+
+	ex := New(Options{MaxOutputBytes: 1024, KillGrace: 50 * time.Millisecond})
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+	res := ex.Run(ctx, Spec{Argv: []string{"/bin/sleep", "2"}, Timeout: 2 * time.Second})
+	if res.Status != "KILLED" {
+		t.Fatalf("Status=%q", res.Status)
+	}
+}
+
 func TestOutputTruncation(t *testing.T) {
 	if _, err := exec.LookPath("yes"); err != nil {
 		t.Skip("yes not found")

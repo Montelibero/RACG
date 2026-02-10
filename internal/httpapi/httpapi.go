@@ -68,6 +68,9 @@ type API struct {
 
 	reqsMu sync.Mutex
 	reqs   map[string]requestRecord
+
+	runningMu sync.Mutex
+	running   map[string]context.CancelFunc
 }
 
 type requestRecord struct {
@@ -117,7 +120,7 @@ type resultRecord struct {
 }
 
 func New(cfg config.Config, opts ...Option) *API {
-	a := &API{cfg: cfg, reqs: map[string]requestRecord{}}
+	a := &API{cfg: cfg, reqs: map[string]requestRecord{}, running: map[string]context.CancelFunc{}}
 
 	a.pairing = auth.NewPairing(6, time.Duration(cfg.PairingCodeTTLSeconds)*time.Second, auth.RealClock{})
 	a.tokens = auth.NewTokenManager(auth.RealClock{})
@@ -424,9 +427,23 @@ func mustJSON(v any) json.RawMessage {
 }
 
 func (a *API) executeApprovedRequest(requestID string, c auth.Claims, op rules.Op) {
+	a.reqsMu.Lock()
+	rec0, ok0 := a.reqs[requestID]
+	a.reqsMu.Unlock()
+	if ok0 && rec0.Status == "KILLED" {
+		return
+	}
+
 	// Bounded concurrency.
 	a.sem <- struct{}{}
 	defer func() { <-a.sem }()
+
+	a.reqsMu.Lock()
+	rec0, ok0 = a.reqs[requestID]
+	a.reqsMu.Unlock()
+	if ok0 && rec0.Status == "KILLED" {
+		return
+	}
 
 	// Mark RUNNING.
 	startedAt := time.Now().UTC()
@@ -461,11 +478,21 @@ func (a *API) executeApprovedRequest(requestID string, c auth.Claims, op rules.O
 		if timeout <= 0 {
 			timeout = time.Duration(a.cfg.DefaultTimeoutSec) * time.Second
 		}
-		res := a.exec.Run(context.Background(), executor.Spec{
+
+		execCtx, cancel := context.WithCancel(context.Background())
+		a.runningMu.Lock()
+		a.running[requestID] = cancel
+		a.runningMu.Unlock()
+
+		res := a.exec.Run(execCtx, executor.Spec{
 			Argv:    payload.Argv,
 			Cwd:     payload.Cwd,
 			Timeout: timeout,
 		})
+		a.runningMu.Lock()
+		delete(a.running, requestID)
+		a.runningMu.Unlock()
+
 		finishedAt := time.Now().UTC()
 		rr = &resultRecord{
 			StartedAt:       startedAt.Format(time.RFC3339Nano),
@@ -495,6 +522,8 @@ func (a *API) executeApprovedRequest(requestID string, c auth.Claims, op rules.O
 	terminalStatus := rr.Status
 	switch rr.Status {
 	case "SUCCEEDED", "FAILED", "TIMED_OUT":
+		// ok
+	case "KILLED":
 		// ok
 	default:
 		terminalStatus = "FAILED"
@@ -637,6 +666,54 @@ func (a *API) decideInternal(requestID string, decision string, c auth.Claims) e
 		a.reqsMu.Unlock()
 		return errors.New("BAD_REQUEST")
 	}
+}
+
+func (a *API) handleKill(w http.ResponseWriter, r *http.Request, c auth.Claims, requestID string) {
+	a.reqsMu.Lock()
+	rec, ok := a.reqs[requestID]
+	a.reqsMu.Unlock()
+	if !ok {
+		writeError(w, http.StatusNotFound, "REQUEST_NOT_FOUND", "request not found", requestID)
+		return
+	}
+
+	// If not running yet, mark killed and do not execute.
+	if rec.Status == "APPROVED" {
+		a.reqsMu.Lock()
+		rec2 := a.reqs[requestID]
+		rec2.Status = "KILLED"
+		rec2.Result = &resultRecord{
+			StartedAt:  time.Now().UTC().Format(time.RFC3339Nano),
+			FinishedAt: time.Now().UTC().Format(time.RFC3339Nano),
+			DurationMs: 0,
+			ExitCode:   -1,
+			Status:     "KILLED",
+			Stderr:     "killed before start",
+		}
+		a.reqs[requestID] = rec2
+		a.reqsMu.Unlock()
+
+		a.hub.Publish(events.Event{
+			Type:      "request.finished",
+			RequestID: requestID,
+			SessionID: c.SessionID,
+			ClientID:  c.ClientID,
+			Data: map[string]any{
+				"status": "KILLED",
+			},
+		})
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
+
+	a.runningMu.Lock()
+	cancel, okCancel := a.running[requestID]
+	a.runningMu.Unlock()
+	if okCancel {
+		cancel()
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func ruleFromOpExact(ruleID string, op rules.Op) (rules.Rule, bool) {
@@ -811,6 +888,15 @@ func (a *API) handleRequestByID(w http.ResponseWriter, r *http.Request, c auth.C
 			return
 		}
 		a.handleDecision(w, r, c, id)
+		return
+	}
+
+	if len(parts) == 2 && parts[1] == "kill" {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "", "")
+			return
+		}
+		a.handleKill(w, r, c, id)
 		return
 	}
 
