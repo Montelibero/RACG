@@ -15,7 +15,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/itolstov/racg/internal/auth"
 	"github.com/itolstov/racg/internal/config"
+	"github.com/itolstov/racg/internal/events"
 	"github.com/itolstov/racg/internal/version"
+	"nhooyr.io/websocket"
+	"nhooyr.io/websocket/wsjson"
 )
 
 //go:embed openapi.json
@@ -31,11 +34,16 @@ func WithTokenManager(m *auth.TokenManager) Option {
 	return func(a *API) { a.tokens = m }
 }
 
+func WithHub(h *events.Hub) Option {
+	return func(a *API) { a.hub = h }
+}
+
 type API struct {
 	cfg config.Config
 
 	pairing *auth.Pairing
 	tokens  *auth.TokenManager
+	hub     *events.Hub
 
 	mu             sync.Mutex
 	lockedClientIP string
@@ -55,6 +63,7 @@ func New(cfg config.Config, opts ...Option) *API {
 
 	a.pairing = auth.NewPairing(6, time.Duration(cfg.PairingCodeTTLSeconds)*time.Second, auth.RealClock{})
 	a.tokens = auth.NewTokenManager(auth.RealClock{})
+	a.hub = events.NewHub()
 
 	for _, o := range opts {
 		o(a)
@@ -79,8 +88,22 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("/v1/session/open", a.handleSessionOpen)
 	mux.HandleFunc("/v1/session/me", a.withAuth(a.handleSessionMe))
 	mux.HandleFunc("/v1/requests", a.withAuth(a.handleRequests))
+	mux.HandleFunc("/v1/events", a.handleEventsWS)
 
-	return mux
+	if !a.cfg.LockFirstClientAddr {
+		return mux
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ip := remoteIP(r)
+		a.mu.Lock()
+		locked := a.lockedClientIP
+		a.mu.Unlock()
+		if locked != "" && locked != ip {
+			writeError(w, http.StatusForbidden, "CLIENT_ADDR_LOCKED", "client address is locked", "")
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
 }
 
 func (a *API) handleOpenAPI(w http.ResponseWriter, r *http.Request) {
@@ -212,27 +235,80 @@ func (a *API) handleRequests(w http.ResponseWriter, r *http.Request, c auth.Clai
 	a.reqs[id] = rec
 	a.reqsMu.Unlock()
 
+	a.hub.Publish(events.Event{
+		Type:      "request.created",
+		RequestID: id,
+		SessionID: c.SessionID,
+		ClientID:  c.ClientID,
+		Data: map[string]any{
+			"status": rec.Status,
+		},
+	})
+
 	resp := map[string]any{"request_id": id, "status": rec.Status}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (a *API) handleEventsWS(w http.ResponseWriter, r *http.Request) {
+	_, ok := a.mustAuth(w, r)
+	if !ok {
+		return
+	}
+
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		// MVP: we do not use Origin checks because deployments vary (ssh tunnels, tailscale).
+		// If exposed publicly, rely on token + optional IP-lock.
+		InsecureSkipVerify: true,
+	})
+	if err != nil {
+		return
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	ctx := r.Context()
+	ch, cancel := a.hub.Subscribe(64)
+	defer cancel()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case e, ok := <-ch:
+			if !ok {
+				return
+			}
+			if err := wsjson.Write(ctx, conn, e); err != nil {
+				return
+			}
+		}
+	}
 }
 
 type authHandler func(http.ResponseWriter, *http.Request, auth.Claims)
 
 func (a *API) withAuth(next authHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tok := bearerToken(r.Header.Get("Authorization"))
-		if tok == "" {
-			writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "missing bearer token", "")
-			return
-		}
-		claims, err := a.tokens.Verify(tok)
-		if err != nil {
-			code, status := mapAuthErr(err)
-			writeError(w, status, code, code, "")
+		claims, ok := a.mustAuth(w, r)
+		if !ok {
 			return
 		}
 		next(w, r, claims)
 	}
+}
+
+func (a *API) mustAuth(w http.ResponseWriter, r *http.Request) (auth.Claims, bool) {
+	tok := bearerToken(r.Header.Get("Authorization"))
+	if tok == "" {
+		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "missing bearer token", "")
+		return auth.Claims{}, false
+	}
+	claims, err := a.tokens.Verify(tok)
+	if err != nil {
+		code, status := mapAuthErr(err)
+		writeError(w, status, code, code, "")
+		return auth.Claims{}, false
+	}
+	return claims, true
 }
 
 func mapPairingErr(err error) (code string, status int) {
