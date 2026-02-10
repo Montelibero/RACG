@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/itolstov/racg/internal/config"
 	"github.com/itolstov/racg/internal/version"
 )
 
@@ -43,6 +44,10 @@ func (r *Root) Run(args []string) int {
 	switch rest[0] {
 	case "serve":
 		return NewServeCmd(r.stdout, r.stderr).Run(rest[1:])
+	case "rules":
+		return NewRulesCmd(r.stdout, r.stderr, config.Defaults().DBPath).Run(rest[1:])
+	case "sessions":
+		return NewSessionsCmd(r.stdout, r.stderr, config.Defaults().DBPath).Run(rest[1:])
 	default:
 		fmt.Fprintln(r.stderr, usage())
 		return 2
@@ -50,5 +55,5 @@ func (r *Root) Run(args []string) int {
 }
 
 func usage() string {
-	return "usage: racg [--version] <command>\n\ncommands:\n  serve\n"
+	return "usage: racg [--version] <command>\n\ncommands:\n  serve\n  rules\n  sessions\n"
 }

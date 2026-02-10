@@ -157,6 +157,44 @@ func (s *Store) GetSession(ctx context.Context, id string) (Session, error) {
 	return sess, nil
 }
 
+func (s *Store) ListSessions(ctx context.Context, limit int) ([]Session, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT session_id, started_at, ended_at FROM sessions ORDER BY started_at DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Session
+	for rows.Next() {
+		var sess Session
+		var started string
+		var ended sql.NullString
+		if err := rows.Scan(&sess.ID, &started, &ended); err != nil {
+			return nil, err
+		}
+		st, err := time.Parse(time.RFC3339Nano, started)
+		if err != nil {
+			return nil, err
+		}
+		sess.StartedAt = st
+		if ended.Valid {
+			tm, err := time.Parse(time.RFC3339Nano, ended.String)
+			if err != nil {
+				return nil, err
+			}
+			sess.EndedAt = &tm
+		}
+		out = append(out, sess)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (s *Store) EndSession(ctx context.Context, id string, endedAt time.Time) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE sessions SET ended_at = ? WHERE session_id = ?`, endedAt.UTC().Format(time.RFC3339Nano), id)
 	return err
