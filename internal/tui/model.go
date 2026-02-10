@@ -18,6 +18,7 @@ const (
 type Request struct {
 	ID      string
 	Summary string
+	Details string
 }
 
 type Approver interface {
@@ -119,6 +120,13 @@ func (m Model) View() string {
 		}
 		out += fmt.Sprintf("%s %s\n", cur, r.Summary)
 	}
+
+	// Minimal details pane for the selected request (diff/context).
+	sel := m.pending[m.cursor]
+	if sel.Details != "" {
+		out += "\n---\n" + sel.Details + "\n"
+	}
+
 	out += "\nkeys: a=allow once, s=allow session, w=allow always, d=deny, r=refresh, q=quit\n"
 	if m.status != "" {
 		out += "\n" + m.status + "\n"

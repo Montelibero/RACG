@@ -14,7 +14,7 @@ func (a *httpAPIApprover) ListPending() ([]Request, error) {
 	pending := a.api.ListPendingForTUI()
 	out := make([]Request, 0, len(pending))
 	for _, r := range pending {
-		out = append(out, Request{ID: r.ID, Summary: r.Summary})
+		out = append(out, Request{ID: r.ID, Summary: r.Summary, Details: r.Details})
 	}
 	return out, nil
 }

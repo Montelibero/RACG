@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -35,5 +36,15 @@ func TestModelDeny(t *testing.T) {
 	}
 	if mm.status != "DENIED r1" {
 		t.Fatalf("status=%q", mm.status)
+	}
+}
+
+func TestViewShowsSelectedDetails(t *testing.T) {
+	ap := &fakeApprover{pending: []Request{{ID: "r1", Summary: "fs.patch_unified /etc/hosts", Details: "@@ -1 +1 @@\n-a\n+b\n"}}}
+	m := NewModel(ap, "CODE12")
+
+	v := m.View()
+	if !strings.Contains(v, "@@ -1 +1 @@") {
+		t.Fatalf("view=%q", v)
 	}
 }

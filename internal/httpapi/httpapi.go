@@ -1,14 +1,20 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
+	"crypto/sha256"
+	"encoding/hex"
 	"embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -98,6 +104,7 @@ type requestRecord struct {
 type TUIRequest struct {
 	ID        string
 	Summary   string
+	Details   string
 	SessionID string
 	ClientID  string
 	RiskFlags []string
@@ -160,6 +167,7 @@ func (a *API) ListPendingForTUI() []TUIRequest {
 		out = append(out, TUIRequest{
 			ID:        rec.ID,
 			Summary:   summarizeOp(rec),
+			Details:   tuiDetails(rec),
 			SessionID: rec.SessionID,
 			ClientID:  rec.ClientID,
 			RiskFlags: append([]string(nil), rec.RiskFlags...),
@@ -557,6 +565,101 @@ func (a *API) executeApprovedRequest(requestID string, c auth.Claims, op rules.O
 			StdoutSHA256:    res.StdoutSHA256,
 			StderrSHA256:    res.StderrSHA256,
 		}
+	case "fs.read":
+		var payload struct {
+			Path     string `json:"path"`
+			MaxBytes int    `json:"max_bytes"`
+		}
+		_ = json.Unmarshal(op.Payload, &payload)
+		maxBytes := payload.MaxBytes
+		if maxBytes <= 0 || maxBytes > a.cfg.MaxOutputBytes {
+			maxBytes = a.cfg.MaxOutputBytes
+		}
+
+		f, err := os.Open(payload.Path)
+		if err != nil {
+			finishedAt = time.Now().UTC()
+			rr = &resultRecord{
+				StartedAt:    startedAt.Format(time.RFC3339Nano),
+				FinishedAt:   finishedAt.Format(time.RFC3339Nano),
+				DurationMs:   finishedAt.Sub(startedAt).Milliseconds(),
+				ExitCode:     -1,
+				Status:       "FAILED",
+				Stderr:       err.Error(),
+				StdoutSHA256: sha256Hex(nil),
+				StderrSHA256: sha256Hex([]byte(err.Error())),
+			}
+			break
+		}
+		defer f.Close()
+
+		out, outHash, outTrunc, err := captureLimited(f, maxBytes)
+		if err != nil {
+			finishedAt = time.Now().UTC()
+			rr = &resultRecord{
+				StartedAt:    startedAt.Format(time.RFC3339Nano),
+				FinishedAt:   finishedAt.Format(time.RFC3339Nano),
+				DurationMs:   finishedAt.Sub(startedAt).Milliseconds(),
+				ExitCode:     -1,
+				Status:       "FAILED",
+				Stderr:       err.Error(),
+				StdoutSHA256: sha256Hex(nil),
+				StderrSHA256: sha256Hex([]byte(err.Error())),
+			}
+			break
+		}
+
+		finishedAt = time.Now().UTC()
+		rr = &resultRecord{
+			StartedAt:       startedAt.Format(time.RFC3339Nano),
+			FinishedAt:      finishedAt.Format(time.RFC3339Nano),
+			DurationMs:      finishedAt.Sub(startedAt).Milliseconds(),
+			ExitCode:        0,
+			Status:          "SUCCEEDED",
+			Stdout:          out,
+			Stderr:          "",
+			StdoutTruncated: outTrunc,
+			StderrTruncated: false,
+			StdoutSHA256:    outHash,
+			StderrSHA256:    sha256Hex(nil),
+		}
+	case "fs.patch_unified":
+		var payload struct {
+			Path string `json:"path"`
+			Diff string `json:"diff"`
+		}
+		_ = json.Unmarshal(op.Payload, &payload)
+
+		perr := applyUnifiedPatchToFile(payload.Path, payload.Diff)
+		finishedAt = time.Now().UTC()
+		if perr != nil {
+			rr = &resultRecord{
+				StartedAt:    startedAt.Format(time.RFC3339Nano),
+				FinishedAt:   finishedAt.Format(time.RFC3339Nano),
+				DurationMs:   finishedAt.Sub(startedAt).Milliseconds(),
+				ExitCode:     -1,
+				Status:       "FAILED",
+				Stderr:       perr.Error(),
+				StdoutSHA256: sha256Hex(nil),
+				StderrSHA256: sha256Hex([]byte(perr.Error())),
+			}
+			break
+		}
+
+		out := "patched"
+		rr = &resultRecord{
+			StartedAt:       startedAt.Format(time.RFC3339Nano),
+			FinishedAt:      finishedAt.Format(time.RFC3339Nano),
+			DurationMs:      finishedAt.Sub(startedAt).Milliseconds(),
+			ExitCode:        0,
+			Status:          "SUCCEEDED",
+			Stdout:          out,
+			Stderr:          "",
+			StdoutTruncated: false,
+			StderrTruncated: false,
+			StdoutSHA256:    sha256Hex([]byte(out)),
+			StderrSHA256:    sha256Hex(nil),
+		}
 	default:
 		finishedAt = time.Now().UTC()
 		rr = &resultRecord{
@@ -919,9 +1022,102 @@ func summarizeOp(rec requestRecord) string {
 			return "cmd.run <empty argv>"
 		}
 		return "cmd.run " + strings.Join(p.Argv, " ")
+	case "fs.read":
+		var p struct {
+			Path string `json:"path"`
+		}
+		_ = json.Unmarshal(op.Payload, &p)
+		if p.Path != "" {
+			return "fs.read " + p.Path
+		}
+		return "fs.read"
+	case "fs.patch_unified":
+		var p struct {
+			Path string `json:"path"`
+		}
+		_ = json.Unmarshal(op.Payload, &p)
+		if p.Path != "" {
+			return "fs.patch_unified " + p.Path
+		}
+		return "fs.patch_unified"
 	default:
 		return op.Type
 	}
+}
+
+func tuiDetails(rec requestRecord) string {
+	var op rules.Op
+	if err := json.Unmarshal(rec.Op, &op); err != nil {
+		return ""
+	}
+
+	switch op.Type {
+	case "cmd.run":
+		var p struct {
+			Argv []string `json:"argv"`
+			Cwd  string   `json:"cwd"`
+		}
+		_ = json.Unmarshal(op.Payload, &p)
+		if len(p.Argv) == 0 {
+			return ""
+		}
+		if p.Cwd != "" {
+			return "cwd: " + p.Cwd + "\nargv: " + strings.Join(p.Argv, " ")
+		}
+		return "argv: " + strings.Join(p.Argv, " ")
+	case "fs.read":
+		var p struct {
+			Path     string `json:"path"`
+			MaxBytes int    `json:"max_bytes"`
+		}
+		_ = json.Unmarshal(op.Payload, &p)
+		if p.Path == "" {
+			return ""
+		}
+		max := p.MaxBytes
+		if max <= 0 || max > 4096 {
+			max = 4096
+		}
+		preview := readPreview(p.Path, max)
+		return "path: " + p.Path + "\n\n" + preview
+	case "fs.patch_unified":
+		var p struct {
+			Path string `json:"path"`
+			Diff string `json:"diff"`
+		}
+		_ = json.Unmarshal(op.Payload, &p)
+		if p.Path == "" && p.Diff == "" {
+			return ""
+		}
+		out := ""
+		if p.Path != "" {
+			out += "path: " + p.Path + "\n\n"
+		}
+		out += p.Diff
+		return out
+	default:
+		return ""
+	}
+}
+
+func readPreview(path string, maxBytes int) string {
+	if maxBytes <= 0 {
+		maxBytes = 1
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return "read error: " + err.Error()
+	}
+	defer f.Close()
+
+	b, err := io.ReadAll(io.LimitReader(f, int64(maxBytes)))
+	if err != nil {
+		return "read error: " + err.Error()
+	}
+	if len(b) == maxBytes {
+		return string(b) + "\n...\n"
+	}
+	return string(b)
 }
 
 func (a *API) handleEventsWS(w http.ResponseWriter, r *http.Request) {
@@ -1086,6 +1282,167 @@ func decodeJSON(r io.Reader, dst any) error {
 		return err
 	}
 	return nil
+}
+
+func sha256Hex(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+func captureLimited(r io.Reader, maxBytes int) (text string, hashHex string, truncated bool, err error) {
+	if maxBytes <= 0 {
+		maxBytes = 1
+	}
+	h := sha256.New()
+	var buf bytes.Buffer
+
+	tmp := make([]byte, 32*1024)
+	for {
+		n, rerr := r.Read(tmp)
+		if n > 0 {
+			_, _ = h.Write(tmp[:n])
+
+			remain := maxBytes - buf.Len()
+			if remain > 0 {
+				if n <= remain {
+					_, _ = buf.Write(tmp[:n])
+				} else {
+					_, _ = buf.Write(tmp[:remain])
+					truncated = true
+				}
+			} else {
+				truncated = true
+			}
+		}
+		if rerr != nil {
+			if errors.Is(rerr, io.EOF) {
+				break
+			}
+			return "", "", false, rerr
+		}
+	}
+
+	return buf.String(), hex.EncodeToString(h.Sum(nil)), truncated, nil
+}
+
+func applyUnifiedPatchToFile(path string, diff string) error {
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("path required")
+	}
+	if strings.TrimSpace(diff) == "" {
+		return fmt.Errorf("diff required")
+	}
+
+	origBytes, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	orig := string(origBytes)
+
+	next, err := applyUnifiedPatchText(orig, diff)
+	if err != nil {
+		return err
+	}
+
+	mode := os.FileMode(0o644)
+	if st, err := os.Stat(path); err == nil {
+		mode = st.Mode().Perm()
+	}
+	return os.WriteFile(path, []byte(next), mode)
+}
+
+func applyUnifiedPatchText(original string, diff string) (string, error) {
+	endsWithNewline := strings.HasSuffix(original, "\n")
+	origBody := strings.TrimSuffix(original, "\n")
+	var origLines []string
+	if origBody == "" {
+		origLines = []string{}
+	} else {
+		origLines = strings.Split(origBody, "\n")
+	}
+
+	diff = strings.ReplaceAll(diff, "\r\n", "\n")
+	patchLines := strings.Split(diff, "\n")
+
+	out := make([]string, 0, len(origLines)+16)
+	cur := 0
+	i := 0
+	for i < len(patchLines) {
+		line := patchLines[i]
+		if strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "diff ") || strings.HasPrefix(line, "index ") {
+			i++
+			continue
+		}
+		if strings.HasPrefix(line, "@@") {
+			oldStart, err := parseUnifiedHunkOldStart(line)
+			if err != nil {
+				return "", err
+			}
+			target := oldStart - 1
+			if target < cur || target > len(origLines) {
+				return "", fmt.Errorf("hunk out of range")
+			}
+			out = append(out, origLines[cur:target]...)
+			cur = target
+			i++
+
+			for i < len(patchLines) && !strings.HasPrefix(patchLines[i], "@@") {
+				hl := patchLines[i]
+				if hl == "" {
+					// Trailing newline in diff; ignore.
+					i++
+					continue
+				}
+				switch hl[0] {
+				case ' ':
+					want := hl[1:]
+					if cur >= len(origLines) || origLines[cur] != want {
+						return "", fmt.Errorf("hunk context mismatch")
+					}
+					out = append(out, want)
+					cur++
+				case '-':
+					want := hl[1:]
+					if cur >= len(origLines) || origLines[cur] != want {
+						return "", fmt.Errorf("hunk delete mismatch")
+					}
+					cur++
+				case '+':
+					out = append(out, hl[1:])
+				case '\\':
+					// "\ No newline at end of file" - ignore for MVP.
+				default:
+					return "", fmt.Errorf("invalid patch line")
+				}
+				i++
+			}
+			continue
+		}
+		i++
+	}
+
+	out = append(out, origLines[cur:]...)
+	res := strings.Join(out, "\n")
+	if endsWithNewline {
+		res += "\n"
+	}
+	return res, nil
+}
+
+func parseUnifiedHunkOldStart(header string) (int, error) {
+	// Expect: @@ -oldStart,oldCount +newStart,newCount @@
+	fields := strings.Fields(header)
+	if len(fields) < 3 {
+		return 0, fmt.Errorf("invalid hunk header")
+	}
+	rng := fields[1] // "-1,3"
+	rng = strings.TrimPrefix(rng, "-")
+	parts := strings.SplitN(rng, ",", 2)
+	n, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, fmt.Errorf("invalid hunk range")
+	}
+	return n, nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
