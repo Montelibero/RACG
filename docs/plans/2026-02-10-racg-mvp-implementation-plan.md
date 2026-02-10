@@ -10,6 +10,17 @@
 
 ---
 
+## Status (as of 2026-02-10)
+
+Implemented on branch `mvp`:
+- Tasks 1-8 are implemented (CLI, config+serve, SQLite migrations bootstrap, auth, HTTP API, WS events, rules+decisions, cmd.run executor + kill).
+- Task 11 (TUI approvals) is implemented minimally.
+- SQLite store exists but is not wired into HTTP/TUI yet (no persistence/audit for requests/decisions/executions/rules; sessions are not recorded from the API).
+
+Next priorities:
+1) Wire SQLite audit + persistence (sessions, requests, decisions, executions, rules; load always rules on start; add minimal rules/sessions introspection).
+2) Add minimal `fs.read` + `fs.patch_unified` operations with diff/context shown in TUI.
+
 ## Prerequisites / Environment
 
 - Go toolchain installed on the server (MVP assumes `go` is available).
@@ -208,4 +219,3 @@ Steps: test model transitions on keypress; integrate queue feed.
 - Test: `internal/httpapi/openapi_test.go`
 
 Steps: serve `/openapi.json` and ensure valid JSON returned.
-
