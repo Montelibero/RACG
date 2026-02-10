@@ -4,12 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/itolstov/racg/internal/rules"
 
 	_ "modernc.org/sqlite"
 )
@@ -157,6 +160,133 @@ func (s *Store) GetSession(ctx context.Context, id string) (Session, error) {
 func (s *Store) EndSession(ctx context.Context, id string, endedAt time.Time) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE sessions SET ended_at = ? WHERE session_id = ?`, endedAt.UTC().Format(time.RFC3339Nano), id)
 	return err
+}
+
+func (s *Store) InsertAlwaysRule(ctx context.Context, r rules.Rule, createdAt time.Time) error {
+	if r.ID == "" {
+		return fmt.Errorf("rule ID required")
+	}
+	if strings.TrimSpace(r.OpType) == "" {
+		return fmt.Errorf("op type required")
+	}
+
+	var argvJSON sql.NullString
+	var pathExact sql.NullString
+	var pathPrefix sql.NullString
+	var pathGlob sql.NullString
+
+	if r.Cmd != nil && len(r.Cmd.ArgvPrefix) > 0 {
+		b, err := json.Marshal(r.Cmd.ArgvPrefix)
+		if err != nil {
+			return err
+		}
+		argvJSON = sql.NullString{String: string(b), Valid: true}
+	}
+	if r.Path != nil {
+		if r.Path.Exact != "" {
+			pathExact = sql.NullString{String: r.Path.Exact, Valid: true}
+		}
+		if r.Path.Prefix != "" {
+			pathPrefix = sql.NullString{String: r.Path.Prefix, Valid: true}
+		}
+		if r.Path.Glob != "" {
+			pathGlob = sql.NullString{String: r.Path.Glob, Valid: true}
+		}
+	}
+
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO rules(rule_id, source, op_type, cmd_argv_prefix_json, path_exact, path_prefix, path_glob, enabled, created_at, disabled_at)
+		 VALUES(?,      ?,      ?,       ?,                  ?,          ?,           ?,         1,       ?,          NULL)`,
+		r.ID,
+		"always",
+		r.OpType,
+		argvJSON,
+		pathExact,
+		pathPrefix,
+		pathGlob,
+		createdAt.UTC().Format(time.RFC3339Nano),
+	)
+	return err
+}
+
+func (s *Store) LoadEnabledAlwaysRules(ctx context.Context) ([]rules.Rule, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT rule_id, op_type, cmd_argv_prefix_json, path_exact, path_prefix, path_glob
+		   FROM rules
+		  WHERE source = 'always' AND enabled = 1
+		  ORDER BY created_at ASC`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []rules.Rule
+	for rows.Next() {
+		var id string
+		var opType string
+		var argvJSON sql.NullString
+		var pathExact sql.NullString
+		var pathPrefix sql.NullString
+		var pathGlob sql.NullString
+		if err := rows.Scan(&id, &opType, &argvJSON, &pathExact, &pathPrefix, &pathGlob); err != nil {
+			return nil, err
+		}
+
+		r := rules.Rule{ID: id, OpType: opType}
+		if argvJSON.Valid && strings.TrimSpace(argvJSON.String) != "" {
+			var argv []string
+			if err := json.Unmarshal([]byte(argvJSON.String), &argv); err != nil {
+				return nil, err
+			}
+			if len(argv) > 0 {
+				r.Cmd = &rules.CmdRule{ArgvPrefix: argv}
+			}
+		}
+		if pathExact.Valid || pathPrefix.Valid || pathGlob.Valid {
+			pr := rules.PathRule{}
+			if pathExact.Valid {
+				pr.Exact = pathExact.String
+			}
+			if pathPrefix.Valid {
+				pr.Prefix = pathPrefix.String
+			}
+			if pathGlob.Valid {
+				pr.Glob = pathGlob.String
+			}
+			r.Path = &pr
+		}
+
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (s *Store) DisableRule(ctx context.Context, ruleID string, disabledAt time.Time) error {
+	if strings.TrimSpace(ruleID) == "" {
+		return fmt.Errorf("rule ID required")
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE rules
+		    SET enabled = 0, disabled_at = ?
+		  WHERE rule_id = ? AND enabled = 1`,
+		disabledAt.UTC().Format(time.RFC3339Nano),
+		ruleID,
+	)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("RULE_NOT_FOUND")
+	}
+	return nil
 }
 
 func migrationVersion(filename string) (int, error) {
