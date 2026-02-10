@@ -2,16 +2,14 @@ package server
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base32"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/itolstov/racg/internal/config"
+	"github.com/itolstov/racg/internal/httpapi"
 )
 
 type Server struct {
@@ -19,7 +17,7 @@ type Server struct {
 	httpServer *http.Server
 	handler    http.Handler
 	ln         net.Listener
-	pairing    string
+	api        *httpapi.API
 }
 
 func New(cfg config.Config) (*Server, error) {
@@ -33,20 +31,17 @@ func New(cfg config.Config) (*Server, error) {
 		return nil, fmt.Errorf("max_concurrency must be > 0")
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
+	api := httpapi.New(cfg)
+	handler := api.Handler()
 
 	return &Server{
 		cfg: cfg,
 		httpServer: &http.Server{
-			Handler:           mux,
+			Handler:           handler,
 			ReadHeaderTimeout: 5 * time.Second,
 		},
-		handler: mux,
-		pairing: generatePairingCode(6),
+		handler: handler,
+		api:     api,
 	}, nil
 }
 
@@ -62,7 +57,7 @@ func (s *Server) Addr() string {
 }
 
 func (s *Server) PairingCode() string {
-	return s.pairing
+	return s.api.PairingCode()
 }
 
 func (s *Server) Run(ctx context.Context, ready chan<- struct{}) error {
@@ -95,22 +90,4 @@ func (s *Server) Run(ctx context.Context, ready chan<- struct{}) error {
 		}
 		return err
 	}
-}
-
-func generatePairingCode(n int) string {
-	if n <= 0 {
-		n = 6
-	}
-	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
-		return "AAAAAA"[:n]
-	}
-	// base32 without padding, then take first n chars.
-	s := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b)
-	s = strings.TrimRight(s, "=")
-	s = strings.ToUpper(s)
-	if len(s) < n {
-		return s
-	}
-	return s[:n]
 }

@@ -1,0 +1,34 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "RACG",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/healthz": {
+      "get": {
+        "responses": { "200": { "description": "ok" } }
+      }
+    },
+    "/v1/info": {
+      "get": {
+        "responses": { "200": { "description": "info" } }
+      }
+    },
+    "/v1/session/open": {
+      "post": {
+        "responses": { "200": { "description": "session" } }
+      }
+    },
+    "/v1/session/me": {
+      "get": {
+        "responses": { "200": { "description": "me" } }
+      }
+    },
+    "/v1/requests": {
+      "post": {
+        "responses": { "200": { "description": "request" } }
+      }
+    }
+  }
+}
