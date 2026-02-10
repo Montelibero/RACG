@@ -34,6 +34,21 @@ func (r *Root) Run(args []string) int {
 		return 0
 	}
 
-	fmt.Fprintln(r.stderr, "usage: racg [--version] <command>")
-	return 2
+	rest := fs.Args()
+	if len(rest) == 0 {
+		fmt.Fprintln(r.stderr, usage())
+		return 2
+	}
+
+	switch rest[0] {
+	case "serve":
+		return NewServeCmd(r.stdout, r.stderr).Run(rest[1:])
+	default:
+		fmt.Fprintln(r.stderr, usage())
+		return 2
+	}
+}
+
+func usage() string {
+	return "usage: racg [--version] <command>\n\ncommands:\n  serve\n"
 }
