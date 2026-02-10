@@ -10,6 +10,8 @@ import (
 
 	"github.com/itolstov/racg/internal/config"
 	"github.com/itolstov/racg/internal/httpapi"
+	"github.com/itolstov/racg/internal/rules"
+	"github.com/itolstov/racg/internal/store"
 )
 
 type Server struct {
@@ -18,6 +20,7 @@ type Server struct {
 	handler    http.Handler
 	ln         net.Listener
 	api        *httpapi.API
+	st         *store.Store
 }
 
 func New(cfg config.Config) (*Server, error) {
@@ -31,7 +34,27 @@ func New(cfg config.Config) (*Server, error) {
 		return nil, fmt.Errorf("max_concurrency must be > 0")
 	}
 
-	api := httpapi.New(cfg)
+	// MVP: always use SQLite for audit/rules persistence.
+	st, err := store.Open(cfg.DBPath)
+	if err != nil {
+		return nil, fmt.Errorf("store open: %w", err)
+	}
+	if err := st.Migrate(context.Background()); err != nil {
+		_ = st.Close()
+		return nil, fmt.Errorf("store migrate: %w", err)
+	}
+
+	re := rules.NewEngine()
+	if always, err := st.LoadEnabledAlwaysRules(context.Background()); err == nil {
+		for _, r := range always {
+			re.AddAlways(r)
+		}
+	} else {
+		_ = st.Close()
+		return nil, fmt.Errorf("store load always rules: %w", err)
+	}
+
+	api := httpapi.New(cfg, httpapi.WithRulesEngine(re))
 	handler := api.Handler()
 
 	return &Server{
@@ -42,6 +65,7 @@ func New(cfg config.Config) (*Server, error) {
 		},
 		handler: handler,
 		api:     api,
+		st:      st,
 	}, nil
 }
 
@@ -63,6 +87,10 @@ func (s *Server) PairingCode() string {
 func (s *Server) API() *httpapi.API { return s.api }
 
 func (s *Server) Run(ctx context.Context, ready chan<- struct{}) error {
+	if s.st != nil {
+		defer func() { _ = s.st.Close() }()
+	}
+
 	addr := fmt.Sprintf("%s:%d", s.cfg.ListenAddr, s.cfg.Port)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {

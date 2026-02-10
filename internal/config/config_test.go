@@ -13,6 +13,9 @@ func TestDefaults(t *testing.T) {
 	if cfg.Port != 8777 {
 		t.Fatalf("Port=%d", cfg.Port)
 	}
+	if cfg.DBPath == "" {
+		t.Fatalf("DBPath empty")
+	}
 	if cfg.MaxConcurrency != 3 {
 		t.Fatalf("MaxConcurrency=%d", cfg.MaxConcurrency)
 	}
@@ -32,6 +35,7 @@ func TestParseConfigTOMLSimple(t *testing.T) {
 # comment
 listen_addr = "0.0.0.0"
 port = 55555
+db_path = "racg-test.db"
 max_concurrency = 7
 lock_first_client_addr = true
 `)
@@ -46,6 +50,9 @@ lock_first_client_addr = true
 	}
 	if cfg.Port != 55555 {
 		t.Fatalf("Port=%d", cfg.Port)
+	}
+	if cfg.DBPath != "racg-test.db" {
+		t.Fatalf("DBPath=%q", cfg.DBPath)
 	}
 	if cfg.MaxConcurrency != 7 {
 		t.Fatalf("MaxConcurrency=%d", cfg.MaxConcurrency)

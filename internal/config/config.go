@@ -11,6 +11,7 @@ import (
 type Config struct {
 	ListenAddr            string
 	Port                  int
+	DBPath                string
 	DefaultTimeoutSec     int
 	MaxOutputBytes        int
 	MaxConcurrency        int
@@ -25,6 +26,7 @@ func Defaults() Config {
 	return Config{
 		ListenAddr:              "127.0.0.1",
 		Port:                    8777,
+		DBPath:                  "racg.db",
 		DefaultTimeoutSec:       120,
 		MaxOutputBytes:          1 * 1024 * 1024,
 		MaxConcurrency:          3,
@@ -74,6 +76,12 @@ func ApplyTOMLSimple(cfg *Config, r io.Reader) error {
 				return fmt.Errorf("line %d: port: %w", lineNo, err)
 			}
 			cfg.Port = n
+		case "db_path":
+			str, err := parseTOMLString(val)
+			if err != nil {
+				return fmt.Errorf("line %d: db_path: %w", lineNo, err)
+			}
+			cfg.DBPath = str
 		case "max_concurrency":
 			n, err := strconv.Atoi(val)
 			if err != nil {

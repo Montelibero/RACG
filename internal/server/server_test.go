@@ -10,6 +10,7 @@ import (
 
 func TestServerHealthzHandler(t *testing.T) {
 	cfg := config.Defaults()
+	cfg.DBPath = "file::memory:?cache=shared"
 
 	s, err := New(cfg)
 	if err != nil {
