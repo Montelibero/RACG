@@ -54,7 +54,7 @@ func New(cfg config.Config) (*Server, error) {
 		return nil, fmt.Errorf("store load always rules: %w", err)
 	}
 
-	api := httpapi.New(cfg, httpapi.WithRulesEngine(re))
+	api := httpapi.New(cfg, httpapi.WithRulesEngine(re), httpapi.WithStore(st))
 	handler := api.Handler()
 
 	return &Server{
