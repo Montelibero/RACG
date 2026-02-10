@@ -16,6 +16,7 @@ import (
 	"github.com/itolstov/racg/internal/auth"
 	"github.com/itolstov/racg/internal/config"
 	"github.com/itolstov/racg/internal/events"
+	"github.com/itolstov/racg/internal/rules"
 	"github.com/itolstov/racg/internal/version"
 	"nhooyr.io/websocket"
 	"nhooyr.io/websocket/wsjson"
@@ -38,12 +39,17 @@ func WithHub(h *events.Hub) Option {
 	return func(a *API) { a.hub = h }
 }
 
+func WithRulesEngine(e *rules.Engine) Option {
+	return func(a *API) { a.rules = e }
+}
+
 type API struct {
 	cfg config.Config
 
 	pairing *auth.Pairing
 	tokens  *auth.TokenManager
 	hub     *events.Hub
+	rules   *rules.Engine
 
 	mu             sync.Mutex
 	lockedClientIP string
@@ -56,6 +62,15 @@ type requestRecord struct {
 	ID     string          `json:"request_id"`
 	Status string          `json:"status"`
 	Op     json.RawMessage `json:"op"`
+
+	Decision *decisionRecord `json:"decision,omitempty"`
+}
+
+type decisionRecord struct {
+	Decision       string `json:"decision"`
+	DecisionSource string `json:"decision_source"`
+	DecidedAt      string `json:"decided_at"`
+	RuleID         string `json:"rule_id,omitempty"`
 }
 
 func New(cfg config.Config, opts ...Option) *API {
@@ -64,6 +79,7 @@ func New(cfg config.Config, opts ...Option) *API {
 	a.pairing = auth.NewPairing(6, time.Duration(cfg.PairingCodeTTLSeconds)*time.Second, auth.RealClock{})
 	a.tokens = auth.NewTokenManager(auth.RealClock{})
 	a.hub = events.NewHub()
+	a.rules = rules.NewEngine()
 
 	for _, o := range opts {
 		o(a)
@@ -215,22 +231,47 @@ func (a *API) handleRequests(w http.ResponseWriter, r *http.Request, c auth.Clai
 	}
 
 	var req struct {
-		Op          any    `json:"op"`
-		ClientReqID string `json:"client_req_id"`
+		Op          rules.Op `json:"op"`
+		ClientReqID string   `json:"client_req_id"`
 	}
 	if err := decodeJSON(r.Body, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "BAD_REQUEST", err.Error(), "")
 		return
 	}
 
-	opBytes, err := json.Marshal(req.Op)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid op", "")
+	if strings.TrimSpace(req.Op.Type) == "" {
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "op.type is required", "")
 		return
+	}
+	if len(req.Op.Payload) == 0 {
+		req.Op.Payload = []byte(`{}`)
 	}
 
 	id := uuid.NewString()
-	rec := requestRecord{ID: id, Status: "PENDING_APPROVAL", Op: opBytes}
+	rec := requestRecord{ID: id, Status: "PENDING_APPROVAL", Op: mustJSON(req.Op)}
+
+	if m, ok := a.rules.Match(c.SessionID, req.Op); ok {
+		rec.Status = "APPROVED"
+		rec.Decision = &decisionRecord{
+			Decision:       "ALLOW_RULE",
+			DecisionSource: "rule",
+			DecidedAt:      time.Now().UTC().Format(time.RFC3339Nano),
+			RuleID:         m.RuleID,
+		}
+		a.hub.Publish(events.Event{
+			Type:      "request.decision",
+			RequestID: id,
+			SessionID: c.SessionID,
+			ClientID:  c.ClientID,
+			Data: map[string]any{
+				"decision":        rec.Decision.Decision,
+				"decision_source": rec.Decision.DecisionSource,
+				"rule_id":         m.RuleID,
+				"status":          rec.Status,
+			},
+		})
+	}
+
 	a.reqsMu.Lock()
 	a.reqs[id] = rec
 	a.reqsMu.Unlock()
@@ -247,6 +288,11 @@ func (a *API) handleRequests(w http.ResponseWriter, r *http.Request, c auth.Clai
 
 	resp := map[string]any{"request_id": id, "status": rec.Status}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func mustJSON(v any) json.RawMessage {
+	b, _ := json.Marshal(v)
+	return b
 }
 
 func (a *API) handleEventsWS(w http.ResponseWriter, r *http.Request) {

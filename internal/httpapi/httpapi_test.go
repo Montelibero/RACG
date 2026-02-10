@@ -10,6 +10,7 @@ import (
 
 	"github.com/itolstov/racg/internal/auth"
 	"github.com/itolstov/racg/internal/config"
+	"github.com/itolstov/racg/internal/rules"
 )
 
 func TestInfo(t *testing.T) {
@@ -116,6 +117,46 @@ func TestRequestsCreate(t *testing.T) {
 		t.Fatalf("missing request_id")
 	}
 	if got["status"] != "PENDING_APPROVAL" {
+		t.Fatalf("status=%v", got["status"])
+	}
+}
+
+func TestRequestsCreateAutoApproveByRule(t *testing.T) {
+	cfg := config.Defaults()
+	clk := auth.NewFakeClock(time.Unix(1000, 0).UTC())
+	pair := auth.NewPairing(6, 3*time.Minute, clk)
+	tm := auth.NewTokenManager(clk)
+
+	re := rules.NewEngine()
+	re.AddAlways(rules.Rule{ID: "allow-echo", OpType: "cmd.run", Cmd: &rules.CmdRule{ArgvPrefix: []string{"/bin/echo"}}})
+
+	api := New(cfg, WithPairing(pair), WithTokenManager(tm), WithRulesEngine(re))
+
+	open := []byte(`{"client_id":"codex-home","pairing_code":"` + pair.Code() + `"}`)
+	rwOpen := httptest.NewRecorder()
+	api.Handler().ServeHTTP(rwOpen, httptest.NewRequest(http.MethodPost, "http://example/v1/session/open", bytes.NewReader(open)))
+	if rwOpen.Code != 200 {
+		t.Fatalf("open status=%d body=%s", rwOpen.Code, rwOpen.Body.String())
+	}
+	var openResp struct {
+		SessionToken string `json:"session_token"`
+	}
+	_ = json.Unmarshal(rwOpen.Body.Bytes(), &openResp)
+
+	reqBody := []byte(`{"op":{"type":"cmd.run","payload":{"argv":["/bin/echo","hi"]}}}`)
+	req := httptest.NewRequest(http.MethodPost, "http://example/v1/requests", bytes.NewReader(reqBody))
+	req.Header.Set("Authorization", "Bearer "+openResp.SessionToken)
+	req.Header.Set("Content-Type", "application/json")
+	rw := httptest.NewRecorder()
+	api.Handler().ServeHTTP(rw, req)
+	if rw.Code != 200 {
+		t.Fatalf("status=%d body=%s", rw.Code, rw.Body.String())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(rw.Body.Bytes(), &got); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if got["status"] != "APPROVED" {
 		t.Fatalf("status=%v", got["status"])
 	}
 }
