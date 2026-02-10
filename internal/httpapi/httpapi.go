@@ -941,6 +941,14 @@ func ruleFromOpExact(ruleID string, op rules.Op) (rules.Rule, bool) {
 			return rules.Rule{}, false
 		}
 		return rules.Rule{ID: ruleID, OpType: "fs.read", Path: &rules.PathRule{Exact: p.Path}}, true
+	case "fs.patch_unified":
+		var p struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal(op.Payload, &p); err != nil || p.Path == "" {
+			return rules.Rule{}, false
+		}
+		return rules.Rule{ID: ruleID, OpType: "fs.patch_unified", Path: &rules.PathRule{Exact: p.Path}}, true
 	default:
 		return rules.Rule{}, false
 	}

@@ -832,6 +832,126 @@ func TestFSPatchUnifiedExecution(t *testing.T) {
 	}
 }
 
+func TestAllowAlwaysCreatesPatchRuleAndAutoApprovesNext(t *testing.T) {
+	ctx := context.Background()
+
+	cfg := config.Defaults()
+	clk := auth.NewFakeClock(time.Unix(1000, 0).UTC())
+	pair := auth.NewPairing(6, 3*time.Minute, clk)
+	tm := auth.NewTokenManager(clk)
+
+	st, err := store.Open("file::memory:?cache=shared")
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer st.Close()
+	if err := st.Migrate(ctx); err != nil {
+		t.Fatalf("store.Migrate: %v", err)
+	}
+
+	api := New(cfg, WithPairing(pair), WithTokenManager(tm), WithStore(st))
+
+	dir := t.TempDir()
+	p := filepath.Join(dir, "file.txt")
+	if err := os.WriteFile(p, []byte("a\nb\nc\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	patch1 := `@@ -1,3 +1,3 @@
+ a
+-b
++B
+ c
+`
+
+	open := []byte(`{"client_id":"codex-home","pairing_code":"` + pair.Code() + `"}`)
+	rwOpen := httptest.NewRecorder()
+	api.Handler().ServeHTTP(rwOpen, httptest.NewRequest(http.MethodPost, "http://example/v1/session/open", bytes.NewReader(open)))
+	if rwOpen.Code != 200 {
+		t.Fatalf("open status=%d body=%s", rwOpen.Code, rwOpen.Body.String())
+	}
+	var openResp struct {
+		SessionToken string `json:"session_token"`
+	}
+	_ = json.Unmarshal(rwOpen.Body.Bytes(), &openResp)
+
+	// Request #1: allow always via TUI decision, should create an always rule for this path.
+	createBody1 := []byte(`{"op":{"type":"fs.patch_unified","payload":{"path":"` + p + `","diff":` + mustJSONString(t, patch1) + `}}}`)
+	createReq1 := httptest.NewRequest(http.MethodPost, "http://example/v1/requests", bytes.NewReader(createBody1))
+	createReq1.Header.Set("Authorization", "Bearer "+openResp.SessionToken)
+	createReq1.Header.Set("Content-Type", "application/json")
+	createRw1 := httptest.NewRecorder()
+	api.Handler().ServeHTTP(createRw1, createReq1)
+	if createRw1.Code != 200 {
+		t.Fatalf("create1 status=%d body=%s", createRw1.Code, createRw1.Body.String())
+	}
+	var created1 struct {
+		RequestID string `json:"request_id"`
+	}
+	_ = json.Unmarshal(createRw1.Body.Bytes(), &created1)
+
+	decBody := []byte(`{"decision":"ALLOW_ALWAYS"}`)
+	decReq := httptest.NewRequest(http.MethodPost, "http://example/v1/requests/"+created1.RequestID+"/decision", bytes.NewReader(decBody))
+	decReq.Header.Set("Authorization", "Bearer "+openResp.SessionToken)
+	decReq.Header.Set("Content-Type", "application/json")
+	decRw := httptest.NewRecorder()
+	api.Handler().ServeHTTP(decRw, decReq)
+	if decRw.Code != 200 {
+		t.Fatalf("dec status=%d body=%s", decRw.Code, decRw.Body.String())
+	}
+
+	always, err := st.LoadEnabledAlwaysRules(ctx)
+	if err != nil {
+		t.Fatalf("LoadEnabledAlwaysRules: %v", err)
+	}
+	if len(always) != 1 {
+		t.Fatalf("always len=%d", len(always))
+	}
+	if always[0].OpType != "fs.patch_unified" {
+		t.Fatalf("op_type=%q", always[0].OpType)
+	}
+	if always[0].Path == nil || always[0].Path.Exact != p {
+		t.Fatalf("path=%v", always[0].Path)
+	}
+	ruleID := always[0].ID
+
+	// Request #2: should auto-approve due to the persisted always rule.
+	patch2 := `@@ -1,3 +1,3 @@
+ a
+-B
++b
+ c
+`
+	createBody2 := []byte(`{"op":{"type":"fs.patch_unified","payload":{"path":"` + p + `","diff":` + mustJSONString(t, patch2) + `}}}`)
+	createReq2 := httptest.NewRequest(http.MethodPost, "http://example/v1/requests", bytes.NewReader(createBody2))
+	createReq2.Header.Set("Authorization", "Bearer "+openResp.SessionToken)
+	createReq2.Header.Set("Content-Type", "application/json")
+	createRw2 := httptest.NewRecorder()
+	api.Handler().ServeHTTP(createRw2, createReq2)
+	if createRw2.Code != 200 {
+		t.Fatalf("create2 status=%d body=%s", createRw2.Code, createRw2.Body.String())
+	}
+	var created2 struct {
+		RequestID string `json:"request_id"`
+		Status    string `json:"status"`
+	}
+	_ = json.Unmarshal(createRw2.Body.Bytes(), &created2)
+	if created2.Status != "APPROVED" {
+		t.Fatalf("create2 status=%q body=%s", created2.Status, createRw2.Body.String())
+	}
+
+	gotDec, err := st.GetDecision(ctx, created2.RequestID)
+	if err != nil {
+		t.Fatalf("GetDecision2: %v", err)
+	}
+	if gotDec.DecisionSource != "rule" {
+		t.Fatalf("DecisionSource=%q", gotDec.DecisionSource)
+	}
+	if gotDec.RuleID != ruleID {
+		t.Fatalf("RuleID=%q want=%q", gotDec.RuleID, ruleID)
+	}
+}
+
 func mustJSONString(t *testing.T, s string) string {
 	t.Helper()
 	b, err := json.Marshal(s)
