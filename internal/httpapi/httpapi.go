@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/subtle"
 	"embed"
 	"encoding/json"
@@ -16,6 +17,7 @@ import (
 	"github.com/itolstov/racg/internal/auth"
 	"github.com/itolstov/racg/internal/config"
 	"github.com/itolstov/racg/internal/events"
+	"github.com/itolstov/racg/internal/executor"
 	"github.com/itolstov/racg/internal/rules"
 	"github.com/itolstov/racg/internal/version"
 	"nhooyr.io/websocket"
@@ -43,6 +45,10 @@ func WithRulesEngine(e *rules.Engine) Option {
 	return func(a *API) { a.rules = e }
 }
 
+func WithExecutor(x *executor.Executor) Option {
+	return func(a *API) { a.exec = x }
+}
+
 type API struct {
 	cfg config.Config
 
@@ -50,6 +56,8 @@ type API struct {
 	tokens  *auth.TokenManager
 	hub     *events.Hub
 	rules   *rules.Engine
+	exec    *executor.Executor
+	sem     chan struct{}
 
 	mu             sync.Mutex
 	lockedClientIP string
@@ -64,6 +72,7 @@ type requestRecord struct {
 	Op     json.RawMessage `json:"op"`
 
 	Decision *decisionRecord `json:"decision,omitempty"`
+	Result   *resultRecord   `json:"result,omitempty"`
 }
 
 type decisionRecord struct {
@@ -73,6 +82,20 @@ type decisionRecord struct {
 	RuleID         string `json:"rule_id,omitempty"`
 }
 
+type resultRecord struct {
+	StartedAt       string `json:"started_at"`
+	FinishedAt      string `json:"finished_at"`
+	DurationMs      int64  `json:"duration_ms"`
+	ExitCode        int    `json:"exit_code"`
+	Status          string `json:"status"`
+	Stdout          string `json:"stdout"`
+	Stderr          string `json:"stderr"`
+	StdoutTruncated bool   `json:"stdout_truncated"`
+	StderrTruncated bool   `json:"stderr_truncated"`
+	StdoutSHA256    string `json:"stdout_sha256"`
+	StderrSHA256    string `json:"stderr_sha256"`
+}
+
 func New(cfg config.Config, opts ...Option) *API {
 	a := &API{cfg: cfg, reqs: map[string]requestRecord{}}
 
@@ -80,6 +103,11 @@ func New(cfg config.Config, opts ...Option) *API {
 	a.tokens = auth.NewTokenManager(auth.RealClock{})
 	a.hub = events.NewHub()
 	a.rules = rules.NewEngine()
+	a.exec = executor.New(executor.Options{
+		MaxOutputBytes: cfg.MaxOutputBytes,
+		KillGrace:      3 * time.Second,
+	})
+	a.sem = make(chan struct{}, cfg.MaxConcurrency)
 
 	for _, o := range opts {
 		o(a)
@@ -104,6 +132,7 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("/v1/session/open", a.handleSessionOpen)
 	mux.HandleFunc("/v1/session/me", a.withAuth(a.handleSessionMe))
 	mux.HandleFunc("/v1/requests", a.withAuth(a.handleRequests))
+	mux.HandleFunc("/v1/requests/", a.withAuth(a.handleRequestByID))
 	mux.HandleFunc("/v1/events", a.handleEventsWS)
 
 	if !a.cfg.LockFirstClientAddr {
@@ -249,28 +278,7 @@ func (a *API) handleRequests(w http.ResponseWriter, r *http.Request, c auth.Clai
 
 	id := uuid.NewString()
 	rec := requestRecord{ID: id, Status: "PENDING_APPROVAL", Op: mustJSON(req.Op)}
-
-	if m, ok := a.rules.Match(c.SessionID, req.Op); ok {
-		rec.Status = "APPROVED"
-		rec.Decision = &decisionRecord{
-			Decision:       "ALLOW_RULE",
-			DecisionSource: "rule",
-			DecidedAt:      time.Now().UTC().Format(time.RFC3339Nano),
-			RuleID:         m.RuleID,
-		}
-		a.hub.Publish(events.Event{
-			Type:      "request.decision",
-			RequestID: id,
-			SessionID: c.SessionID,
-			ClientID:  c.ClientID,
-			Data: map[string]any{
-				"decision":        rec.Decision.Decision,
-				"decision_source": rec.Decision.DecisionSource,
-				"rule_id":         m.RuleID,
-				"status":          rec.Status,
-			},
-		})
-	}
+	respStatus := rec.Status
 
 	a.reqsMu.Lock()
 	a.reqs[id] = rec
@@ -286,13 +294,143 @@ func (a *API) handleRequests(w http.ResponseWriter, r *http.Request, c auth.Clai
 		},
 	})
 
-	resp := map[string]any{"request_id": id, "status": rec.Status}
+	// Auto-approve via rules (MVP).
+	if m, ok := a.rules.Match(c.SessionID, req.Op); ok {
+		dec := &decisionRecord{
+			Decision:       "ALLOW_RULE",
+			DecisionSource: "rule",
+			DecidedAt:      time.Now().UTC().Format(time.RFC3339Nano),
+			RuleID:         m.RuleID,
+		}
+		a.reqsMu.Lock()
+		rec2 := a.reqs[id]
+		rec2.Status = "APPROVED"
+		rec2.Decision = dec
+		a.reqs[id] = rec2
+		a.reqsMu.Unlock()
+
+		respStatus = "APPROVED"
+		a.hub.Publish(events.Event{
+			Type:      "request.decision",
+			RequestID: id,
+			SessionID: c.SessionID,
+			ClientID:  c.ClientID,
+			Data: map[string]any{
+				"decision":        dec.Decision,
+				"decision_source": dec.DecisionSource,
+				"rule_id":         m.RuleID,
+				"status":          "APPROVED",
+			},
+		})
+		// Execute asynchronously.
+		go a.executeApprovedRequest(id, c, req.Op)
+	}
+
+	resp := map[string]any{"request_id": id, "status": respStatus}
 	writeJSON(w, http.StatusOK, resp)
 }
 
 func mustJSON(v any) json.RawMessage {
 	b, _ := json.Marshal(v)
 	return b
+}
+
+func (a *API) executeApprovedRequest(requestID string, c auth.Claims, op rules.Op) {
+	// Bounded concurrency.
+	a.sem <- struct{}{}
+	defer func() { <-a.sem }()
+
+	// Mark RUNNING.
+	startedAt := time.Now().UTC()
+	a.reqsMu.Lock()
+	rec, ok := a.reqs[requestID]
+	if ok {
+		rec.Status = "RUNNING"
+		a.reqs[requestID] = rec
+	}
+	a.reqsMu.Unlock()
+
+	a.hub.Publish(events.Event{
+		Type:      "request.started",
+		RequestID: requestID,
+		SessionID: c.SessionID,
+		ClientID:  c.ClientID,
+		Data: map[string]any{
+			"status": "RUNNING",
+		},
+	})
+
+	var rr *resultRecord
+	switch op.Type {
+	case "cmd.run":
+		var payload struct {
+			Argv       []string `json:"argv"`
+			Cwd        string   `json:"cwd"`
+			TimeoutSec int      `json:"timeout_sec"`
+		}
+		_ = json.Unmarshal(op.Payload, &payload)
+		timeout := time.Duration(payload.TimeoutSec) * time.Second
+		if timeout <= 0 {
+			timeout = time.Duration(a.cfg.DefaultTimeoutSec) * time.Second
+		}
+		res := a.exec.Run(context.Background(), executor.Spec{
+			Argv:    payload.Argv,
+			Cwd:     payload.Cwd,
+			Timeout: timeout,
+		})
+		finishedAt := time.Now().UTC()
+		rr = &resultRecord{
+			StartedAt:       startedAt.Format(time.RFC3339Nano),
+			FinishedAt:      finishedAt.Format(time.RFC3339Nano),
+			DurationMs:      res.DurationMs,
+			ExitCode:        res.ExitCode,
+			Status:          res.Status,
+			Stdout:          res.Stdout,
+			Stderr:          res.Stderr,
+			StdoutTruncated: res.StdoutTruncated,
+			StderrTruncated: res.StderrTruncated,
+			StdoutSHA256:    res.StdoutSHA256,
+			StderrSHA256:    res.StderrSHA256,
+		}
+	default:
+		finishedAt := time.Now().UTC()
+		rr = &resultRecord{
+			StartedAt:  startedAt.Format(time.RFC3339Nano),
+			FinishedAt: finishedAt.Format(time.RFC3339Nano),
+			DurationMs: finishedAt.Sub(startedAt).Milliseconds(),
+			ExitCode:   -1,
+			Status:     "FAILED",
+			Stderr:     "OP_NOT_SUPPORTED",
+		}
+	}
+
+	terminalStatus := rr.Status
+	switch rr.Status {
+	case "SUCCEEDED", "FAILED", "TIMED_OUT":
+		// ok
+	default:
+		terminalStatus = "FAILED"
+	}
+
+	a.reqsMu.Lock()
+	rec2, ok := a.reqs[requestID]
+	if ok {
+		rec2.Result = rr
+		rec2.Status = terminalStatus
+		a.reqs[requestID] = rec2
+	}
+	a.reqsMu.Unlock()
+
+	a.hub.Publish(events.Event{
+		Type:      "request.finished",
+		RequestID: requestID,
+		SessionID: c.SessionID,
+		ClientID:  c.ClientID,
+		Data: map[string]any{
+			"status":    terminalStatus,
+			"exit_code": rr.ExitCode,
+		},
+	})
 }
 
 func (a *API) handleEventsWS(w http.ResponseWriter, r *http.Request) {
@@ -328,6 +466,29 @@ func (a *API) handleEventsWS(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+func (a *API) handleRequestByID(w http.ResponseWriter, r *http.Request, c auth.Claims) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "", "")
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/v1/requests/")
+	if id == "" || strings.Contains(id, "/") {
+		writeError(w, http.StatusNotFound, "REQUEST_NOT_FOUND", "request not found", "")
+		return
+	}
+
+	a.reqsMu.Lock()
+	rec, ok := a.reqs[id]
+	a.reqsMu.Unlock()
+	if !ok {
+		writeError(w, http.StatusNotFound, "REQUEST_NOT_FOUND", "request not found", id)
+		return
+	}
+
+	// In MVP we don't filter by session/client; token possession is sufficient.
+	writeJSON(w, http.StatusOK, rec)
 }
 
 type authHandler func(http.ResponseWriter, *http.Request, auth.Claims)
