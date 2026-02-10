@@ -178,7 +178,7 @@ func (a *API) DecideForTUI(requestID string, decision string) error {
 		return errors.New("REQUEST_NOT_FOUND")
 	}
 	claims := auth.Claims{SessionID: rec.SessionID, ClientID: rec.ClientID}
-	return a.decideInternal(requestID, decision, claims)
+	return a.decideInternal(context.Background(), requestID, decision, claims)
 }
 
 func (a *API) Handler() http.Handler {
@@ -352,6 +352,7 @@ func (a *API) handleRequests(w http.ResponseWriter, r *http.Request, c auth.Clai
 	}
 
 	id := uuid.NewString()
+	createdAt := time.Now().UTC()
 	rec := requestRecord{
 		ID:        id,
 		Status:    "PENDING_APPROVAL",
@@ -359,13 +360,32 @@ func (a *API) handleRequests(w http.ResponseWriter, r *http.Request, c auth.Clai
 		RiskFlags: riskFlags(req.Op),
 		SessionID: c.SessionID,
 		ClientID:  c.ClientID,
-		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		CreatedAt: createdAt.Format(time.RFC3339Nano),
 	}
 	respStatus := rec.Status
 
 	a.reqsMu.Lock()
 	a.reqs[id] = rec
 	a.reqsMu.Unlock()
+
+	if a.st != nil {
+		rf, _ := json.Marshal(rec.RiskFlags)
+		if err := a.st.InsertRequest(r.Context(), store.Request{
+			ID:            id,
+			SessionID:     c.SessionID,
+			ClientID:      c.ClientID,
+			Status:        rec.Status,
+			OpJSON:        string(rec.Op),
+			RiskFlagsJSON: string(rf),
+			CreatedAt:     createdAt,
+		}); err != nil {
+			a.reqsMu.Lock()
+			delete(a.reqs, id)
+			a.reqsMu.Unlock()
+			writeError(w, http.StatusInternalServerError, "INTERNAL", err.Error(), "")
+			return
+		}
+	}
 
 	a.hub.Publish(events.Event{
 		Type:      "request.created",
@@ -379,10 +399,11 @@ func (a *API) handleRequests(w http.ResponseWriter, r *http.Request, c auth.Clai
 
 	// Auto-approve via rules (MVP).
 	if m, ok := a.rules.Match(c.SessionID, req.Op); ok {
+		decidedAt := time.Now().UTC()
 		dec := &decisionRecord{
 			Decision:       "ALLOW_RULE",
 			DecisionSource: "rule",
-			DecidedAt:      time.Now().UTC().Format(time.RFC3339Nano),
+			DecidedAt:      decidedAt.Format(time.RFC3339Nano),
 			RuleID:         m.RuleID,
 		}
 		a.reqsMu.Lock()
@@ -391,6 +412,17 @@ func (a *API) handleRequests(w http.ResponseWriter, r *http.Request, c auth.Clai
 		rec2.Decision = dec
 		a.reqs[id] = rec2
 		a.reqsMu.Unlock()
+
+		if a.st != nil {
+			_ = a.st.UpdateRequestStatus(r.Context(), id, "APPROVED")
+			_ = a.st.InsertDecision(r.Context(), store.Decision{
+				RequestID:      id,
+				Decision:       "ALLOW_RULE",
+				DecisionSource: "rule",
+				DecidedAt:      decidedAt,
+				RuleID:         m.RuleID,
+			})
+		}
 
 		respStatus = "APPROVED"
 		a.hub.Publish(events.Event{
@@ -468,6 +500,10 @@ func (a *API) executeApprovedRequest(requestID string, c auth.Claims, op rules.O
 	}
 	a.reqsMu.Unlock()
 
+	if a.st != nil {
+		_ = a.st.UpdateRequestStatus(context.Background(), requestID, "RUNNING")
+	}
+
 	a.hub.Publish(events.Event{
 		Type:      "request.started",
 		RequestID: requestID,
@@ -479,6 +515,7 @@ func (a *API) executeApprovedRequest(requestID string, c auth.Claims, op rules.O
 	})
 
 	var rr *resultRecord
+	var finishedAt time.Time
 	switch op.Type {
 	case "cmd.run":
 		var payload struct {
@@ -506,7 +543,7 @@ func (a *API) executeApprovedRequest(requestID string, c auth.Claims, op rules.O
 		delete(a.running, requestID)
 		a.runningMu.Unlock()
 
-		finishedAt := time.Now().UTC()
+		finishedAt = time.Now().UTC()
 		rr = &resultRecord{
 			StartedAt:       startedAt.Format(time.RFC3339Nano),
 			FinishedAt:      finishedAt.Format(time.RFC3339Nano),
@@ -521,7 +558,7 @@ func (a *API) executeApprovedRequest(requestID string, c auth.Claims, op rules.O
 			StderrSHA256:    res.StderrSHA256,
 		}
 	default:
-		finishedAt := time.Now().UTC()
+		finishedAt = time.Now().UTC()
 		rr = &resultRecord{
 			StartedAt:  startedAt.Format(time.RFC3339Nano),
 			FinishedAt: finishedAt.Format(time.RFC3339Nano),
@@ -551,6 +588,24 @@ func (a *API) executeApprovedRequest(requestID string, c auth.Claims, op rules.O
 	}
 	a.reqsMu.Unlock()
 
+	if a.st != nil && rr != nil {
+		_ = a.st.UpdateRequestStatus(context.Background(), requestID, terminalStatus)
+		_ = a.st.InsertExecution(context.Background(), store.Execution{
+			RequestID:        requestID,
+			StartedAt:        startedAt,
+			FinishedAt:       finishedAt,
+			DurationMs:       rr.DurationMs,
+			ExitCode:         rr.ExitCode,
+			Status:           terminalStatus,
+			Stdout:           rr.Stdout,
+			Stderr:           rr.Stderr,
+			StdoutTruncated:  rr.StdoutTruncated,
+			StderrTruncated:  rr.StderrTruncated,
+			StdoutSHA256:     rr.StdoutSHA256,
+			StderrSHA256:     rr.StderrSHA256,
+		})
+	}
+
 	a.hub.Publish(events.Event{
 		Type:      "request.finished",
 		RequestID: requestID,
@@ -572,7 +627,7 @@ func (a *API) handleDecision(w http.ResponseWriter, r *http.Request, c auth.Clai
 		return
 	}
 
-	if err := a.decideInternal(requestID, req.Decision, c); err != nil {
+	if err := a.decideInternal(r.Context(), requestID, req.Decision, c); err != nil {
 		switch err.Error() {
 		case "REQUEST_NOT_FOUND":
 			writeError(w, http.StatusNotFound, "REQUEST_NOT_FOUND", "request not found", requestID)
@@ -590,7 +645,7 @@ func (a *API) handleDecision(w http.ResponseWriter, r *http.Request, c auth.Clai
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-func (a *API) decideInternal(requestID string, decision string, c auth.Claims) error {
+func (a *API) decideInternal(ctx context.Context, requestID string, decision string, c auth.Claims) error {
 	decision = strings.TrimSpace(decision)
 	if decision == "" {
 		return errors.New("BAD_REQUEST")
@@ -611,7 +666,8 @@ func (a *API) decideInternal(requestID string, decision string, c auth.Claims) e
 	_ = json.Unmarshal(rec.Op, &op)
 	dangerous := isDangerous(rec.RiskFlags)
 
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	decidedAt := time.Now().UTC()
+	now := decidedAt.Format(time.RFC3339Nano)
 	dec := &decisionRecord{
 		Decision:       decision,
 		DecisionSource: "tui",
@@ -620,6 +676,15 @@ func (a *API) decideInternal(requestID string, decision string, c auth.Claims) e
 
 	switch decision {
 	case "DENY":
+		if a.st != nil {
+			_ = a.st.UpdateRequestStatus(ctx, requestID, "DENIED")
+			_ = a.st.InsertDecision(ctx, store.Decision{
+				RequestID:      requestID,
+				Decision:       "DENY",
+				DecisionSource: "tui",
+				DecidedAt:      decidedAt,
+			})
+		}
 		rec.Status = "DENIED"
 		rec.Decision = dec
 		a.reqs[requestID] = rec
@@ -644,20 +709,46 @@ func (a *API) decideInternal(requestID string, decision string, c auth.Claims) e
 			return errors.New("ALLOW_ALWAYS_NOT_PERMITTED")
 		}
 
+		var createdRuleID string
+		var createdRule rules.Rule
+		var hasRule bool
+		if decision == "ALLOW_SESSION" || decision == "ALLOW_ALWAYS" {
+			createdRuleID = uuid.NewString()
+			rule, ok := ruleFromOpExact(createdRuleID, op)
+			if ok {
+				createdRule = rule
+				hasRule = true
+			}
+		}
+
+		if a.st != nil {
+			ruleID := ""
+			if hasRule {
+				ruleID = createdRuleID
+			}
+			_ = a.st.UpdateRequestStatus(ctx, requestID, "APPROVED")
+			_ = a.st.InsertDecision(ctx, store.Decision{
+				RequestID:      requestID,
+				Decision:       decision,
+				DecisionSource: "tui",
+				DecidedAt:      decidedAt,
+				RuleID:         ruleID,
+			})
+			if decision == "ALLOW_ALWAYS" && hasRule {
+				_ = a.st.InsertAlwaysRule(ctx, createdRule, decidedAt)
+			}
+		}
+
 		rec.Status = "APPROVED"
 		rec.Decision = dec
 		a.reqs[requestID] = rec
 		a.reqsMu.Unlock()
 
-		if decision == "ALLOW_SESSION" || decision == "ALLOW_ALWAYS" {
-			ruleID := uuid.NewString()
-			r, ok := ruleFromOpExact(ruleID, op)
-			if ok {
-				if decision == "ALLOW_SESSION" {
-					a.rules.AddSession(c.SessionID, r)
-				} else {
-					a.rules.AddAlways(r)
-				}
+		if hasRule {
+			if decision == "ALLOW_SESSION" {
+				a.rules.AddSession(c.SessionID, createdRule)
+			} else if decision == "ALLOW_ALWAYS" {
+				a.rules.AddAlways(createdRule)
 			}
 		}
 

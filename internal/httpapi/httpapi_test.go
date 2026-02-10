@@ -166,6 +166,67 @@ func TestRequestsCreate(t *testing.T) {
 	}
 }
 
+func TestRequestsCreatePersistsRequestInSQLite(t *testing.T) {
+	ctx := context.Background()
+
+	cfg := config.Defaults()
+	clk := auth.NewFakeClock(time.Unix(1000, 0).UTC())
+	pair := auth.NewPairing(6, 3*time.Minute, clk)
+	tm := auth.NewTokenManager(clk)
+
+	st, err := store.Open("file::memory:?cache=shared")
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer st.Close()
+	if err := st.Migrate(ctx); err != nil {
+		t.Fatalf("store.Migrate: %v", err)
+	}
+
+	api := New(cfg, WithPairing(pair), WithTokenManager(tm), WithStore(st))
+
+	open := []byte(`{"client_id":"codex-home","pairing_code":"` + pair.Code() + `"}`)
+	rwOpen := httptest.NewRecorder()
+	api.Handler().ServeHTTP(rwOpen, httptest.NewRequest(http.MethodPost, "http://example/v1/session/open", bytes.NewReader(open)))
+	if rwOpen.Code != 200 {
+		t.Fatalf("open status=%d body=%s", rwOpen.Code, rwOpen.Body.String())
+	}
+	var openResp struct {
+		SessionID    string `json:"session_id"`
+		SessionToken string `json:"session_token"`
+	}
+	_ = json.Unmarshal(rwOpen.Body.Bytes(), &openResp)
+
+	reqBody := []byte(`{"op":{"type":"cmd.run","payload":{"argv":["/bin/echo","hi"]}}}`)
+	req := httptest.NewRequest(http.MethodPost, "http://example/v1/requests", bytes.NewReader(reqBody))
+	req.Header.Set("Authorization", "Bearer "+openResp.SessionToken)
+	req.Header.Set("Content-Type", "application/json")
+	rw := httptest.NewRecorder()
+	api.Handler().ServeHTTP(rw, req)
+	if rw.Code != 200 {
+		t.Fatalf("status=%d body=%s", rw.Code, rw.Body.String())
+	}
+	var createResp struct {
+		RequestID string `json:"request_id"`
+		Status    string `json:"status"`
+	}
+	_ = json.Unmarshal(rw.Body.Bytes(), &createResp)
+	if createResp.RequestID == "" {
+		t.Fatalf("missing request_id")
+	}
+
+	got, err := st.GetRequest(ctx, createResp.RequestID)
+	if err != nil {
+		t.Fatalf("GetRequest: %v", err)
+	}
+	if got.SessionID != openResp.SessionID {
+		t.Fatalf("SessionID=%q", got.SessionID)
+	}
+	if got.Status != createResp.Status {
+		t.Fatalf("Status=%q", got.Status)
+	}
+}
+
 func TestRequestsCreateAutoApproveByRule(t *testing.T) {
 	cfg := config.Defaults()
 	clk := auth.NewFakeClock(time.Unix(1000, 0).UTC())
@@ -203,6 +264,72 @@ func TestRequestsCreateAutoApproveByRule(t *testing.T) {
 	}
 	if got["status"] != "APPROVED" {
 		t.Fatalf("status=%v", got["status"])
+	}
+}
+
+func TestAutoApproveByRulePersistsDecisionInSQLite(t *testing.T) {
+	ctx := context.Background()
+
+	cfg := config.Defaults()
+	clk := auth.NewFakeClock(time.Unix(1000, 0).UTC())
+	pair := auth.NewPairing(6, 3*time.Minute, clk)
+	tm := auth.NewTokenManager(clk)
+
+	st, err := store.Open("file::memory:?cache=shared")
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer st.Close()
+	if err := st.Migrate(ctx); err != nil {
+		t.Fatalf("store.Migrate: %v", err)
+	}
+
+	re := rules.NewEngine()
+	re.AddAlways(rules.Rule{ID: "allow-echo", OpType: "cmd.run", Cmd: &rules.CmdRule{ArgvPrefix: []string{"/bin/echo"}}})
+
+	api := New(cfg, WithPairing(pair), WithTokenManager(tm), WithRulesEngine(re), WithStore(st), WithExecutor(immediateRunner{}))
+
+	open := []byte(`{"client_id":"codex-home","pairing_code":"` + pair.Code() + `"}`)
+	rwOpen := httptest.NewRecorder()
+	api.Handler().ServeHTTP(rwOpen, httptest.NewRequest(http.MethodPost, "http://example/v1/session/open", bytes.NewReader(open)))
+	if rwOpen.Code != 200 {
+		t.Fatalf("open status=%d body=%s", rwOpen.Code, rwOpen.Body.String())
+	}
+	var openResp struct {
+		SessionToken string `json:"session_token"`
+	}
+	_ = json.Unmarshal(rwOpen.Body.Bytes(), &openResp)
+
+	reqBody := []byte(`{"op":{"type":"cmd.run","payload":{"argv":["/bin/echo","hi"]}}}`)
+	req := httptest.NewRequest(http.MethodPost, "http://example/v1/requests", bytes.NewReader(reqBody))
+	req.Header.Set("Authorization", "Bearer "+openResp.SessionToken)
+	req.Header.Set("Content-Type", "application/json")
+	rw := httptest.NewRecorder()
+	api.Handler().ServeHTTP(rw, req)
+	if rw.Code != 200 {
+		t.Fatalf("status=%d body=%s", rw.Code, rw.Body.String())
+	}
+	var created struct {
+		RequestID string `json:"request_id"`
+		Status    string `json:"status"`
+	}
+	_ = json.Unmarshal(rw.Body.Bytes(), &created)
+	if created.RequestID == "" {
+		t.Fatalf("missing request_id")
+	}
+	if created.Status != "APPROVED" {
+		t.Fatalf("create status=%q", created.Status)
+	}
+
+	gotDec, err := st.GetDecision(ctx, created.RequestID)
+	if err != nil {
+		t.Fatalf("GetDecision: %v", err)
+	}
+	if gotDec.DecisionSource != "rule" {
+		t.Fatalf("DecisionSource=%q", gotDec.DecisionSource)
+	}
+	if gotDec.RuleID != "allow-echo" {
+		t.Fatalf("RuleID=%q", gotDec.RuleID)
 	}
 }
 
@@ -302,6 +429,171 @@ func TestDecisionDeny(t *testing.T) {
 	_ = json.Unmarshal(getRw.Body.Bytes(), &rec)
 	if rec["status"] != "DENIED" {
 		t.Fatalf("status=%v", rec["status"])
+	}
+}
+
+func TestDecisionPersistsDecisionInSQLite(t *testing.T) {
+	ctx := context.Background()
+
+	cfg := config.Defaults()
+	clk := auth.NewFakeClock(time.Unix(1000, 0).UTC())
+	pair := auth.NewPairing(6, 3*time.Minute, clk)
+	tm := auth.NewTokenManager(clk)
+
+	st, err := store.Open("file::memory:?cache=shared")
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer st.Close()
+	if err := st.Migrate(ctx); err != nil {
+		t.Fatalf("store.Migrate: %v", err)
+	}
+
+	api := New(cfg, WithPairing(pair), WithTokenManager(tm), WithStore(st))
+
+	open := []byte(`{"client_id":"codex-home","pairing_code":"` + pair.Code() + `"}`)
+	rwOpen := httptest.NewRecorder()
+	api.Handler().ServeHTTP(rwOpen, httptest.NewRequest(http.MethodPost, "http://example/v1/session/open", bytes.NewReader(open)))
+	if rwOpen.Code != 200 {
+		t.Fatalf("open status=%d body=%s", rwOpen.Code, rwOpen.Body.String())
+	}
+	var openResp struct {
+		SessionToken string `json:"session_token"`
+	}
+	_ = json.Unmarshal(rwOpen.Body.Bytes(), &openResp)
+
+	createBody := []byte(`{"op":{"type":"cmd.run","payload":{"argv":["/bin/echo","hi"]}}}`)
+	createReq := httptest.NewRequest(http.MethodPost, "http://example/v1/requests", bytes.NewReader(createBody))
+	createReq.Header.Set("Authorization", "Bearer "+openResp.SessionToken)
+	createReq.Header.Set("Content-Type", "application/json")
+	createRw := httptest.NewRecorder()
+	api.Handler().ServeHTTP(createRw, createReq)
+	if createRw.Code != 200 {
+		t.Fatalf("create status=%d body=%s", createRw.Code, createRw.Body.String())
+	}
+	var created struct {
+		RequestID string `json:"request_id"`
+	}
+	_ = json.Unmarshal(createRw.Body.Bytes(), &created)
+
+	decBody := []byte(`{"decision":"ALLOW_ONCE"}`)
+	decReq := httptest.NewRequest(http.MethodPost, "http://example/v1/requests/"+created.RequestID+"/decision", bytes.NewReader(decBody))
+	decReq.Header.Set("Authorization", "Bearer "+openResp.SessionToken)
+	decReq.Header.Set("Content-Type", "application/json")
+	decRw := httptest.NewRecorder()
+	api.Handler().ServeHTTP(decRw, decReq)
+	if decRw.Code != 200 {
+		t.Fatalf("dec status=%d body=%s", decRw.Code, decRw.Body.String())
+	}
+
+	gotDec, err := st.GetDecision(ctx, created.RequestID)
+	if err != nil {
+		t.Fatalf("GetDecision: %v", err)
+	}
+	if gotDec.Decision != "ALLOW_ONCE" {
+		t.Fatalf("decision=%q", gotDec.Decision)
+	}
+
+	gotReq, err := st.GetRequest(ctx, created.RequestID)
+	if err != nil {
+		t.Fatalf("GetRequest: %v", err)
+	}
+	if gotReq.Status != "APPROVED" {
+		t.Fatalf("request status=%q", gotReq.Status)
+	}
+}
+
+type immediateRunner struct{}
+
+func (im immediateRunner) Run(ctx context.Context, s executor.Spec) executor.Result {
+	return executor.Result{
+		Status:       "SUCCEEDED",
+		ExitCode:     0,
+		DurationMs:   1,
+		Stdout:       "hi\n",
+		Stderr:       "",
+		StdoutSHA256: "x",
+		StderrSHA256: "y",
+	}
+}
+
+func TestExecutionPersistsExecutionInSQLite(t *testing.T) {
+	ctx := context.Background()
+
+	cfg := config.Defaults()
+	clk := auth.NewFakeClock(time.Unix(1000, 0).UTC())
+	pair := auth.NewPairing(6, 3*time.Minute, clk)
+	tm := auth.NewTokenManager(clk)
+
+	st, err := store.Open("file::memory:?cache=shared")
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer st.Close()
+	if err := st.Migrate(ctx); err != nil {
+		t.Fatalf("store.Migrate: %v", err)
+	}
+
+	re := rules.NewEngine()
+	re.AddAlways(rules.Rule{ID: "allow-echo", OpType: "cmd.run", Cmd: &rules.CmdRule{ArgvPrefix: []string{"/bin/echo"}}})
+
+	api := New(cfg, WithPairing(pair), WithTokenManager(tm), WithStore(st), WithRulesEngine(re), WithExecutor(immediateRunner{}))
+
+	open := []byte(`{"client_id":"codex-home","pairing_code":"` + pair.Code() + `"}`)
+	rwOpen := httptest.NewRecorder()
+	api.Handler().ServeHTTP(rwOpen, httptest.NewRequest(http.MethodPost, "http://example/v1/session/open", bytes.NewReader(open)))
+	if rwOpen.Code != 200 {
+		t.Fatalf("open status=%d body=%s", rwOpen.Code, rwOpen.Body.String())
+	}
+	var openResp struct {
+		SessionToken string `json:"session_token"`
+	}
+	_ = json.Unmarshal(rwOpen.Body.Bytes(), &openResp)
+
+	createBody := []byte(`{"op":{"type":"cmd.run","payload":{"argv":["/bin/echo","hi"]}}}`)
+	createReq := httptest.NewRequest(http.MethodPost, "http://example/v1/requests", bytes.NewReader(createBody))
+	createReq.Header.Set("Authorization", "Bearer "+openResp.SessionToken)
+	createReq.Header.Set("Content-Type", "application/json")
+	createRw := httptest.NewRecorder()
+	api.Handler().ServeHTTP(createRw, createReq)
+	if createRw.Code != 200 {
+		t.Fatalf("create status=%d body=%s", createRw.Code, createRw.Body.String())
+	}
+	var created struct {
+		RequestID string `json:"request_id"`
+		Status    string `json:"status"`
+	}
+	_ = json.Unmarshal(createRw.Body.Bytes(), &created)
+	if created.Status != "APPROVED" {
+		t.Fatalf("create status=%q", created.Status)
+	}
+
+	// Wait briefly for the async execution to finish and be persisted.
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for {
+		if time.Now().After(deadline) {
+			t.Fatalf("execution not persisted in time")
+		}
+		if _, err := st.GetExecution(ctx, created.RequestID); err == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	ex, err := st.GetExecution(ctx, created.RequestID)
+	if err != nil {
+		t.Fatalf("GetExecution: %v", err)
+	}
+	if ex.Status != "SUCCEEDED" {
+		t.Fatalf("exec status=%q", ex.Status)
+	}
+
+	reqRow, err := st.GetRequest(ctx, created.RequestID)
+	if err != nil {
+		t.Fatalf("GetRequest: %v", err)
+	}
+	if reqRow.Status != "SUCCEEDED" {
+		t.Fatalf("request status=%q", reqRow.Status)
 	}
 }
 

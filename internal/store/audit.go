@@ -98,6 +98,27 @@ func (s *Store) GetRequest(ctx context.Context, requestID string) (Request, erro
 	return r, nil
 }
 
+func (s *Store) UpdateRequestStatus(ctx context.Context, requestID string, status string) error {
+	if requestID == "" {
+		return fmt.Errorf("request ID required")
+	}
+	if status == "" {
+		return fmt.Errorf("status required")
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE requests SET status = ? WHERE request_id = ?`, status, requestID)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 func (s *Store) InsertDecision(ctx context.Context, d Decision) error {
 	if d.RequestID == "" {
 		return fmt.Errorf("request ID required")
@@ -240,4 +261,3 @@ func boolToInt(b bool) int {
 	}
 	return 0
 }
-
