@@ -60,6 +60,8 @@ func (s *Server) PairingCode() string {
 	return s.api.PairingCode()
 }
 
+func (s *Server) API() *httpapi.API { return s.api }
+
 func (s *Server) Run(ctx context.Context, ready chan<- struct{}) error {
 	addr := fmt.Sprintf("%s:%d", s.cfg.ListenAddr, s.cfg.Port)
 	ln, err := net.Listen("tcp", addr)

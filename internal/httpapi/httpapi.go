@@ -79,6 +79,20 @@ type requestRecord struct {
 	Result   *resultRecord   `json:"result,omitempty"`
 
 	RiskFlags []string `json:"risk_flags,omitempty"`
+
+	SessionID string `json:"session_id,omitempty"`
+	ClientID  string `json:"client_id,omitempty"`
+	CreatedAt string `json:"created_at,omitempty"`
+}
+
+// TUIRequest is a summarized view used by the built-in TUI.
+type TUIRequest struct {
+	ID        string
+	Summary   string
+	SessionID string
+	ClientID  string
+	RiskFlags []string
+	CreatedAt string
 }
 
 type decisionRecord struct {
@@ -123,6 +137,39 @@ func New(cfg config.Config, opts ...Option) *API {
 
 func (a *API) PairingCode() string {
 	return a.pairing.Code()
+}
+
+// ListPendingForTUI returns pending requests for display/approval.
+func (a *API) ListPendingForTUI() []TUIRequest {
+	a.reqsMu.Lock()
+	defer a.reqsMu.Unlock()
+	out := make([]TUIRequest, 0, 64)
+	for _, rec := range a.reqs {
+		if rec.Status != "PENDING_APPROVAL" {
+			continue
+		}
+		out = append(out, TUIRequest{
+			ID:        rec.ID,
+			Summary:   summarizeOp(rec),
+			SessionID: rec.SessionID,
+			ClientID:  rec.ClientID,
+			RiskFlags: append([]string(nil), rec.RiskFlags...),
+			CreatedAt: rec.CreatedAt,
+		})
+	}
+	return out
+}
+
+// DecideForTUI applies a decision without HTTP auth (used by in-process TUI).
+func (a *API) DecideForTUI(requestID string, decision string) error {
+	a.reqsMu.Lock()
+	rec, ok := a.reqs[requestID]
+	a.reqsMu.Unlock()
+	if !ok {
+		return errors.New("REQUEST_NOT_FOUND")
+	}
+	claims := auth.Claims{SessionID: rec.SessionID, ClientID: rec.ClientID}
+	return a.decideInternal(requestID, decision, claims)
 }
 
 func (a *API) Handler() http.Handler {
@@ -289,7 +336,15 @@ func (a *API) handleRequests(w http.ResponseWriter, r *http.Request, c auth.Clai
 	}
 
 	id := uuid.NewString()
-	rec := requestRecord{ID: id, Status: "PENDING_APPROVAL", Op: mustJSON(req.Op), RiskFlags: riskFlags(req.Op)}
+	rec := requestRecord{
+		ID:        id,
+		Status:    "PENDING_APPROVAL",
+		Op:        mustJSON(req.Op),
+		RiskFlags: riskFlags(req.Op),
+		SessionID: c.SessionID,
+		ClientID:  c.ClientID,
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	}
 	respStatus := rec.Status
 
 	a.reqsMu.Lock()
@@ -475,36 +530,53 @@ func (a *API) handleDecision(w http.ResponseWriter, r *http.Request, c auth.Clai
 		return
 	}
 
-	req.Decision = strings.TrimSpace(req.Decision)
-	if req.Decision == "" {
-		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "decision is required", requestID)
+	if err := a.decideInternal(requestID, req.Decision, c); err != nil {
+		switch err.Error() {
+		case "REQUEST_NOT_FOUND":
+			writeError(w, http.StatusNotFound, "REQUEST_NOT_FOUND", "request not found", requestID)
+		case "REQUEST_NOT_PENDING":
+			writeError(w, http.StatusConflict, "REQUEST_NOT_PENDING", "request is not pending approval", requestID)
+		case "ALLOW_ALWAYS_NOT_PERMITTED":
+			writeError(w, http.StatusForbidden, "ALLOW_ALWAYS_NOT_PERMITTED", "allow always not permitted for dangerous requests", requestID)
+		case "BAD_REQUEST":
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST", "bad request", requestID)
+		default:
+			writeError(w, http.StatusInternalServerError, "INTERNAL", err.Error(), requestID)
+		}
 		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (a *API) decideInternal(requestID string, decision string, c auth.Claims) error {
+	decision = strings.TrimSpace(decision)
+	if decision == "" {
+		return errors.New("BAD_REQUEST")
 	}
 
 	a.reqsMu.Lock()
 	rec, ok := a.reqs[requestID]
 	if !ok {
 		a.reqsMu.Unlock()
-		writeError(w, http.StatusNotFound, "REQUEST_NOT_FOUND", "request not found", requestID)
-		return
+		return errors.New("REQUEST_NOT_FOUND")
 	}
 	if rec.Status != "PENDING_APPROVAL" {
 		a.reqsMu.Unlock()
-		writeError(w, http.StatusConflict, "REQUEST_NOT_PENDING", "request is not pending approval", requestID)
-		return
+		return errors.New("REQUEST_NOT_PENDING")
 	}
+
 	var op rules.Op
 	_ = json.Unmarshal(rec.Op, &op)
 	dangerous := isDangerous(rec.RiskFlags)
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	dec := &decisionRecord{
-		Decision:       req.Decision,
+		Decision:       decision,
 		DecisionSource: "tui",
 		DecidedAt:      now,
 	}
 
-	switch req.Decision {
+	switch decision {
 	case "DENY":
 		rec.Status = "DENIED"
 		rec.Decision = dec
@@ -522,29 +594,24 @@ func (a *API) handleDecision(w http.ResponseWriter, r *http.Request, c auth.Clai
 				"status":          "DENIED",
 			},
 		})
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-		return
+		return nil
 
 	case "ALLOW_ONCE", "ALLOW_SESSION", "ALLOW_ALWAYS":
-		// Gate allow-always for dangerous requests unless explicitly enabled.
-		if req.Decision == "ALLOW_ALWAYS" && dangerous && !a.cfg.AllowAlwaysForDangerous {
+		if decision == "ALLOW_ALWAYS" && dangerous && !a.cfg.AllowAlwaysForDangerous {
 			a.reqsMu.Unlock()
-			writeError(w, http.StatusForbidden, "ALLOW_ALWAYS_NOT_PERMITTED", "allow always not permitted for dangerous requests", requestID)
-			return
+			return errors.New("ALLOW_ALWAYS_NOT_PERMITTED")
 		}
 
-		// Record approval.
 		rec.Status = "APPROVED"
 		rec.Decision = dec
 		a.reqs[requestID] = rec
 		a.reqsMu.Unlock()
 
-		// Optionally add rule for session/always (exact match by default).
-		if req.Decision == "ALLOW_SESSION" || req.Decision == "ALLOW_ALWAYS" {
+		if decision == "ALLOW_SESSION" || decision == "ALLOW_ALWAYS" {
 			ruleID := uuid.NewString()
 			r, ok := ruleFromOpExact(ruleID, op)
 			if ok {
-				if req.Decision == "ALLOW_SESSION" {
+				if decision == "ALLOW_SESSION" {
 					a.rules.AddSession(c.SessionID, r)
 				} else {
 					a.rules.AddAlways(r)
@@ -558,19 +625,17 @@ func (a *API) handleDecision(w http.ResponseWriter, r *http.Request, c auth.Clai
 			SessionID: c.SessionID,
 			ClientID:  c.ClientID,
 			Data: map[string]any{
-				"decision":        req.Decision,
+				"decision":        decision,
 				"decision_source": "tui",
 				"status":          "APPROVED",
 			},
 		})
 
 		go a.executeApprovedRequest(requestID, c, op)
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-		return
+		return nil
 	default:
 		a.reqsMu.Unlock()
-		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "unknown decision", requestID)
-		return
+		return errors.New("BAD_REQUEST")
 	}
 }
 
@@ -656,6 +721,26 @@ func isDangerous(flags []string) bool {
 		}
 	}
 	return false
+}
+
+func summarizeOp(rec requestRecord) string {
+	var op rules.Op
+	if err := json.Unmarshal(rec.Op, &op); err != nil {
+		return rec.ID + " <invalid op>"
+	}
+	switch op.Type {
+	case "cmd.run":
+		var p struct {
+			Argv []string `json:"argv"`
+		}
+		_ = json.Unmarshal(op.Payload, &p)
+		if len(p.Argv) == 0 {
+			return "cmd.run <empty argv>"
+		}
+		return "cmd.run " + strings.Join(p.Argv, " ")
+	default:
+		return op.Type
+	}
 }
 
 func (a *API) handleEventsWS(w http.ResponseWriter, r *http.Request) {

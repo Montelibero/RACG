@@ -11,6 +11,9 @@ import (
 
 	"github.com/itolstov/racg/internal/config"
 	"github.com/itolstov/racg/internal/server"
+	"github.com/itolstov/racg/internal/tui"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 type ServeCmd struct {
@@ -56,13 +59,27 @@ func (c *ServeCmd) Run(args []string) int {
 		return 1
 	}
 
-	fmt.Fprintf(c.stdout, "pairing_code=%s\n", s.PairingCode())
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	ready := make(chan struct{})
-	if err := s.Run(ctx, ready); err != nil {
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- s.Run(ctx, ready)
+	}()
+
+	<-ready
+	fmt.Fprintf(c.stdout, "listening=http://%s\n", s.Addr())
+	fmt.Fprintf(c.stdout, "pairing_code=%s\n", s.PairingCode())
+
+	// Built-in approvals TUI.
+	ap := tui.NewHTTPAPIApprover(s.API())
+	m := tui.NewModel(ap, s.PairingCode())
+	p := tea.NewProgram(m)
+	_, _ = p.Run()
+
+	stop()
+	if err := <-errCh; err != nil {
 		fmt.Fprintf(c.stderr, "server error: %v\n", err)
 		return 1
 	}
