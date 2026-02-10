@@ -19,6 +19,7 @@ import (
 	"github.com/itolstov/racg/internal/events"
 	"github.com/itolstov/racg/internal/executor"
 	"github.com/itolstov/racg/internal/rules"
+	"github.com/itolstov/racg/internal/store"
 	"github.com/itolstov/racg/internal/version"
 	"nhooyr.io/websocket"
 	"nhooyr.io/websocket/wsjson"
@@ -49,6 +50,10 @@ func WithExecutor(x CmdRunner) Option {
 	return func(a *API) { a.exec = x }
 }
 
+func WithStore(s *store.Store) Option {
+	return func(a *API) { a.st = s }
+}
+
 type CmdRunner interface {
 	Run(ctx context.Context, s executor.Spec) executor.Result
 }
@@ -61,6 +66,7 @@ type API struct {
 	hub     *events.Hub
 	rules   *rules.Engine
 	exec    CmdRunner
+	st      *store.Store
 	sem     chan struct{}
 
 	mu             sync.Mutex
@@ -288,7 +294,14 @@ func (a *API) handleSessionOpen(w http.ResponseWriter, r *http.Request) {
 		a.mu.Unlock()
 	}
 
+	startedAt := time.Now().UTC()
 	sessionID := uuid.NewString()
+	if a.st != nil {
+		if err := a.st.InsertSession(r.Context(), store.Session{ID: sessionID, StartedAt: startedAt}); err != nil {
+			writeError(w, http.StatusInternalServerError, "INTERNAL", err.Error(), "")
+			return
+		}
+	}
 	tok, exp := a.tokens.Issue(sessionID, req.ClientID, 8*time.Hour)
 
 	resp := map[string]any{

@@ -13,6 +13,7 @@ import (
 	"github.com/itolstov/racg/internal/config"
 	"github.com/itolstov/racg/internal/executor"
 	"github.com/itolstov/racg/internal/rules"
+	"github.com/itolstov/racg/internal/store"
 )
 
 func TestInfo(t *testing.T) {
@@ -68,6 +69,48 @@ func TestSessionOpenAndMe(t *testing.T) {
 	api.Handler().ServeHTTP(rw2, req2)
 	if rw2.Code != 200 {
 		t.Fatalf("me status=%d body=%s", rw2.Code, rw2.Body.String())
+	}
+}
+
+func TestSessionOpenPersistsSessionInSQLite(t *testing.T) {
+	cfg := config.Defaults()
+
+	st, err := store.Open("file::memory:?cache=shared")
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer st.Close()
+	if err := st.Migrate(context.Background()); err != nil {
+		t.Fatalf("store.Migrate: %v", err)
+	}
+
+	clk := auth.NewFakeClock(time.Unix(1000, 0).UTC())
+	pair := auth.NewPairing(6, 3*time.Minute, clk)
+	tm := auth.NewTokenManager(clk)
+
+	api := New(cfg, WithPairing(pair), WithTokenManager(tm), WithStore(st))
+
+	body := []byte(`{"client_id":"codex-home","pairing_code":"` + pair.Code() + `"}`)
+	req := httptest.NewRequest(http.MethodPost, "http://example/v1/session/open", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rw := httptest.NewRecorder()
+	api.Handler().ServeHTTP(rw, req)
+	if rw.Code != 200 {
+		t.Fatalf("status=%d body=%s", rw.Code, rw.Body.String())
+	}
+
+	var resp struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := json.Unmarshal(rw.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if resp.SessionID == "" {
+		t.Fatalf("empty session_id")
+	}
+
+	if _, err := st.GetSession(context.Background(), resp.SessionID); err != nil {
+		t.Fatalf("GetSession: %v", err)
 	}
 }
 
