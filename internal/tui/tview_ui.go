@@ -95,16 +95,17 @@ func RunServeUI(ctx context.Context, cfg ServeUIConfig) error {
 			case <-ctx.Done():
 				app.QueueUpdateDraw(func() { app.Stop() })
 				return
-			case e, ok := <-evCh:
-				if !ok {
-					return
+				case e, ok := <-evCh:
+					if !ok {
+						return
+					}
+					app.QueueUpdateDraw(func() {
+						state.onEvent(e)
+						state.maybeAutoSwitchToDashboard(app, pages, len(cfg.API.ListPendingForTUI()))
+					})
 				}
-				app.QueueUpdateDraw(func() {
-					state.onEvent(e)
-				})
 			}
-		}
-	}()
+		}()
 
 	// Safety net: periodic refresh to avoid missing dropped events.
 	tick := time.NewTicker(500 * time.Millisecond)
@@ -115,7 +116,10 @@ func RunServeUI(ctx context.Context, cfg ServeUIConfig) error {
 			case <-ctx.Done():
 				return
 			case <-tick.C:
-				app.QueueUpdateDraw(func() { state.refresh() })
+				app.QueueUpdateDraw(func() {
+					state.refresh()
+					state.maybeAutoSwitchToDashboard(app, pages, len(cfg.API.ListPendingForTUI()))
+				})
 			}
 		}
 	}()
@@ -181,6 +185,14 @@ func (s *uiState) showDashboard(app *tview.Application, pages *tview.Pages) {
 	if app != nil {
 		s.cycleFocusTo(app, s.pendingList)
 	}
+}
+
+func (s *uiState) maybeAutoSwitchToDashboard(app *tview.Application, pages *tview.Pages, pendingCount int) bool {
+	if s.page != "pairing" || pendingCount <= 0 {
+		return false
+	}
+	s.showDashboard(app, pages)
+	return true
 }
 
 func (s *uiState) showRules(app *tview.Application, pages *tview.Pages) {

@@ -7,3 +7,7 @@ func TestVersionNonEmpty(t *testing.T) {
 		t.Fatalf("Version must be non-empty")
 	}
 }
+
+func TestVersionAddressable(t *testing.T) {
+	_ = &Version
+}

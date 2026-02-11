@@ -30,3 +30,14 @@ func TestShowRulesCallsRefresh(t *testing.T) {
 	}
 }
 
+func TestMaybeAutoSwitchToDashboardFromPairing(t *testing.T) {
+	s := newUIState(nil, nil)
+	s.page = "pairing"
+
+	if switched := s.maybeAutoSwitchToDashboard(nil, nil, 1); !switched {
+		t.Fatalf("expected switch=true")
+	}
+	if s.page != "dashboard" {
+		t.Fatalf("page=%q, want dashboard", s.page)
+	}
+}

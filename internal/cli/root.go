@@ -55,5 +55,5 @@ func (r *Root) Run(args []string) int {
 }
 
 func usage() string {
-	return "usage: racg [--version] <command>\n\ncommands:\n  serve\n  rules\n  sessions\n"
+	return "usage: racg [--version] <command>\n\ncommands:\n  serve\n  rules\n  sessions\n\nquick start:\n  sudo racg serve -listen-addr 127.0.0.1 -port 8777\n"
 }
