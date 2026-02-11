@@ -37,22 +37,7 @@ Options for installer:
 - `RACG_VERSION` (default: `latest`)
 - `RACG_PREFIX` (default: `/usr/local/bin`)
 
-## Releases
-
-GitHub Actions builds release binaries for Linux on tag push (`v*`).
-
-Create release:
-
-```bash
-git tag v0.1.1
-git push origin v0.1.1
-```
-
-Artifacts in GitHub Release:
-
-- `racg_<version>_linux_amd64.tar.gz`
-- `racg_<version>_linux_arm64.tar.gz`
-- `checksums.txt`
+Release process for maintainers is documented in `docs/developer-run.md`.
 
 ## API quick check
 
@@ -60,3 +45,20 @@ Artifacts in GitHub Release:
 curl -sS http://127.0.0.1:8777/v1/info
 curl -sS http://127.0.0.1:8777/openapi.json
 ```
+
+## Safe vs Dangerous (`ALLOW_ALWAYS`)
+
+`ALLOW_ALWAYS` разрешен для запросов без dangerous-флагов.
+
+Обычно safe (можно сохранять как always):
+- `fs.read` (например чтение `~/.bashrc`, лучше указывать абсолютный путь)
+- `cmd.run` с безопасными командами чтения/диагностики (`cat`, `ls`, `uname`, `date` и т.п.)
+
+Dangerous (по умолчанию `ALLOW_ALWAYS` запрещен):
+- `WRITE_ETC` (`fs.patch_unified`/`conf.set_kv` по `/etc/...`)
+- `APT_REMOVE` (`apt/apt-get remove|purge`)
+- `FIREWALL` (`iptables`, `nft`, `ufw`)
+- `DESTRUCTIVE_FS` (`rm`, `/bin/rm`)
+- `SERVICE_SSH_RISK` (`systemctl stop|disable ...ssh...`)
+
+Примечание: `ALLOW_ALWAYS` для dangerous можно включить флагом `allow_always_for_dangerous=true` в конфиге.
