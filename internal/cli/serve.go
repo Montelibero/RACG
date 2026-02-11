@@ -75,6 +75,7 @@ func (c *ServeCmd) Run(args []string) int {
 	_ = tui.RunServeUI(ctx, tui.ServeUIConfig{
 		Version:  version.Version,
 		Listen:   s.Addr(),
+		DBPath:   cfg.DBPath,
 		API:      s.API(),
 		Store:    s.Store(),
 		ExitFunc: stop,

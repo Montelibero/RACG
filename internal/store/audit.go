@@ -9,13 +9,13 @@ import (
 )
 
 type Request struct {
-	ID           string
-	SessionID    string
-	ClientID     string
-	Status       string
-	OpJSON       string
+	ID            string
+	SessionID     string
+	ClientID      string
+	Status        string
+	OpJSON        string
 	RiskFlagsJSON string
-	CreatedAt    time.Time
+	CreatedAt     time.Time
 }
 
 type Decision struct {
@@ -27,18 +27,33 @@ type Decision struct {
 }
 
 type Execution struct {
-	RequestID        string
-	StartedAt        time.Time
-	FinishedAt       time.Time
-	DurationMs       int64
-	ExitCode         int
-	Status           string
-	Stdout           string
-	Stderr           string
-	StdoutTruncated  bool
-	StderrTruncated  bool
-	StdoutSHA256     string
-	StderrSHA256     string
+	RequestID       string
+	StartedAt       time.Time
+	FinishedAt      time.Time
+	DurationMs      int64
+	ExitCode        int
+	Status          string
+	Stdout          string
+	Stderr          string
+	StdoutTruncated bool
+	StderrTruncated bool
+	StdoutSHA256    string
+	StderrSHA256    string
+}
+
+type SessionHistoryItem struct {
+	RequestID       string
+	ClientID        string
+	Status          string
+	OpJSON          string
+	RiskFlagsJSON   string
+	CreatedAt       time.Time
+	Decision        *string
+	DecisionSource  *string
+	DecidedAt       *time.Time
+	ExecutionStatus *string
+	ExitCode        *int
+	DurationMs      *int64
 }
 
 func (s *Store) InsertRequest(ctx context.Context, r Request) error {
@@ -305,6 +320,111 @@ func (s *Store) GetExecution(ctx context.Context, requestID string) (Execution, 
 	e.StdoutTruncated = stdoutTrunc != 0
 	e.StderrTruncated = stderrTrunc != 0
 	return e, nil
+}
+
+func (s *Store) ListSessionHistoryItems(ctx context.Context, sessionID string, limit int) ([]SessionHistoryItem, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return nil, fmt.Errorf("session ID required")
+	}
+	if limit <= 0 {
+		limit = 200
+	}
+
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT
+		   r.request_id,
+		   r.client_id,
+		   r.status,
+		   r.op_json,
+		   r.risk_flags_json,
+		   r.created_at,
+		   d.decision,
+		   d.decision_source,
+		   d.decided_at,
+		   e.status,
+		   e.exit_code,
+		   e.duration_ms
+		 FROM requests r
+		 LEFT JOIN decisions d ON d.request_id = r.request_id
+		 LEFT JOIN executions e ON e.request_id = r.request_id
+		 WHERE r.session_id = ?
+		 ORDER BY r.created_at ASC
+		 LIMIT ?`,
+		sessionID, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []SessionHistoryItem
+	for rows.Next() {
+		var item SessionHistoryItem
+		var created string
+		var decision sql.NullString
+		var decisionSource sql.NullString
+		var decidedAt sql.NullString
+		var execStatus sql.NullString
+		var exitCode sql.NullInt64
+		var durationMs sql.NullInt64
+
+		if err := rows.Scan(
+			&item.RequestID,
+			&item.ClientID,
+			&item.Status,
+			&item.OpJSON,
+			&item.RiskFlagsJSON,
+			&created,
+			&decision,
+			&decisionSource,
+			&decidedAt,
+			&execStatus,
+			&exitCode,
+			&durationMs,
+		); err != nil {
+			return nil, err
+		}
+
+		createdAt, err := time.Parse(time.RFC3339Nano, created)
+		if err != nil {
+			return nil, err
+		}
+		item.CreatedAt = createdAt
+
+		if decision.Valid {
+			v := decision.String
+			item.Decision = &v
+		}
+		if decisionSource.Valid {
+			v := decisionSource.String
+			item.DecisionSource = &v
+		}
+		if decidedAt.Valid {
+			tm, err := time.Parse(time.RFC3339Nano, decidedAt.String)
+			if err != nil {
+				return nil, err
+			}
+			item.DecidedAt = &tm
+		}
+		if execStatus.Valid {
+			v := execStatus.String
+			item.ExecutionStatus = &v
+		}
+		if exitCode.Valid {
+			v := int(exitCode.Int64)
+			item.ExitCode = &v
+		}
+		if durationMs.Valid {
+			v := durationMs.Int64
+			item.DurationMs = &v
+		}
+
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func boolToInt(b bool) int {

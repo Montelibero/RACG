@@ -2,22 +2,26 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
 	"github.com/itolstov/racg/internal/events"
 	"github.com/itolstov/racg/internal/httpapi"
+	"github.com/itolstov/racg/internal/rules"
 	"github.com/itolstov/racg/internal/store"
 )
 
 type ServeUIConfig struct {
 	Version  string
 	Listen   string
+	DBPath   string
 	API      *httpapi.API
 	Store    *store.Store
 	ExitFunc func()
@@ -48,6 +52,10 @@ func RunServeUI(ctx context.Context, cfg ServeUIConfig) error {
 	pages.AddPage("history", historyPage, true, false)
 	pages.AddPage("help", helpPage, true, false)
 
+	// Initial visible page is pairing; dashboard builder sets focus/defaults but
+	// should not affect current page state used by auto-switch logic.
+	state.setCurrentPage("pairing")
+
 	app.SetRoot(pages, true)
 
 	app.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
@@ -68,7 +76,7 @@ func RunServeUI(ctx context.Context, cfg ServeUIConfig) error {
 			state.back(app, pages)
 			return nil
 		}
-		switch ev.Rune() {
+		switch hotkeyRune(ev.Rune()) {
 		case 'q':
 			cfg.ExitFunc()
 			app.Stop()
@@ -95,17 +103,17 @@ func RunServeUI(ctx context.Context, cfg ServeUIConfig) error {
 			case <-ctx.Done():
 				app.QueueUpdateDraw(func() { app.Stop() })
 				return
-				case e, ok := <-evCh:
-					if !ok {
-						return
-					}
-					app.QueueUpdateDraw(func() {
-						state.onEvent(e)
-						state.maybeAutoSwitchToDashboard(app, pages, len(cfg.API.ListPendingForTUI()))
-					})
+			case e, ok := <-evCh:
+				if !ok {
+					return
 				}
+				app.QueueUpdateDraw(func() {
+					state.onEvent(e)
+					state.maybeAutoSwitchToDashboard(app, pages, len(cfg.API.ListPendingForTUI()))
+				})
 			}
-		}()
+		}
+	}()
 
 	// Safety net: periodic refresh to avoid missing dropped events.
 	tick := time.NewTicker(500 * time.Millisecond)
@@ -176,10 +184,78 @@ func newUIState(api *httpapi.API, st *store.Store) *uiState {
 
 func (s *uiState) setCurrentPage(p string) { s.page = p }
 
-func (s *uiState) showDashboard(app *tview.Application, pages *tview.Pages) {
-	if pages != nil {
-		pages.ShowPage("dashboard")
+func hotkeyRune(r rune) rune {
+	r = unicode.ToLower(r)
+	switch r {
+	case 'й':
+		return 'q'
+	case 'ц':
+		return 'w'
+	case 'у':
+		return 'e'
+	case 'к':
+		return 'r'
+	case 'е':
+		return 't'
+	case 'н':
+		return 'y'
+	case 'г':
+		return 'u'
+	case 'ш':
+		return 'i'
+	case 'щ':
+		return 'o'
+	case 'з':
+		return 'p'
+	case 'ф':
+		return 'a'
+	case 'ы':
+		return 's'
+	case 'в':
+		return 'd'
+	case 'а':
+		return 'f'
+	case 'п':
+		return 'g'
+	case 'р':
+		return 'h'
+	case 'о':
+		return 'j'
+	case 'л':
+		return 'k'
+	case 'д':
+		return 'l'
+	case 'я':
+		return 'z'
+	case 'ч':
+		return 'x'
+	case 'с':
+		return 'c'
+	case 'м':
+		return 'v'
+	case 'и':
+		return 'b'
+	case 'т':
+		return 'n'
+	case 'ь':
+		return 'm'
+	default:
+		return r
 	}
+}
+
+func (s *uiState) switchMainPage(pages *tview.Pages, name string) {
+	if pages == nil {
+		return
+	}
+	for _, p := range []string{"pairing", "dashboard", "rules", "history"} {
+		pages.HidePage(p)
+	}
+	pages.ShowPage(name)
+}
+
+func (s *uiState) showDashboard(app *tview.Application, pages *tview.Pages) {
+	s.switchMainPage(pages, "dashboard")
 	s.page = "dashboard"
 	s.refresh()
 	if app != nil {
@@ -196,9 +272,7 @@ func (s *uiState) maybeAutoSwitchToDashboard(app *tview.Application, pages *tvie
 }
 
 func (s *uiState) showRules(app *tview.Application, pages *tview.Pages) {
-	if pages != nil {
-		pages.ShowPage("rules")
-	}
+	s.switchMainPage(pages, "rules")
 	s.page = "rules"
 	if s.rulesRefresh != nil {
 		s.rulesRefresh()
@@ -206,9 +280,7 @@ func (s *uiState) showRules(app *tview.Application, pages *tview.Pages) {
 }
 
 func (s *uiState) showHistory(app *tview.Application, pages *tview.Pages) {
-	if pages != nil {
-		pages.ShowPage("history")
-	}
+	s.switchMainPage(pages, "history")
 	s.page = "history"
 	if s.historyRefresh != nil {
 		s.historyRefresh()
@@ -217,9 +289,7 @@ func (s *uiState) showHistory(app *tview.Application, pages *tview.Pages) {
 
 func (s *uiState) back(app *tview.Application, pages *tview.Pages) {
 	if s.page == "dashboard" {
-		if pages != nil {
-			pages.ShowPage("pairing")
-		}
+		s.switchMainPage(pages, "pairing")
 		s.page = "pairing"
 		return
 	}
@@ -543,10 +613,7 @@ func buildPairingPage(ctx context.Context, app *tview.Application, pages *tview.
 	meta := tview.NewTextView().SetDynamicColors(false).SetTextAlign(tview.AlignLeft)
 
 	goDashboard := func() {
-		pages.ShowPage("dashboard")
-		s.setCurrentPage("dashboard")
-		s.refresh()
-		app.SetFocus(s.pendingList)
+		s.showDashboard(app, pages)
 	}
 	btnDash := tview.NewButton("Go to Dashboard").SetSelectedFunc(goDashboard)
 
@@ -602,7 +669,7 @@ func buildPairingPage(ctx context.Context, app *tview.Application, pages *tview.
 			goDashboard()
 			return nil
 		}
-		switch ev.Rune() {
+		switch hotkeyRune(ev.Rune()) {
 		case 'r':
 			regen()
 			return nil
@@ -697,15 +764,17 @@ func buildDashboardPage(app *tview.Application, pages *tview.Pages, s *uiState, 
 			app.SetFocus(s.filter)
 			return nil
 		}
-		switch ev.Rune() {
+		switch hotkeyRune(ev.Rune()) {
 		case 'a':
+			// Shift+A (including RU layout "Ф") keeps "allow always" shortcut.
+			if ev.Rune() == 'A' || ev.Rune() == 'Ф' {
+				s.doDecision("ALLOW_ALWAYS")
+				return nil
+			}
 			s.doDecision("ALLOW_ONCE")
 			return nil
 		case 's':
 			s.doDecision("ALLOW_SESSION")
-			return nil
-		case 'A':
-			s.doDecision("ALLOW_ALWAYS")
 			return nil
 		case 'd':
 			s.doDecision("DENY")
@@ -816,7 +885,7 @@ func buildJobPage(app *tview.Application, pages *tview.Pages, s *uiState, cfg Se
 				return nil
 			}
 		}
-		switch ev.Rune() {
+		switch hotkeyRune(ev.Rune()) {
 		case 'f':
 			toggleFollow()
 			return nil
@@ -851,23 +920,57 @@ func buildHelpModal(pages *tview.Pages, s *uiState) tview.Primitive {
 }
 
 func buildRulesPage(app *tview.Application, pages *tview.Pages, s *uiState, cfg ServeUIConfig) tview.Primitive {
-	table := tview.NewTable().SetSelectable(true, false)
+	list := tview.NewList().ShowSecondaryText(false)
 	details := tview.NewTextView().SetScrollable(true)
-	var selectedRuleID string
-	var selectedRuleEnabled bool
+	list.SetMainTextColor(tcell.ColorWhite)
+	details.SetTextColor(tcell.ColorWhite)
+	list.SetBorder(true).SetTitle("Rules")
+	details.SetBorder(true).SetTitle("Details")
 
-	refresh := func() {
-		table.Clear()
-		table.SetCell(0, 0, tview.NewTableCell("enabled"))
-		table.SetCell(0, 1, tview.NewTableCell("id"))
-		table.SetCell(0, 2, tview.NewTableCell("op"))
-		table.SetCell(0, 3, tview.NewTableCell("scope"))
-		if cfg.Store == nil {
+	var rows []store.RuleRow
+	selectedIndex := -1
+
+	refreshDetails := func() {
+		if selectedIndex < 0 || selectedIndex >= len(rows) {
+			if len(rows) == 0 {
+				details.SetText("rules: 0")
+			} else {
+				details.SetText(fmt.Sprintf("rules: %d\nselect a rule", len(rows)))
+			}
 			return
 		}
-		rows, err := cfg.Store.ListRules(context.Background(), 1000)
+		r := rows[selectedIndex]
+		en := "0"
+		if r.Enabled {
+			en = "1"
+		}
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("rule_id=%s\n", r.RuleID))
+		b.WriteString(fmt.Sprintf("enabled=%s\n", en))
+		b.WriteString(fmt.Sprintf("op=%s\n", r.OpType))
+		b.WriteString(fmt.Sprintf("scope=%s\n", ruleScopeLabel(r)))
+		b.WriteString(fmt.Sprintf("source=%s\n", r.Source))
+		b.WriteString(fmt.Sprintf("created_at=%s\n", r.CreatedAt.UTC().Format(time.RFC3339)))
+		details.SetText(b.String())
+	}
+
+	refresh := func() {
+		list.Clear()
+		rows = nil
+		selectedIndex = -1
+		if cfg.Store == nil {
+			details.SetText("store is not configured")
+			return
+		}
+		dbRows, err := cfg.Store.ListRules(context.Background(), 1000)
 		if err != nil {
 			details.SetText("error: " + err.Error())
+			return
+		}
+		rows = dbRows
+		if len(rows) == 0 {
+			details.SetText("rules: 0")
+			list.AddItem("No rules", "", 0, nil)
 			return
 		}
 		for i, r := range rows {
@@ -875,53 +978,47 @@ func buildRulesPage(app *tview.Application, pages *tview.Pages, s *uiState, cfg 
 			if r.Enabled {
 				en = "1"
 			}
-			scope := ""
-			if r.PathExact != nil {
-				scope = "path=" + *r.PathExact
+			title := fmt.Sprintf("[%s] %s  %s", en, r.OpType, ruleScopeLabel(r))
+			list.AddItem(title, "", 0, nil)
+			if i == 0 {
+				selectedIndex = 0
 			}
-			table.SetCell(i+1, 0, tview.NewTableCell(en))
-			table.SetCell(i+1, 1, tview.NewTableCell(r.RuleID))
-			table.SetCell(i+1, 2, tview.NewTableCell(r.OpType))
-			table.SetCell(i+1, 3, tview.NewTableCell(scope))
 		}
+		refreshDetails()
 	}
 	refresh()
 	s.rulesRefresh = refresh
 
-	table.SetSelectedFunc(func(row, _ int) {
-		if row <= 0 {
-			return
-		}
-		id := table.GetCell(row, 1).Text
-		selectedRuleID = id
-		selectedRuleEnabled = table.GetCell(row, 0).Text == "1"
-		details.SetText(fmt.Sprintf("rule_id=%s\nenabled=%v\n", id, selectedRuleEnabled))
+	list.SetChangedFunc(func(index int, _ string, _ string, _ rune) {
+		selectedIndex = index
+		refreshDetails()
 	})
 
 	btnToggle := tview.NewButton("Enable/Disable").SetSelectedFunc(func() {
-		if cfg.Store == nil || selectedRuleID == "" {
+		if cfg.Store == nil || selectedIndex < 0 || selectedIndex >= len(rows) {
 			return
 		}
-		if selectedRuleEnabled {
-			_ = cfg.Store.DisableRule(context.Background(), selectedRuleID, time.Now().UTC())
+		r := rows[selectedIndex]
+		if r.Enabled {
+			_ = cfg.Store.DisableRule(context.Background(), r.RuleID, time.Now().UTC())
 		} else {
-			_ = cfg.Store.EnableRule(context.Background(), selectedRuleID)
+			_ = cfg.Store.EnableRule(context.Background(), r.RuleID)
 		}
 		refresh()
 	})
 
 	btnDelete := tview.NewButton("Delete").SetSelectedFunc(func() {
-		if cfg.Store == nil || selectedRuleID == "" {
+		if cfg.Store == nil || selectedIndex < 0 || selectedIndex >= len(rows) {
 			return
 		}
+		ruleID := rows[selectedIndex].RuleID
 		m := tview.NewModal().
-			SetText("Delete rule " + selectedRuleID + "?").
+			SetText("Delete rule " + ruleID + "?").
 			AddButtons([]string{"Cancel", "Delete"}).
 			SetDoneFunc(func(ix int, _ string) {
 				pages.RemovePage("confirm_delete_rule")
 				if ix == 1 {
-					_ = cfg.Store.DeleteRule(context.Background(), selectedRuleID)
-					selectedRuleID = ""
+					_ = cfg.Store.DeleteRule(context.Background(), ruleID)
 					refresh()
 				}
 			})
@@ -935,8 +1032,8 @@ func buildRulesPage(app *tview.Application, pages *tview.Pages, s *uiState, cfg 
 
 	root := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(tview.NewFlex().SetDirection(tview.FlexColumn).
-			AddItem(table.SetBorder(true).SetTitle("Rules"), 0, 2, true).
-			AddItem(details.SetBorder(true).SetTitle("Details"), 0, 3, false), 0, 1, true).
+			AddItem(list, 0, 2, true).
+			AddItem(details, 0, 3, false), 0, 1, true).
 		AddItem(tview.NewFlex().SetDirection(tview.FlexColumn).
 			AddItem(btnToggle, 0, 1, false).
 			AddItem(btnDelete, 0, 1, false).
@@ -952,29 +1049,75 @@ func buildRulesPage(app *tview.Application, pages *tview.Pages, s *uiState, cfg 
 	return root
 }
 
+func ruleScopeLabel(r store.RuleRow) string {
+	if r.PathExact != nil && *r.PathExact != "" {
+		return "path=" + *r.PathExact
+	}
+	if r.PathPrefix != nil && *r.PathPrefix != "" {
+		return "path_prefix=" + *r.PathPrefix
+	}
+	if r.PathGlob != nil && *r.PathGlob != "" {
+		return "path_glob=" + *r.PathGlob
+	}
+	if r.CmdArgvJSON != nil && *r.CmdArgvJSON != "" {
+		return "argv=" + *r.CmdArgvJSON
+	}
+	return "-"
+}
+
 func buildHistoryPage(app *tview.Application, pages *tview.Pages, s *uiState, cfg ServeUIConfig) tview.Primitive {
-	table := tview.NewTable().SetSelectable(true, false)
-	details := tview.NewTextView().SetScrollable(true)
+	left := tview.NewList().ShowSecondaryText(false)
+	details := tview.NewTextView().SetDynamicColors(false).SetScrollable(true)
+	left.SetMainTextColor(tcell.ColorWhite)
+	details.SetTextColor(tcell.ColorWhite)
+	left.SetBorder(true).SetTitle("Sessions")
+	details.SetBorder(true).SetTitle("Details")
+
+	var sessions []store.Session
+
+	showSession := func(index int) {
+		if index < 0 || index >= len(sessions) {
+			details.SetText("No session selected.")
+			return
+		}
+		sess := sessions[index]
+		details.SetText(renderSessionHistoryText(cfg.Store, sess))
+	}
 
 	refresh := func() {
-		table.Clear()
-		table.SetCell(0, 0, tview.NewTableCell("session_id"))
-		table.SetCell(0, 1, tview.NewTableCell("started_at"))
 		if cfg.Store == nil {
+			left.Clear()
+			left.AddItem("No sessions found", "", 0, nil)
+			details.SetText("History is unavailable: store is not configured.")
 			return
 		}
 		ss, err := cfg.Store.ListSessions(context.Background(), 100)
 		if err != nil {
-			details.SetText("error: " + err.Error())
+			left.Clear()
+			left.AddItem("No sessions found", "", 0, nil)
+			details.SetText("History load error: " + err.Error())
 			return
 		}
+		sessions = ss
+		left.Clear()
+		if len(ss) == 0 {
+			left.AddItem("No sessions found", "", 0, nil)
+			details.SetText("No history yet.")
+			return
+		}
+
 		for i, sess := range ss {
-			table.SetCell(i+1, 0, tview.NewTableCell(sess.ID))
-			table.SetCell(i+1, 1, tview.NewTableCell(sess.StartedAt.UTC().Format(time.RFC3339)))
+			left.AddItem(historySessionLabel(sess), "", 0, nil)
+			if i == 0 {
+				showSession(0)
+			}
 		}
 	}
 	refresh()
 	s.historyRefresh = refresh
+	left.SetChangedFunc(func(index int, _ string, _ string, _ rune) {
+		showSession(index)
+	})
 
 	back := func() {
 		s.showDashboard(app, pages)
@@ -983,8 +1126,8 @@ func buildHistoryPage(app *tview.Application, pages *tview.Pages, s *uiState, cf
 
 	root := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(tview.NewFlex().SetDirection(tview.FlexColumn).
-			AddItem(table.SetBorder(true).SetTitle("Sessions"), 0, 2, true).
-			AddItem(details.SetBorder(true).SetTitle("Details"), 0, 3, false), 0, 1, true).
+			AddItem(left, 0, 2, true).
+			AddItem(details, 0, 3, false), 0, 1, true).
 		AddItem(btnBack, 1, 0, true)
 
 	root.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
@@ -995,6 +1138,113 @@ func buildHistoryPage(app *tview.Application, pages *tview.Pages, s *uiState, cf
 		return ev
 	})
 	return root
+}
+
+func renderSessionHistoryText(st *store.Store, sess store.Session) string {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("session_id: %s\n", sess.ID))
+	b.WriteString(fmt.Sprintf("started_at: %s\n", sess.StartedAt.UTC().Format(time.RFC3339)))
+	if sess.EndedAt != nil {
+		b.WriteString(fmt.Sprintf("ended_at: %s\n", sess.EndedAt.UTC().Format(time.RFC3339)))
+	}
+
+	if st == nil {
+		b.WriteString("\nHistory is unavailable: store is not configured.")
+		return b.String()
+	}
+	items, err := st.ListSessionHistoryItems(context.Background(), sess.ID, 200)
+	if err != nil {
+		b.WriteString("\n\nhistory_error: " + err.Error())
+		return b.String()
+	}
+	if len(items) == 0 {
+		b.WriteString("\n\noperations: 0")
+		return b.String()
+	}
+
+	b.WriteString(fmt.Sprintf("\n\noperations: %d\n", len(items)))
+	for idx, item := range items {
+		b.WriteString(fmt.Sprintf("%d) %s  %s\n", idx+1, item.CreatedAt.UTC().Format(time.RFC3339), historyOpSummary(item.OpJSON)))
+		b.WriteString(fmt.Sprintf("   client: %s  request: %s\n", item.ClientID, item.RequestID))
+		if item.Decision != nil {
+			b.WriteString(fmt.Sprintf("   decision: %s", *item.Decision))
+			if item.DecisionSource != nil && *item.DecisionSource != "" {
+				b.WriteString(fmt.Sprintf(" (%s)", *item.DecisionSource))
+			}
+			b.WriteByte('\n')
+		} else {
+			b.WriteString("   decision: -\n")
+		}
+		if item.ExecutionStatus != nil {
+			b.WriteString(fmt.Sprintf("   result: %s", *item.ExecutionStatus))
+			if item.ExitCode != nil {
+				b.WriteString(fmt.Sprintf(" exit=%d", *item.ExitCode))
+			}
+			if item.DurationMs != nil {
+				b.WriteString(fmt.Sprintf(" duration_ms=%d", *item.DurationMs))
+			}
+			b.WriteByte('\n')
+		} else {
+			b.WriteString(fmt.Sprintf("   result: %s\n", item.Status))
+		}
+		b.WriteByte('\n')
+	}
+
+	return strings.TrimSpace(b.String())
+}
+
+func historySessionLabel(sess store.Session) string {
+	return fmt.Sprintf("%s  %s", sess.ID, sess.StartedAt.UTC().Format(time.RFC3339))
+}
+
+func historyOpSummary(opJSON string) string {
+	var op rules.Op
+	if err := json.Unmarshal([]byte(opJSON), &op); err != nil {
+		return "<invalid op>"
+	}
+	switch op.Type {
+	case "cmd.run":
+		var p struct {
+			Argv []string `json:"argv"`
+		}
+		_ = json.Unmarshal(op.Payload, &p)
+		if len(p.Argv) == 0 {
+			return "cmd.run <empty argv>"
+		}
+		return "cmd.run " + strings.Join(p.Argv, " ")
+	case "fs.read":
+		var p struct {
+			Path string `json:"path"`
+		}
+		_ = json.Unmarshal(op.Payload, &p)
+		if p.Path == "" {
+			return "fs.read"
+		}
+		return "fs.read " + p.Path
+	case "fs.patch_unified":
+		var p struct {
+			Path string `json:"path"`
+		}
+		_ = json.Unmarshal(op.Payload, &p)
+		if p.Path == "" {
+			return "fs.patch_unified"
+		}
+		return "fs.patch_unified " + p.Path
+	case "conf.set_kv":
+		var p struct {
+			Key string `json:"key"`
+		}
+		_ = json.Unmarshal(op.Payload, &p)
+		if p.Key == "" {
+			return "conf.set_kv"
+		}
+		return "conf.set_kv " + p.Key
+	default:
+		if strings.TrimSpace(op.Type) == "" {
+			return "<unknown op>"
+		}
+		return op.Type
+	}
 }
 
 func trimTime(ts string) string {
