@@ -531,6 +531,8 @@ func (s *uiState) refreshStatus() {
 func (s *uiState) refreshPending() {
 	filter := strings.TrimSpace(s.filter.GetText())
 	items := s.api.ListPendingForTUI()
+	prevSelectedID := s.selectedPending
+	prevIndex := s.pendingList.GetCurrentItem()
 
 	s.pendingList.Clear()
 	s.pendingIDs = s.pendingIDs[:0]
@@ -553,9 +555,31 @@ func (s *uiState) refreshPending() {
 		s.details.SetText("")
 		return
 	}
-	if s.selectedPending == "" {
-		s.pendingList.SetCurrentItem(0)
+	idx := pendingSelectionIndex(s.pendingIDs, prevSelectedID, prevIndex)
+	if idx < 0 {
+		s.selectedPending = ""
+		s.details.SetText("")
+		return
 	}
+	s.selectedPending = s.pendingIDs[idx]
+	s.pendingList.SetCurrentItem(idx)
+}
+
+func pendingSelectionIndex(ids []string, prevSelectedID string, prevIndex int) int {
+	if len(ids) == 0 {
+		return -1
+	}
+	if prevSelectedID != "" {
+		for i, id := range ids {
+			if id == prevSelectedID {
+				return i
+			}
+		}
+	}
+	if prevIndex >= 0 && prevIndex < len(ids) {
+		return prevIndex
+	}
+	return 0
 }
 
 func (s *uiState) refreshDetails(requestID string) {
