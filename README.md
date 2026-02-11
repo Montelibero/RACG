@@ -14,8 +14,10 @@ RACG is a local Approval Gateway for privileged operations. A client sends reque
 ## Local run
 
 ```bash
-GOCACHE=/tmp/gocache GOPATH=/tmp/gopath GOMODCACHE=/tmp/gomodcache GOTOOLCHAIN=local go run ./cmd/racg serve -listen-addr 127.0.0.1 -port 8777
+racg serve -listen-addr 127.0.0.1 -port 8777
 ```
+
+For development-specific run settings, see `docs/developer-run.md`.
 
 ## Install on server (one line)
 
