@@ -500,7 +500,7 @@ func TestDecisionPersistsDecisionInSQLite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRequest: %v", err)
 	}
-	if gotReq.Status != "APPROVED" {
+	if gotReq.Status != "APPROVED" && gotReq.Status != "RUNNING" && gotReq.Status != "SUCCEEDED" && gotReq.Status != "FAILED" && gotReq.Status != "TIMED_OUT" && gotReq.Status != "KILLED" {
 		t.Fatalf("request status=%q", gotReq.Status)
 	}
 }

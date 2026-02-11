@@ -12,8 +12,7 @@ import (
 	"github.com/itolstov/racg/internal/config"
 	"github.com/itolstov/racg/internal/server"
 	"github.com/itolstov/racg/internal/tui"
-
-	tea "github.com/charmbracelet/bubbletea"
+	"github.com/itolstov/racg/internal/version"
 )
 
 type ServeCmd struct {
@@ -72,11 +71,14 @@ func (c *ServeCmd) Run(args []string) int {
 	fmt.Fprintf(c.stdout, "listening=http://%s\n", s.Addr())
 	fmt.Fprintf(c.stdout, "pairing_code=%s\n", s.PairingCode())
 
-	// Built-in approvals TUI.
-	ap := tui.NewHTTPAPIApprover(s.API())
-	m := tui.NewModel(ap, s.PairingCode())
-	p := tea.NewProgram(m)
-	_, _ = p.Run()
+	// Built-in TUI (tview): pairing page + dashboard + jobs.
+	_ = tui.RunServeUI(ctx, tui.ServeUIConfig{
+		Version:  version.Version,
+		Listen:   s.Addr(),
+		API:      s.API(),
+		Store:    s.Store(),
+		ExitFunc: stop,
+	})
 
 	stop()
 	if err := <-errCh; err != nil {

@@ -35,6 +35,27 @@ func TestPairingExpiry(t *testing.T) {
 	}
 }
 
+func TestPairingRegenerate(t *testing.T) {
+	clk := NewFakeClock(time.Unix(1000, 0).UTC())
+	p := NewPairing(6, 2*time.Minute, clk)
+
+	code1 := p.Code()
+	p.Regenerate()
+	code2 := p.Code()
+	if code2 == code1 {
+		t.Fatalf("expected new code")
+	}
+
+	// New code should be consumable.
+	if err := p.Consume(code2); err != nil {
+		t.Fatalf("consume new: %v", err)
+	}
+	// Old code should no longer be valid.
+	if err := p.Consume(code1); err != ErrPairingCodeInvalid {
+		t.Fatalf("expected old invalid, got %v", err)
+	}
+}
+
 func TestTokenIssueVerifyExpire(t *testing.T) {
 	clk := NewFakeClock(time.Unix(1000, 0).UTC())
 	m := NewTokenManager(clk)

@@ -75,3 +75,25 @@ func TestOutputTruncation(t *testing.T) {
 		t.Fatalf("Status=%q", res.Status)
 	}
 }
+
+func TestStreamCallbacks(t *testing.T) {
+	if _, err := exec.LookPath("/bin/echo"); err != nil {
+		t.Skip("/bin/echo not found")
+	}
+
+	var gotStdout string
+	ex := New(Options{MaxOutputBytes: 1024, KillGrace: 50 * time.Millisecond})
+	res := ex.Run(context.Background(), Spec{
+		Argv:    []string{"/bin/echo", "hi"},
+		Timeout: 2 * time.Second,
+		OnStdout: func(b []byte) {
+			gotStdout += string(b)
+		},
+	})
+	if res.Status != "SUCCEEDED" {
+		t.Fatalf("Status=%q", res.Status)
+	}
+	if gotStdout == "" {
+		t.Fatalf("expected stdout callback")
+	}
+}

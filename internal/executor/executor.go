@@ -25,6 +25,10 @@ type Spec struct {
 	Argv    []string
 	Cwd     string
 	Timeout time.Duration
+
+	// Optional streaming callbacks (used by TUI for live output).
+	OnStdout func([]byte)
+	OnStderr func([]byte)
 }
 
 type Result struct {
@@ -101,11 +105,11 @@ func (e *Executor) Run(ctx context.Context, s Spec) Result {
 	errCh := make(chan capRes, 1)
 
 	go func() {
-		txt, h, trunc := captureLimited(stdoutPipe, e.opts.MaxOutputBytes)
+		txt, h, trunc := captureLimited(stdoutPipe, e.opts.MaxOutputBytes, s.OnStdout)
 		outCh <- capRes{text: txt, hashHex: h, truncated: trunc}
 	}()
 	go func() {
-		txt, h, trunc := captureLimited(stderrPipe, e.opts.MaxOutputBytes)
+		txt, h, trunc := captureLimited(stderrPipe, e.opts.MaxOutputBytes, s.OnStderr)
 		errCh <- capRes{text: txt, hashHex: h, truncated: trunc}
 	}()
 
@@ -172,7 +176,7 @@ func (e *Executor) Run(ctx context.Context, s Spec) Result {
 	return res
 }
 
-func captureLimited(r io.Reader, max int) (text string, shaHex string, truncated bool) {
+func captureLimited(r io.Reader, max int, onChunk func([]byte)) (text string, shaHex string, truncated bool) {
 	h := sha256.New()
 	var buf bytes.Buffer
 
@@ -183,6 +187,11 @@ func captureLimited(r io.Reader, max int) (text string, shaHex string, truncated
 		n, err := r.Read(tmp)
 		if n > 0 {
 			chunk := tmp[:n]
+			if onChunk != nil {
+				// Copy to decouple from tmp reuse.
+				cp := append([]byte(nil), chunk...)
+				onChunk(cp)
+			}
 			_, _ = h.Write(chunk)
 
 			if stored < max {

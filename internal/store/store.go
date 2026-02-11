@@ -30,6 +30,19 @@ type Session struct {
 	EndedAt   *time.Time
 }
 
+type RuleRow struct {
+	RuleID      string
+	Source      string
+	OpType      string
+	Enabled     bool
+	CreatedAt   time.Time
+	DisabledAt  *time.Time
+	CmdArgvJSON *string
+	PathExact   *string
+	PathPrefix  *string
+	PathGlob    *string
+}
+
 func Open(dsn string) (*Store, error) {
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -325,6 +338,127 @@ func (s *Store) DisableRule(ctx context.Context, ruleID string, disabledAt time.
 		return fmt.Errorf("RULE_NOT_FOUND")
 	}
 	return nil
+}
+
+func (s *Store) EnableRule(ctx context.Context, ruleID string) error {
+	if strings.TrimSpace(ruleID) == "" {
+		return fmt.Errorf("rule ID required")
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE rules
+		    SET enabled = 1, disabled_at = NULL
+		  WHERE rule_id = ? AND enabled = 0`,
+		ruleID,
+	)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("RULE_NOT_FOUND")
+	}
+	return nil
+}
+
+func (s *Store) DeleteRule(ctx context.Context, ruleID string) error {
+	if strings.TrimSpace(ruleID) == "" {
+		return fmt.Errorf("rule ID required")
+	}
+	res, err := s.db.ExecContext(ctx, `DELETE FROM rules WHERE rule_id = ?`, ruleID)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("RULE_NOT_FOUND")
+	}
+	return nil
+}
+
+func (s *Store) ListRules(ctx context.Context, limit int) ([]RuleRow, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT rule_id, source, op_type, enabled, created_at, disabled_at, cmd_argv_prefix_json, path_exact, path_prefix, path_glob
+		   FROM rules
+		  ORDER BY created_at DESC
+		  LIMIT ?`,
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []RuleRow
+	for rows.Next() {
+		var rr RuleRow
+		var enabledInt int
+		var created string
+		var disabled sql.NullString
+		var cmdJSON sql.NullString
+		var pathExact sql.NullString
+		var pathPrefix sql.NullString
+		var pathGlob sql.NullString
+
+		if err := rows.Scan(
+			&rr.RuleID,
+			&rr.Source,
+			&rr.OpType,
+			&enabledInt,
+			&created,
+			&disabled,
+			&cmdJSON,
+			&pathExact,
+			&pathPrefix,
+			&pathGlob,
+		); err != nil {
+			return nil, err
+		}
+
+		rr.Enabled = enabledInt != 0
+		tm, err := time.Parse(time.RFC3339Nano, created)
+		if err != nil {
+			return nil, err
+		}
+		rr.CreatedAt = tm
+		if disabled.Valid {
+			dt, err := time.Parse(time.RFC3339Nano, disabled.String)
+			if err != nil {
+				return nil, err
+			}
+			rr.DisabledAt = &dt
+		}
+		if cmdJSON.Valid {
+			v := cmdJSON.String
+			rr.CmdArgvJSON = &v
+		}
+		if pathExact.Valid {
+			v := pathExact.String
+			rr.PathExact = &v
+		}
+		if pathPrefix.Valid {
+			v := pathPrefix.String
+			rr.PathPrefix = &v
+		}
+		if pathGlob.Valid {
+			v := pathGlob.String
+			rr.PathGlob = &v
+		}
+		out = append(out, rr)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func migrationVersion(filename string) (int, error) {

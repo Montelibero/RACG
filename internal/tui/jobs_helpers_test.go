@@ -1,0 +1,48 @@
+package tui
+
+import "testing"
+
+func TestNextJobIDCycles(t *testing.T) {
+	s := newUIState(nil, nil)
+	s.jobIDs = []string{"j1", "j2", "j3"}
+	s.selectedJob = "j2"
+
+	if got := s.nextJobID(1); got != "j3" {
+		t.Fatalf("next +1 = %q, want j3", got)
+	}
+	if got := s.nextJobID(-1); got != "j1" {
+		t.Fatalf("next -1 = %q, want j1", got)
+	}
+
+	s.selectedJob = "j1"
+	if got := s.nextJobID(-1); got != "j3" {
+		t.Fatalf("wrap -1 = %q, want j3", got)
+	}
+}
+
+func TestNthJobID(t *testing.T) {
+	s := newUIState(nil, nil)
+	s.jobIDs = []string{"j1", "j2"}
+
+	if got := s.nthJobID(1); got != "j1" {
+		t.Fatalf("nth 1 = %q, want j1", got)
+	}
+	if got := s.nthJobID(2); got != "j2" {
+		t.Fatalf("nth 2 = %q, want j2", got)
+	}
+	if got := s.nthJobID(3); got != "" {
+		t.Fatalf("nth 3 = %q, want empty", got)
+	}
+}
+
+func TestShortStatus(t *testing.T) {
+	if got := shortStatus("RUNNING"); got != "RUN" {
+		t.Fatalf("RUNNING -> %q", got)
+	}
+	if got := shortStatus("SUCCEEDED"); got != "OK" {
+		t.Fatalf("SUCCEEDED -> %q", got)
+	}
+	if got := shortStatus("PENDING_APPROVAL"); got != "PENDING_APPROVAL" {
+		t.Fatalf("fallback -> %q", got)
+	}
+}

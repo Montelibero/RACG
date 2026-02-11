@@ -4,30 +4,398 @@
     "title": "RACG",
     "version": "0.1.0"
   },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "schemas": {
+      "ErrorEnvelope": {
+        "type": "object",
+        "required": ["error"],
+        "properties": { "error": { "$ref": "#/components/schemas/ErrorObject" } }
+      },
+      "ErrorObject": {
+        "type": "object",
+        "required": ["code", "message"],
+        "properties": {
+          "code": { "type": "string" },
+          "message": { "type": "string" },
+          "request_id": { "type": "string" }
+        }
+      },
+      "InfoResponse": {
+        "type": "object",
+        "required": ["server_version", "api_versions", "ws_url", "openapi_url", "privilege_mode", "limits", "features", "supported_ops"],
+        "properties": {
+          "server_version": { "type": "string" },
+          "api_versions": { "type": "array", "items": { "type": "string" } },
+          "ws_url": { "type": "string" },
+          "openapi_url": { "type": "string" },
+          "privilege_mode": { "type": "string", "enum": ["root"] },
+          "limits": {
+            "type": "object",
+            "required": ["default_timeout_sec", "max_output_bytes", "max_concurrency"],
+            "properties": {
+              "default_timeout_sec": { "type": "integer" },
+              "max_output_bytes": { "type": "integer" },
+              "max_concurrency": { "type": "integer" }
+            }
+          },
+          "features": {
+            "type": "object",
+            "properties": {
+              "lock_first_client_addr": { "type": "boolean" }
+            }
+          },
+          "supported_ops": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "SessionOpenRequest": {
+        "type": "object",
+        "required": ["client_id", "pairing_code"],
+        "properties": {
+          "client_id": { "type": "string" },
+          "pairing_code": { "type": "string" }
+        }
+      },
+      "SessionOpenResponse": {
+        "type": "object",
+        "required": ["session_id", "session_token", "expires_at"],
+        "properties": {
+          "session_id": { "type": "string" },
+          "session_token": { "type": "string" },
+          "expires_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "SessionMeResponse": {
+        "type": "object",
+        "required": ["session_id", "client_id", "expires_at", "privilege_mode"],
+        "properties": {
+          "session_id": { "type": "string" },
+          "client_id": { "type": "string" },
+          "expires_at": { "type": "string", "format": "date-time" },
+          "privilege_mode": { "type": "string", "enum": ["root"] }
+        }
+      },
+      "CreateRequestRequest": {
+        "type": "object",
+        "required": ["op"],
+        "properties": {
+          "op": { "$ref": "#/components/schemas/Op" },
+          "client_req_id": { "type": "string" }
+        }
+      },
+      "CreateRequestResponse": {
+        "type": "object",
+        "required": ["request_id", "status"],
+        "properties": {
+          "request_id": { "type": "string" },
+          "status": { "$ref": "#/components/schemas/RequestStatus" }
+        }
+      },
+      "ListRequestsResponse": {
+        "type": "object",
+        "required": ["requests"],
+        "properties": {
+          "requests": { "type": "array", "items": { "$ref": "#/components/schemas/RequestRecord" } }
+        }
+      },
+      "DecisionRequest": {
+        "type": "object",
+        "required": ["decision"],
+        "properties": {
+          "decision": { "type": "string", "enum": ["ALLOW_ONCE", "ALLOW_SESSION", "ALLOW_ALWAYS", "DENY"] }
+        }
+      },
+      "OKResponse": {
+        "type": "object",
+        "required": ["ok"],
+        "properties": { "ok": { "type": "boolean" } }
+      },
+      "RequestStatus": {
+        "type": "string",
+        "enum": ["PENDING_APPROVAL", "APPROVED", "RUNNING", "SUCCEEDED", "FAILED", "TIMED_OUT", "KILLED", "DENIED"]
+      },
+      "OpType": {
+        "type": "string",
+        "enum": ["cmd.run", "fs.read", "fs.patch_unified", "conf.set_kv", "svc.status", "svc.restart", "svc.logs"]
+      },
+      "Op": {
+        "oneOf": [
+          { "$ref": "#/components/schemas/CmdRunOp" },
+          { "$ref": "#/components/schemas/FsReadOp" },
+          { "$ref": "#/components/schemas/FsPatchUnifiedOp" },
+          { "$ref": "#/components/schemas/GenericOp" }
+        ],
+        "discriminator": { "propertyName": "type" }
+      },
+      "GenericOp": {
+        "type": "object",
+        "required": ["type", "payload"],
+        "properties": {
+          "type": { "$ref": "#/components/schemas/OpType" },
+          "payload": { "type": "object", "additionalProperties": true }
+        }
+      },
+      "CmdRunOp": {
+        "type": "object",
+        "required": ["type", "payload"],
+        "properties": {
+          "type": { "type": "string", "enum": ["cmd.run"] },
+          "payload": { "$ref": "#/components/schemas/CmdRunPayload" }
+        }
+      },
+      "CmdRunPayload": {
+        "type": "object",
+        "required": ["argv"],
+        "properties": {
+          "argv": { "type": "array", "items": { "type": "string" } },
+          "cwd": { "type": "string" },
+          "timeout_sec": { "type": "integer" },
+          "run_as": { "type": "string", "description": "Accepted but currently ignored by the executor; server runs in root mode." }
+        }
+      },
+      "FsReadOp": {
+        "type": "object",
+        "required": ["type", "payload"],
+        "properties": {
+          "type": { "type": "string", "enum": ["fs.read"] },
+          "payload": { "$ref": "#/components/schemas/FsReadPayload" }
+        }
+      },
+      "FsReadPayload": {
+        "type": "object",
+        "required": ["path"],
+        "properties": {
+          "path": { "type": "string" },
+          "max_bytes": { "type": "integer" }
+        }
+      },
+      "FsPatchUnifiedOp": {
+        "type": "object",
+        "required": ["type", "payload"],
+        "properties": {
+          "type": { "type": "string", "enum": ["fs.patch_unified"] },
+          "payload": { "$ref": "#/components/schemas/FsPatchUnifiedPayload" }
+        }
+      },
+      "FsPatchUnifiedPayload": {
+        "type": "object",
+        "required": ["path", "diff"],
+        "properties": {
+          "path": { "type": "string" },
+          "diff": { "type": "string", "description": "Unified diff." }
+        }
+      },
+      "RequestRecord": {
+        "type": "object",
+        "required": ["request_id", "status", "op"],
+        "properties": {
+          "request_id": { "type": "string" },
+          "status": { "$ref": "#/components/schemas/RequestStatus" },
+          "op": { "$ref": "#/components/schemas/Op" },
+          "decision": { "$ref": "#/components/schemas/DecisionRecord" },
+          "result": { "$ref": "#/components/schemas/ResultRecord" },
+          "risk_flags": { "type": "array", "items": { "type": "string" } },
+          "session_id": { "type": "string" },
+          "client_id": { "type": "string" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "DecisionRecord": {
+        "type": "object",
+        "required": ["decision", "decision_source", "decided_at"],
+        "properties": {
+          "decision": { "type": "string" },
+          "decision_source": { "type": "string", "enum": ["tui", "rule"] },
+          "decided_at": { "type": "string", "format": "date-time" },
+          "rule_id": { "type": "string" }
+        }
+      },
+      "ResultRecord": {
+        "type": "object",
+        "required": ["started_at", "finished_at", "duration_ms", "exit_code", "status", "stdout", "stderr", "stdout_truncated", "stderr_truncated", "stdout_sha256", "stderr_sha256"],
+        "properties": {
+          "started_at": { "type": "string", "format": "date-time" },
+          "finished_at": { "type": "string", "format": "date-time" },
+          "duration_ms": { "type": "integer" },
+          "exit_code": { "type": "integer" },
+          "status": { "type": "string" },
+          "stdout": { "type": "string" },
+          "stderr": { "type": "string" },
+          "stdout_truncated": { "type": "boolean" },
+          "stderr_truncated": { "type": "boolean" },
+          "stdout_sha256": { "type": "string" },
+          "stderr_sha256": { "type": "string" }
+        }
+      }
+    }
+  },
   "paths": {
     "/healthz": {
       "get": {
-        "responses": { "200": { "description": "ok" } }
+        "summary": "Health check",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": { "text/plain": { "schema": { "type": "string" } } }
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "summary": "OpenAPI document",
+        "responses": {
+          "200": {
+            "description": "OpenAPI JSON",
+            "content": { "application/json": { "schema": { "type": "object" } } }
+          }
+        }
       }
     },
     "/v1/info": {
       "get": {
-        "responses": { "200": { "description": "info" } }
+        "summary": "Server info",
+        "responses": {
+          "200": {
+            "description": "info",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/InfoResponse" } } }
+          }
+        }
       }
     },
     "/v1/session/open": {
       "post": {
-        "responses": { "200": { "description": "session" } }
+        "summary": "Open session",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SessionOpenRequest" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "session",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SessionOpenResponse" } } }
+          },
+          "403": { "description": "forbidden", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+        }
       }
     },
     "/v1/session/me": {
       "get": {
-        "responses": { "200": { "description": "me" } }
+        "summary": "Session info",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "me",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SessionMeResponse" } } }
+          },
+          "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+        }
       }
     },
     "/v1/requests": {
       "post": {
-        "responses": { "200": { "description": "request" } }
+        "summary": "Create approval request",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateRequestRequest" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "request",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateRequestResponse" } } }
+          },
+          "400": { "description": "bad request", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+        }
+      },
+      "get": {
+        "summary": "List requests (in-memory)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": { "$ref": "#/components/schemas/RequestStatus" },
+            "description": "Defaults to PENDING_APPROVAL."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "requests",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ListRequestsResponse" } } }
+          },
+          "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+        }
+      }
+    },
+    "/v1/requests/{request_id}": {
+      "get": {
+        "summary": "Get request",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "request_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "request",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RequestRecord" } } }
+          },
+          "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "404": { "description": "not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+        }
+      }
+    },
+    "/v1/requests/{request_id}/decision": {
+      "post": {
+        "summary": "Decide (approve/deny) request",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "request_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DecisionRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "ok", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OKResponse" } } } },
+          "400": { "description": "bad request", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "403": { "description": "forbidden", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "404": { "description": "not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "409": { "description": "conflict", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+        }
+      }
+    },
+    "/v1/requests/{request_id}/kill": {
+      "post": {
+        "summary": "Kill running request",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "request_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "ok", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OKResponse" } } } },
+          "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "404": { "description": "not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+        }
+      }
+    },
+    "/v1/events": {
+      "get": {
+        "summary": "WebSocket events (upgrade)",
+        "description": "Upgrade this endpoint to WebSocket. Authentication is via Authorization: Bearer <token> header.",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "101": { "description": "Switching Protocols (WebSocket)" },
+          "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+        }
       }
     }
   }

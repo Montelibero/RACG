@@ -3,18 +3,19 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"crypto/subtle"
 	"crypto/sha256"
 	"encoding/hex"
 	"embed"
 	"encoding/json"
-	"database/sql"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -84,6 +85,9 @@ type API struct {
 
 	runningMu sync.Mutex
 	running   map[string]context.CancelFunc
+
+	liveMu sync.Mutex
+	live   map[string]*liveOutput
 }
 
 type requestRecord struct {
@@ -104,12 +108,27 @@ type requestRecord struct {
 // TUIRequest is a summarized view used by the built-in TUI.
 type TUIRequest struct {
 	ID        string
+	Status    string
 	Summary   string
 	Details   string
 	SessionID string
 	ClientID  string
 	RiskFlags []string
 	CreatedAt string
+}
+
+type TUIRequestInfo struct {
+	ID        string
+	Status    string
+	Summary   string
+	Details   string
+	SessionID string
+	ClientID  string
+	RiskFlags []string
+	CreatedAt string
+
+	Decision *decisionRecord
+	Result   *resultRecord
 }
 
 type decisionRecord struct {
@@ -131,6 +150,56 @@ type resultRecord struct {
 	StderrTruncated bool   `json:"stderr_truncated"`
 	StdoutSHA256    string `json:"stdout_sha256"`
 	StderrSHA256    string `json:"stderr_sha256"`
+}
+
+type liveOutput struct {
+	combined   []byte
+	truncated  bool
+	updatedAt  time.Time
+	maxBytes   int
+	requestID  string
+}
+
+func (o *liveOutput) append(stream string, b []byte) {
+	if len(b) == 0 {
+		return
+	}
+	prefix := []byte("O: ")
+	if stream == "stderr" {
+		prefix = []byte("E: ")
+	}
+
+	chunk := append(prefix, b...)
+
+	o.combined = append(o.combined, chunk...)
+	if len(o.combined) > o.maxBytes {
+		// Keep tail.
+		o.truncated = true
+		o.combined = o.combined[len(o.combined)-o.maxBytes:]
+	}
+	o.updatedAt = time.Now().UTC()
+}
+
+func (a *API) GetLiveJobOutput(requestID string) (combined string, truncated bool) {
+	a.liveMu.Lock()
+	o := a.live[requestID]
+	a.liveMu.Unlock()
+	if o == nil {
+		return "", false
+	}
+	return string(o.combined), o.truncated
+}
+
+func (a *API) SubscribeEvents(buf int) (<-chan events.Event, func()) {
+	return a.hub.Subscribe(buf)
+}
+
+func (a *API) RegeneratePairingCode() {
+	a.pairing.Regenerate()
+}
+
+func (a *API) PairingExpiresIn() time.Duration {
+	return a.pairing.ExpiresIn()
 }
 
 // RehydrateFromStore loads persisted requests into memory so they are visible to TUI and HTTP endpoints
@@ -228,7 +297,12 @@ func (a *API) RehydrateFromStore(ctx context.Context) error {
 }
 
 func New(cfg config.Config, opts ...Option) *API {
-	a := &API{cfg: cfg, reqs: map[string]requestRecord{}, running: map[string]context.CancelFunc{}}
+	a := &API{
+		cfg:     cfg,
+		reqs:    map[string]requestRecord{},
+		running: map[string]context.CancelFunc{},
+		live:    map[string]*liveOutput{},
+	}
 
 	a.pairing = auth.NewPairing(6, time.Duration(cfg.PairingCodeTTLSeconds)*time.Second, auth.RealClock{})
 	a.tokens = auth.NewTokenManager(auth.RealClock{})
@@ -254,22 +328,7 @@ func (a *API) PairingCode() string {
 func (a *API) ListPendingForTUI() []TUIRequest {
 	a.reqsMu.Lock()
 	defer a.reqsMu.Unlock()
-	out := make([]TUIRequest, 0, 64)
-	for _, rec := range a.reqs {
-		if rec.Status != "PENDING_APPROVAL" {
-			continue
-		}
-		out = append(out, TUIRequest{
-			ID:        rec.ID,
-			Summary:   summarizeOp(rec),
-			Details:   tuiDetails(rec),
-			SessionID: rec.SessionID,
-			ClientID:  rec.ClientID,
-			RiskFlags: append([]string(nil), rec.RiskFlags...),
-			CreatedAt: rec.CreatedAt,
-		})
-	}
-	return out
+	return listForTUI(a.reqs, func(st string) bool { return st == "PENDING_APPROVAL" })
 }
 
 // DecideForTUI applies a decision without HTTP auth (used by in-process TUI).
@@ -282,6 +341,155 @@ func (a *API) DecideForTUI(requestID string, decision string) error {
 	}
 	claims := auth.Claims{SessionID: rec.SessionID, ClientID: rec.ClientID}
 	return a.decideInternal(context.Background(), requestID, decision, claims)
+}
+
+func (a *API) KillForTUI(requestID string) error {
+	a.reqsMu.Lock()
+	rec, ok := a.reqs[requestID]
+	a.reqsMu.Unlock()
+	if !ok {
+		return errors.New("REQUEST_NOT_FOUND")
+	}
+	claims := auth.Claims{SessionID: rec.SessionID, ClientID: rec.ClientID}
+	return a.killInternal(context.Background(), requestID, claims)
+}
+
+func (a *API) killInternal(ctx context.Context, requestID string, c auth.Claims) error {
+	a.reqsMu.Lock()
+	rec, ok := a.reqs[requestID]
+	a.reqsMu.Unlock()
+	if !ok {
+		return errors.New("REQUEST_NOT_FOUND")
+	}
+
+	// If not running yet, mark killed and do not execute.
+	if rec.Status == "APPROVED" {
+		now := time.Now().UTC()
+		a.reqsMu.Lock()
+		rec2 := a.reqs[requestID]
+		rec2.Status = "KILLED"
+		rec2.Result = &resultRecord{
+			StartedAt:  now.Format(time.RFC3339Nano),
+			FinishedAt: now.Format(time.RFC3339Nano),
+			DurationMs: 0,
+			ExitCode:   -1,
+			Status:     "KILLED",
+			Stderr:     "killed before start",
+		}
+		a.reqs[requestID] = rec2
+		a.reqsMu.Unlock()
+
+		if a.st != nil {
+			_ = a.st.UpdateRequestStatus(ctx, requestID, "KILLED")
+			_ = a.st.InsertExecution(ctx, store.Execution{
+				RequestID:        requestID,
+				StartedAt:        now,
+				FinishedAt:       now,
+				DurationMs:       0,
+				ExitCode:         -1,
+				Status:           "KILLED",
+				Stdout:           "",
+				Stderr:           "killed before start",
+				StdoutTruncated:  false,
+				StderrTruncated:  false,
+				StdoutSHA256:     sha256Hex(nil),
+				StderrSHA256:     sha256Hex([]byte("killed before start")),
+			})
+		}
+
+		a.hub.Publish(events.Event{
+			Type:      "request.finished",
+			RequestID: requestID,
+			SessionID: c.SessionID,
+			ClientID:  c.ClientID,
+			Data: map[string]any{
+				"status": "KILLED",
+			},
+		})
+		return nil
+	}
+
+	a.runningMu.Lock()
+	cancel, okCancel := a.running[requestID]
+	a.runningMu.Unlock()
+	if okCancel {
+		cancel()
+	}
+	return nil
+}
+
+func (a *API) ListRunningForTUI() []TUIRequest {
+	a.reqsMu.Lock()
+	defer a.reqsMu.Unlock()
+	return listForTUI(a.reqs, func(st string) bool { return st == "RUNNING" })
+}
+
+// ListJobsForTUI returns running jobs, and optionally finished ones, for jobs panel.
+func (a *API) ListJobsForTUI(includeFinished bool) []TUIRequest {
+	a.reqsMu.Lock()
+	defer a.reqsMu.Unlock()
+	return listForTUI(a.reqs, func(st string) bool {
+		if st == "RUNNING" || st == "APPROVED" {
+			return true
+		}
+		if !includeFinished {
+			return false
+		}
+		switch st {
+		case "SUCCEEDED", "FAILED", "TIMED_OUT", "KILLED":
+			return true
+		default:
+			return false
+		}
+	})
+}
+
+func (a *API) ListApprovedForTUI() []TUIRequest {
+	a.reqsMu.Lock()
+	defer a.reqsMu.Unlock()
+	return listForTUI(a.reqs, func(st string) bool { return st == "APPROVED" })
+}
+
+func (a *API) GetRequestInfoForTUI(requestID string) (TUIRequestInfo, bool) {
+	a.reqsMu.Lock()
+	rec, ok := a.reqs[requestID]
+	a.reqsMu.Unlock()
+	if !ok {
+		return TUIRequestInfo{}, false
+	}
+	return TUIRequestInfo{
+		ID:        rec.ID,
+		Status:    rec.Status,
+		Summary:   summarizeOp(rec),
+		Details:   tuiDetails(rec),
+		SessionID: rec.SessionID,
+		ClientID:  rec.ClientID,
+		RiskFlags: append([]string(nil), rec.RiskFlags...),
+		CreatedAt: rec.CreatedAt,
+		Decision:  rec.Decision,
+		Result:    rec.Result,
+	}, true
+}
+
+func listForTUI(m map[string]requestRecord, want func(string) bool) []TUIRequest {
+	out := make([]TUIRequest, 0, 64)
+	for _, rec := range m {
+		if !want(rec.Status) {
+			continue
+		}
+		out = append(out, TUIRequest{
+			ID:        rec.ID,
+			Status:    rec.Status,
+			Summary:   summarizeOp(rec),
+			Details:   tuiDetails(rec),
+			SessionID: rec.SessionID,
+			ClientID:  rec.ClientID,
+			RiskFlags: append([]string(nil), rec.RiskFlags...),
+			CreatedAt: rec.CreatedAt,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt < out[j].CreatedAt })
+	return out
 }
 
 func (a *API) Handler() http.Handler {
@@ -637,10 +845,48 @@ func (a *API) executeApprovedRequest(requestID string, c auth.Claims, op rules.O
 		a.running[requestID] = cancel
 		a.runningMu.Unlock()
 
+		a.liveMu.Lock()
+		a.live[requestID] = &liveOutput{maxBytes: a.cfg.MaxOutputBytes * 2, requestID: requestID}
+		a.liveMu.Unlock()
+
 		res := a.exec.Run(execCtx, executor.Spec{
 			Argv:    payload.Argv,
 			Cwd:     payload.Cwd,
 			Timeout: timeout,
+			OnStdout: func(b []byte) {
+				a.liveMu.Lock()
+				if o := a.live[requestID]; o != nil {
+					o.append("stdout", b)
+				}
+				a.liveMu.Unlock()
+				a.hub.Publish(events.Event{
+					Type:      "request.output",
+					RequestID: requestID,
+					SessionID: c.SessionID,
+					ClientID:  c.ClientID,
+					Data: map[string]any{
+						"stream": "stdout",
+						"chunk":  string(b),
+					},
+				})
+			},
+			OnStderr: func(b []byte) {
+				a.liveMu.Lock()
+				if o := a.live[requestID]; o != nil {
+					o.append("stderr", b)
+				}
+				a.liveMu.Unlock()
+				a.hub.Publish(events.Event{
+					Type:      "request.output",
+					RequestID: requestID,
+					SessionID: c.SessionID,
+					ClientID:  c.ClientID,
+					Data: map[string]any{
+						"stream": "stderr",
+						"chunk":  string(b),
+					},
+				})
+			},
 		})
 		a.runningMu.Lock()
 		delete(a.running, requestID)
@@ -971,50 +1217,14 @@ func (a *API) decideInternal(ctx context.Context, requestID string, decision str
 }
 
 func (a *API) handleKill(w http.ResponseWriter, r *http.Request, c auth.Claims, requestID string) {
-	a.reqsMu.Lock()
-	rec, ok := a.reqs[requestID]
-	a.reqsMu.Unlock()
-	if !ok {
-		writeError(w, http.StatusNotFound, "REQUEST_NOT_FOUND", "request not found", requestID)
-		return
-	}
-
-	// If not running yet, mark killed and do not execute.
-	if rec.Status == "APPROVED" {
-		a.reqsMu.Lock()
-		rec2 := a.reqs[requestID]
-		rec2.Status = "KILLED"
-		rec2.Result = &resultRecord{
-			StartedAt:  time.Now().UTC().Format(time.RFC3339Nano),
-			FinishedAt: time.Now().UTC().Format(time.RFC3339Nano),
-			DurationMs: 0,
-			ExitCode:   -1,
-			Status:     "KILLED",
-			Stderr:     "killed before start",
+	if err := a.killInternal(r.Context(), requestID, c); err != nil {
+		if err.Error() == "REQUEST_NOT_FOUND" {
+			writeError(w, http.StatusNotFound, "REQUEST_NOT_FOUND", "request not found", requestID)
+			return
 		}
-		a.reqs[requestID] = rec2
-		a.reqsMu.Unlock()
-
-		a.hub.Publish(events.Event{
-			Type:      "request.finished",
-			RequestID: requestID,
-			SessionID: c.SessionID,
-			ClientID:  c.ClientID,
-			Data: map[string]any{
-				"status": "KILLED",
-			},
-		})
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		writeError(w, http.StatusInternalServerError, "INTERNAL", err.Error(), requestID)
 		return
 	}
-
-	a.runningMu.Lock()
-	cancel, okCancel := a.running[requestID]
-	a.runningMu.Unlock()
-	if okCancel {
-		cancel()
-	}
-
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

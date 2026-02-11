@@ -6,20 +6,25 @@
 
 **Architecture:** One process `racg serve` hosts HTTP+WS, manages sessions/tokens, maintains an approval queue, runs an executor with bounded concurrency, and persists state to SQLite. The built-in TUI is the only place a human approves/denies.
 
-**Tech Stack:** Go, `net/http`, WebSocket, SQLite (driver), Bubble Tea (TUI), OpenAPI JSON.
+**Tech Stack:** Go, `net/http`, WebSocket, SQLite (driver), `tview`/`tcell` (TUI), OpenAPI JSON.
 
 ---
 
-## Status (as of 2026-02-10)
+## Status (as of 2026-02-11)
 
-Implemented on branch `mvp`:
-- Tasks 1-8 are implemented (CLI, config+serve, SQLite migrations bootstrap, auth, HTTP API, WS events, rules+decisions, cmd.run executor + kill).
-- Task 11 (TUI approvals) is implemented minimally.
-- SQLite store exists but is not wired into HTTP/TUI yet (no persistence/audit for requests/decisions/executions/rules; sessions are not recorded from the API).
+Implemented on `main`:
+- HTTP API + WS events, cmd.run, fs.read, fs.patch_unified.
+- SQLite persistence/audit always-on: sessions, requests, decisions, executions, rules(always). Always rules load on start.
+- Request rehydrate on start: PENDING_APPROVAL/APPROVED/RUNNING are loaded; RUNNING is marked FAILED with an execution row `stderr="server restarted"`.
+- CLI: `racg rules list/disable`, `racg sessions list/show`.
+- New TUI direction: `tview`/`tcell` UI started (pairing page + dashboard skeleton + rules/history stubs + job view skeleton).
 
 Next priorities:
-1) Wire SQLite audit + persistence (sessions, requests, decisions, executions, rules; load always rules on start; add minimal rules/sessions introspection).
-2) Add minimal `fs.read` + `fs.patch_unified` operations with diff/context shown in TUI.
+1) Complete TUI per spec (mouse/focus/pages, jobs+live output tabs, kill confirmations, toasts, help overlay).
+2) Update OpenAPI (`openapi.json`) to match supported ops/payloads.
+
+Notes:
+- `tcell` latest requires Go >= 1.24; pinned compatible versions are used to keep Go 1.22.2.
 
 ## Prerequisites / Environment
 

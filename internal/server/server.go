@@ -90,6 +90,8 @@ func (s *Server) PairingCode() string {
 
 func (s *Server) API() *httpapi.API { return s.api }
 
+func (s *Server) Store() *store.Store { return s.st }
+
 func (s *Server) Run(ctx context.Context, ready chan<- struct{}) error {
 	if s.st != nil {
 		defer func() { _ = s.st.Close() }()
