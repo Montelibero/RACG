@@ -176,6 +176,7 @@ type uiState struct {
 	selectedJob     string
 	pendingIDs      []string
 	jobIDs          []string
+	jobListSig      string
 	showAllJobs     bool
 
 	// Optional page refresh hooks (for non-dashboard pages).
@@ -519,6 +520,7 @@ func (s *uiState) setJobsModeLabel() {
 
 func (s *uiState) toggleJobsMode() {
 	s.showAllJobs = !s.showAllJobs
+	s.jobListSig = ""
 	s.setJobsModeLabel()
 	s.refreshJobs()
 }
@@ -743,6 +745,10 @@ func (s *uiState) refreshDetails(requestID string) {
 
 func (s *uiState) refreshJobs() {
 	items := s.api.ListJobsForTUI(s.showAllJobs)
+	sig := jobListSignature(items)
+	if sig == s.jobListSig {
+		return
+	}
 	prevIndex := s.jobsList.GetCurrentItem()
 	s.jobsList.Clear()
 	s.jobIDs = s.jobIDs[:0]
@@ -753,11 +759,30 @@ func (s *uiState) refreshJobs() {
 	}
 	if len(s.jobIDs) == 0 {
 		s.selectedJob = ""
+		s.jobListSig = sig
 		return
 	}
 	idx := jobSelectionIndex(s.jobIDs, s.selectedJob, prevIndex)
 	s.selectedJob = s.jobIDs[idx]
 	s.jobsList.SetCurrentItem(idx)
+	s.jobListSig = sig
+}
+
+func jobListSignature(items []httpapi.TUIRequest) string {
+	var b strings.Builder
+	for _, it := range items {
+		b.WriteString(it.ID)
+		b.WriteByte('\x00')
+		b.WriteString(it.Status)
+		b.WriteByte('\x00')
+		b.WriteString(it.CreatedAt)
+		b.WriteByte('\x00')
+		b.WriteString(it.ClientID)
+		b.WriteByte('\x00')
+		b.WriteString(it.Summary)
+		b.WriteByte('\x00')
+	}
+	return b.String()
 }
 
 func jobSelectionIndex(ids []string, prevSelectedID string, prevIndex int) int {
