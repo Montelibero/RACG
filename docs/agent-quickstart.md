@@ -4,6 +4,23 @@ This file is for an automation agent that works with a running `racg serve`.
 
 Prefer the `racg` client commands over raw HTTP. They handle saved auth, request creation, waiting, live output, final logs, and cancel/kill with compact human-readable output.
 
+## Agent Skill
+
+This repository includes an agentskills.io-style skill for agents:
+
+```text
+skills/racg-client-ops/
+```
+
+Install it by copying the directory into the agent's skills directory. For Codex:
+
+```bash
+mkdir -p ~/.codex/skills
+cp -R skills/racg-client-ops ~/.codex/skills/
+```
+
+Use the skill when an agent should operate through RACG instead of direct shell execution. It covers login, command submission, live output, final logs, cancel/kill, safe diagnostics, and auto-approve rule boundaries.
+
 ## 1. Connect
 
 Inputs needed from the human:

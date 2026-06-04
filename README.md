@@ -78,6 +78,23 @@ You can still override saved config with `--host`, `--token`, `RACG_HOST`, and `
 Use `racg request logs <id> --live` for the current in-memory live output snapshot while a request is still running, or `racg request tail <id>` to follow live output until the request reaches a terminal status.
 Use `racg request cancel <id>` to cancel a pending approval or stop a running command.
 
+## Agent skill
+
+This repository includes an agentskills.io-style skill for agents that operate through RACG:
+
+```text
+skills/racg-client-ops/
+```
+
+Install it by copying the skill directory into your agent's skills directory. For Codex:
+
+```bash
+mkdir -p ~/.codex/skills
+cp -R skills/racg-client-ops ~/.codex/skills/
+```
+
+The skill teaches agents the RACG client workflow: login, `racg run`, live logs, tail, cancel, safe diagnostics, and narrow auto-approve rule guidance.
+
 ## Rule presets
 
 Install narrow read-only diagnostics rules into the SQLite rules store:
