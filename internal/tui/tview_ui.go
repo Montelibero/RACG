@@ -178,6 +178,7 @@ type uiState struct {
 	jobIDs          []string
 	jobListSig      string
 	showAllJobs     bool
+	activeMainTab   string
 
 	// Optional page refresh hooks (for non-dashboard pages).
 	rulesRefresh   func()
@@ -192,7 +193,7 @@ type uiState struct {
 }
 
 func newUIState(api *httpapi.API, st *store.Store) *uiState {
-	return &uiState{api: api, store: st, follow: true, page: "pairing", showAllJobs: true, jobMode: "combined"}
+	return &uiState{api: api, store: st, follow: true, page: "pairing", showAllJobs: true, activeMainTab: "pending", jobMode: "combined"}
 }
 
 func (s *uiState) setCurrentPage(p string) { s.page = p }
@@ -273,13 +274,14 @@ func (s *uiState) renderMainTabs() string {
 	type tab struct {
 		page  string
 		key   string
+		name  string
 		label string
 	}
 	tabs := []tab{
-		{page: "dashboard", key: "1", label: "Pending"},
-		{page: "dashboard", key: "2", label: "Jobs"},
-		{page: "rules", key: "3", label: "Rules"},
-		{page: "history", key: "4", label: "History"},
+		{page: "dashboard", key: "1", name: "pending", label: "Pending"},
+		{page: "dashboard", key: "2", name: "jobs", label: "Jobs"},
+		{page: "rules", key: "3", name: "rules", label: "Rules"},
+		{page: "history", key: "4", name: "history", label: "History"},
 	}
 	var b strings.Builder
 	for i, t := range tabs {
@@ -287,19 +289,20 @@ func (s *uiState) renderMainTabs() string {
 			b.WriteString("   ")
 		}
 		text := t.key + " " + t.label
-		if s.page == t.page {
-			if t.key == "2" && s.jobsList != nil {
-				// Jobs shares the dashboard page; focus marks it active.
-				text = t.key + " " + t.label
-			}
-			if t.key != "2" || s.pendingList == nil {
-				b.WriteString("[" + text + "]")
-				continue
-			}
+		if s.activeMainTab == t.name || (s.activeMainTab == "" && s.page == t.page && t.name != "jobs") {
+			b.WriteString("[" + text + "]")
+			continue
 		}
 		b.WriteString(text)
 	}
 	return b.String()
+}
+
+func (s *uiState) setActiveMainTab(name string) {
+	s.activeMainTab = name
+	if s.mainTabs != nil {
+		s.mainTabs.SetText(s.renderMainTabs())
+	}
 }
 
 func pendingActionHint() string {
@@ -328,6 +331,7 @@ func (s *uiState) showDashboard(app *tview.Application, pages *tview.Pages) {
 	s.closeOverlay(pages)
 	s.switchMainPage(pages, "dashboard")
 	s.page = "dashboard"
+	s.setActiveMainTab("pending")
 	s.refresh()
 	if app != nil {
 		s.cycleFocusTo(app, s.pendingList)
@@ -346,6 +350,7 @@ func (s *uiState) showRules(app *tview.Application, pages *tview.Pages) {
 	s.closeOverlay(pages)
 	s.switchMainPage(pages, "rules")
 	s.page = "rules"
+	s.setActiveMainTab("rules")
 	if s.rulesRefresh != nil {
 		s.rulesRefresh()
 	}
@@ -355,6 +360,7 @@ func (s *uiState) showHistory(app *tview.Application, pages *tview.Pages) {
 	s.closeOverlay(pages)
 	s.switchMainPage(pages, "history")
 	s.page = "history"
+	s.setActiveMainTab("history")
 	if s.historyRefresh != nil {
 		s.historyRefresh()
 	}
@@ -382,6 +388,7 @@ func (s *uiState) leaveJobPage(app *tview.Application, pages *tview.Pages, focus
 		pages.SendToFront("dashboard")
 	}
 	s.setCurrentPage("dashboard")
+	s.setActiveMainTab("jobs")
 	s.refresh()
 	if app != nil && focus != nil {
 		app.SetFocus(focus)
@@ -942,6 +949,7 @@ func buildDashboardPage(app *tview.Application, pages *tview.Pages, s *uiState, 
 	s.statusBar = tview.NewTextView().SetDynamicColors(false)
 	s.jobsModeBtn = tview.NewButton("").SetSelectedFunc(func() {
 		s.toggleJobsMode()
+		s.setActiveMainTab("jobs")
 		app.SetFocus(s.jobsList)
 	})
 	s.setJobsModeLabel()
@@ -952,6 +960,11 @@ func buildDashboardPage(app *tview.Application, pages *tview.Pages, s *uiState, 
 			app.SetFocus(s.pendingList)
 		}
 	})
+	s.filter.SetFocusFunc(func() { s.setActiveMainTab("pending") })
+	s.pendingList.SetFocusFunc(func() { s.setActiveMainTab("pending") })
+	s.details.SetFocusFunc(func() { s.setActiveMainTab("pending") })
+	s.jobsList.SetFocusFunc(func() { s.setActiveMainTab("jobs") })
+	s.jobsModeBtn.SetFocusFunc(func() { s.setActiveMainTab("jobs") })
 
 	left := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(s.filter, 1, 0, false).
@@ -1049,9 +1062,11 @@ func buildDashboardPage(app *tview.Application, pages *tview.Pages, s *uiState, 
 	root.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
 		switch ev.Rune() {
 		case '1':
+			s.setActiveMainTab("pending")
 			app.SetFocus(s.pendingList)
 			return nil
 		case '2':
+			s.setActiveMainTab("jobs")
 			app.SetFocus(s.jobsList)
 			return nil
 		case '3':

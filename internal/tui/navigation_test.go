@@ -100,7 +100,19 @@ func TestRenderMainTabsMarksActivePage(t *testing.T) {
 		}
 	}
 
+	s.setActiveMainTab("jobs")
+	got = s.renderMainTabs()
+	for _, want := range []string{"1 Pending", "[2 Jobs]", "3 Rules", "4 History"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("tabs=%q want %q", got, want)
+		}
+	}
+	if strings.Contains(got, "[1 Pending]") {
+		t.Fatalf("tabs=%q still marks pending active", got)
+	}
+
 	s.page = "rules"
+	s.setActiveMainTab("rules")
 	got = s.renderMainTabs()
 	if !strings.Contains(got, "[3 Rules]") {
 		t.Fatalf("tabs=%q", got)
