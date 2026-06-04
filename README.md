@@ -7,7 +7,9 @@ RACG is a local Approval Gateway for privileged operations. A client sends reque
 - HTTP API + WebSocket events
 - Built-in TUI approvals dashboard (mouse + hotkeys)
 - Session pairing with bearer tokens
+- Client helpers for login, approve-and-wait command runs, live logs, tail, and cancel
 - Rule engine (`ALLOW_SESSION` / `ALLOW_ALWAYS`)
+- Read-only diagnostics rule presets
 - SQLite audit trail: sessions, requests, decisions, executions, rules
 - Command execution with timeout/kill/output limits
 
@@ -28,7 +30,7 @@ curl -fsSL https://raw.githubusercontent.com/Montelibero/RACG/main/scripts/insta
 Install a specific version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Montelibero/RACG/main/scripts/install.sh | RACG_VERSION=v0.1.1 bash
+curl -fsSL https://raw.githubusercontent.com/Montelibero/RACG/main/scripts/install.sh | RACG_VERSION=v0.2.0 bash
 ```
 
 Options for installer:
@@ -47,6 +49,8 @@ curl -sS http://127.0.0.1:8777/openapi.json
 ```
 
 ## Client helper commands
+
+Agent-oriented quickstart is in `docs/agent-quickstart.md`.
 
 Log in once with the pairing code shown by `racg serve`:
 
@@ -72,6 +76,7 @@ You can still override saved config with `--host`, `--token`, `RACG_HOST`, and `
 `racg run` creates a `cmd.run` request and waits until it reaches a terminal status, then prints compact sections: `request_id`, `status`, `exit_code`, `stdout`, `stderr`.
 `racg request logs` reads raw stream endpoints (`/v1/requests/<id>/logs/stdout` and `/v1/requests/<id>/logs/stderr`) so large output can be consumed without parsing the full request JSON.
 Use `racg request logs <id> --live` for the current in-memory live output snapshot while a request is still running, or `racg request tail <id>` to follow live output until the request reaches a terminal status.
+Use `racg request cancel <id>` to cancel a pending approval or stop a running command.
 
 ## Rule presets
 

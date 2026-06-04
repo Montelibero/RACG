@@ -2,104 +2,212 @@
 
 This file is for an automation agent that works with a running `racg serve`.
 
-## 1) Connect to RACG
+Prefer the `racg` client commands over raw HTTP. They handle saved auth, request creation, waiting, live output, final logs, and cancel/kill with compact human-readable output.
 
-Inputs needed from human:
-- `BASE_URL` (example: `http://127.0.0.1:8777`)
-- `PAIRING_CODE` (shown in TUI)
-- `CLIENT_ID` (your agent name, example: `codex-cli`)
+## 1. Connect
 
-Open session:
+Inputs needed from the human:
 
-```bash
-BASE_URL="http://127.0.0.1:8777"
-PAIRING_CODE="ABC123"
-CLIENT_ID="codex-cli"
+- `HOST`, usually `http://127.0.0.1:8777`
+- `PAIRING_CODE`, shown in the RACG TUI
 
-curl -sS -X POST "$BASE_URL/v1/session/open" \
-  -H 'Content-Type: application/json' \
-  -d "{\"pairing_code\":\"$PAIRING_CODE\",\"client_id\":\"$CLIENT_ID\"}"
-```
-
-Save `session_token` from response and use it as bearer token:
+Log in once:
 
 ```bash
-TOKEN="<session_token>"
-AUTH_HEADER="Authorization: Bearer $TOKEN"
+racg login --host http://127.0.0.1:8777 --pairing-code ABC123
+racg session status
 ```
 
-## 2) Submit operations
-
-Create request (`cmd.run`, argv only):
+Client login state is saved in `~/.config/racg/client.json`. For isolated agent sessions, set `RACG_CLIENT_CONFIG`:
 
 ```bash
-curl -sS -X POST "$BASE_URL/v1/requests" \
-  -H 'Content-Type: application/json' \
-  -H "$AUTH_HEADER" \
-  -d '{"op":{"type":"cmd.run","payload":{"argv":["/bin/uname","-a"],"timeout_ms":5000}}}'
+export RACG_CLIENT_CONFIG=/tmp/racg-client.json
+racg login --host http://127.0.0.1:8777 --pairing-code ABC123
 ```
 
-Create request (`fs.read`):
+Auth resolution order is explicit flags, then environment variables, then saved config:
 
 ```bash
-curl -sS -X POST "$BASE_URL/v1/requests" \
-  -H 'Content-Type: application/json' \
-  -H "$AUTH_HEADER" \
-  -d '{"op":{"type":"fs.read","payload":{"path":"/etc/hosts","max_bytes":4096}}}'
+racg run --host "$HOST" --token "$TOKEN" -- date
+RACG_HOST="$HOST" RACG_TOKEN="$TOKEN" racg request logs <id> --live
 ```
 
-Notes:
-- Do not use shell string mode for commands.
-- Send absolute paths (not `~`).
+Do not print saved tokens in chat or logs.
 
-## 3) Wait for human approval
+## 2. Run Commands
 
-After request creation, status is usually `PENDING_APPROVAL`.
-Human decides in TUI:
-- `ALLOW_ONCE`
-- `ALLOW_SESSION`
-- `ALLOW_ALWAYS`
-- `DENY`
-
-Poll request:
+Submit a command and wait for terminal status:
 
 ```bash
-REQ_ID="<request_id>"
-curl -sS "$BASE_URL/v1/requests/$REQ_ID" -H "$AUTH_HEADER"
+racg run -- date
+racg run -- bash -lc 'date && uname -a'
 ```
+
+Expected output is compact, not a full JSON document:
+
+```text
+request_id: <uuid>
+status: SUCCEEDED
+exit_code: 0
+stdout:
+...
+stderr:
+...
+```
+
+Submit a long-running command without waiting:
+
+```bash
+racg run --no-wait -- /bin/sh -c 'while true; do date +"tick %H:%M:%S"; sleep 3; done'
+```
+
+Useful flags:
+
+```text
+--cwd <dir>              command working directory
+--timeout <seconds>      command timeout
+--no-wait                print request id and return immediately
+--poll-interval <dur>    wait/tail polling interval
+--wait-timeout <dur>     maximum wait duration for racg run
+```
+
+## 3. Approval And Status
+
+After request creation, status is usually `PENDING_APPROVAL`. The human decides in the TUI:
+
+- allow once
+- allow session
+- allow always
+- deny
+
+For long-running or pending work, do not submit duplicate requests. Wait for approval, inspect live output after it starts, or cancel if the user asks.
 
 Terminal statuses:
+
 - `SUCCEEDED`
 - `FAILED`
 - `TIMED_OUT`
 - `KILLED`
 - `DENIED`
+- `CANCELED`
 
-## 4) How to reduce repeated approvals
+## 4. Live And Final Output
 
-Important:
-- No operation is auto-approved from scratch.
-- Auto-approval appears only after human creates a rule (`ALLOW_ALWAYS`).
+Current live combined output while a request is running:
 
-Practical flow:
-1. Send safe read/diagnostic request.
-2. Human chooses `ALLOW_ALWAYS`.
-3. Similar future requests are auto-approved by rules.
+```bash
+racg request logs <request_id> --live
+```
 
-## 5) What is considered dangerous
+Follow live output until terminal status:
 
-`ALLOW_ALWAYS` is blocked by default for dangerous requests.
-Danger flags:
-- `WRITE_ETC`
-- `APT_REMOVE`
-- `FIREWALL`
-- `DESTRUCTIVE_FS`
-- `SERVICE_SSH_RISK`
+```bash
+racg request tail <request_id>
+```
 
-Config override:
-- `allow_always_for_dangerous=true` (not recommended by default)
+Final raw streams after completion:
 
-## 6) Useful endpoints
+```bash
+racg request logs <request_id> --stdout
+racg request logs <request_id> --stderr
+```
+
+`--stdout` and `--stderr` require a finished request. If the server returns `REQUEST_NOT_FINISHED`, use `--live` or `tail`.
+
+## 5. Cancel Or Stop
+
+Cancel a pending request or stop a running command:
+
+```bash
+racg request cancel <request_id>
+```
+
+For running commands this maps to the server kill path. Verify with live output or final request status.
+
+## 6. Reduce Repeated Approvals
+
+Install narrow read-only presets when the human wants repeated diagnostics to avoid approval friction:
+
+```bash
+racg rules presets list
+racg rules presets install readonly-diagnostics --db racg.db
+```
+
+The preset auto-approves:
+
+- `git status`
+- `git log`
+- `kubectl get`
+- `kubectl describe`
+- `kubectl logs`
+- `curl *health*`
+
+Do not auto-approve destructive or mutating operations such as `kubectl apply/delete/patch`, `git push`, `sudo`, firewall commands, or filesystem deletion.
+
+## 7. Safety Checklist
+
+Before submitting a command, identify:
+
+- cwd
+- argv
+- timeout
+- whether it reads, writes, restarts, deletes, patches, applies, or exposes secrets
+- expected output size
+
+Prefer explicit argv over opaque shell strings:
+
+```bash
+racg run -- kubectl get pods -A
+```
+
+Use shell only when shell features are necessary:
+
+```bash
+racg run -- bash -lc 'set -euo pipefail; date; uname -a'
+```
+
+Treat these words as extra-risk indicators:
+
+```text
+delete
+patch
+apply
+secret
+sudo
+ufw
+iptables
+systemctl restart
+```
+
+## 8. Raw HTTP Fallback
+
+Use raw HTTP only when the CLI is unavailable.
+
+Open a session:
+
+```bash
+curl -sS -X POST "$HOST/v1/session/open" \
+  -H 'Content-Type: application/json' \
+  -d "{\"pairing_code\":\"$PAIRING_CODE\",\"client_id\":\"codex-cli\"}"
+```
+
+Create a command request:
+
+```bash
+curl -sS -X POST "$HOST/v1/requests" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"op":{"type":"cmd.run","payload":{"argv":["/bin/uname","-a"],"timeout_sec":120}}}'
+```
+
+Read current live output:
+
+```bash
+curl -sS -H "Authorization: Bearer $TOKEN" \
+  "$HOST/v1/requests/$REQ_ID/logs/live"
+```
+
+Useful endpoints:
 
 - `GET /v1/info`
 - `GET /openapi.json`
@@ -110,11 +218,15 @@ Config override:
 - `GET /v1/requests/{id}`
 - `POST /v1/requests/{id}/decision`
 - `POST /v1/requests/{id}/kill`
-- `GET /v1/events` (websocket)
+- `GET /v1/requests/{id}/logs/live`
+- `GET /v1/requests/{id}/logs/stdout`
+- `GET /v1/requests/{id}/logs/stderr`
+- `GET /v1/events` (WebSocket)
 
-## 7) Minimal troubleshooting
+## 9. Troubleshooting
 
-- `PAIRING_CODE_USED`: ask human for a new pairing code.
-- `REQUEST_NOT_PENDING`: request already decided/finished.
+- `PAIRING_CODE_USED`: reuse the existing saved client config if available, otherwise ask for a new pairing code.
+- `REQUEST_NOT_PENDING`: request was already decided or finished.
+- `REQUEST_NOT_FINISHED`: use `logs --live` or `tail`; final stdout/stderr are not available yet.
 - `ALLOW_ALWAYS_NOT_PERMITTED`: request is dangerous by policy.
-- `401/403`: token expired or invalid; reopen session with new pairing code.
+- `401/403`: token expired or invalid; log in again with a fresh pairing code.
