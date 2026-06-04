@@ -70,6 +70,33 @@ func TestTUIDetailsShowsCommandAnalysisAllowBlock(t *testing.T) {
 	}
 }
 
+func TestTUIDetailsShowsUnsupportedSegmentSource(t *testing.T) {
+	api := New(config.Defaults())
+
+	op := map[string]any{
+		"type": "cmd.run",
+		"payload": map[string]any{
+			"argv": []string{"sh", "-c", "echo redirect-test > /tmp/racg-scope-test.txt"},
+		},
+	}
+	b, err := json.Marshal(op)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	got := api.tuiDetails(requestRecord{Op: b, SessionID: "sess1"})
+	if strings.Contains(got, "BLOCK <unknown>") {
+		t.Fatalf("details should not show unknown segment:\n%s", got)
+	}
+	for _, want := range []string{
+		"[red]BLOCK[-] echo redirect-test >/tmp/racg-scope-test.txt  reason=redirect",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("details missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestRuleScopePatternRejectsShellSeparators(t *testing.T) {
 	if _, err := ruleFromScopePattern("docker stop nginx && rm /"); err == nil {
 		t.Fatalf("expected separator pattern to be rejected")

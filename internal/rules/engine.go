@@ -38,6 +38,7 @@ type Match struct {
 
 type SegmentDecision struct {
 	Argv        []string
+	SourceText  string
 	Source      string
 	RuleID      string
 	Allowed     bool
@@ -124,7 +125,7 @@ func (e *Engine) Explain(sessionID string, op Op) Explanation {
 	analysis := AnalyzeCommandOp(op)
 	segments := make([]SegmentDecision, 0, len(analysis.Segments))
 	for _, segment := range analysis.Segments {
-		decision := SegmentDecision{Argv: append([]string(nil), segment.Argv...), Unsupported: segment.Unsupported}
+		decision := SegmentDecision{Argv: append([]string(nil), segment.Argv...), SourceText: segment.Source, Unsupported: segment.Unsupported}
 		if segment.Unsupported != "" {
 			decision.Reason = segment.Unsupported
 		} else if r, ok := matchCmdArgvRules(sess, segment.Argv); ok {
@@ -175,7 +176,7 @@ func matchAnalyzedCommand(sess []Rule, always []Rule, op Op) (Match, bool) {
 	out := Match{RuleID: "shell-segments", Source: "segments"}
 	allAllowed := true
 	for _, segment := range analysis.Segments {
-		decision := SegmentDecision{Argv: append([]string(nil), segment.Argv...), Unsupported: segment.Unsupported}
+		decision := SegmentDecision{Argv: append([]string(nil), segment.Argv...), SourceText: segment.Source, Unsupported: segment.Unsupported}
 		if segment.Unsupported != "" {
 			allAllowed = false
 			out.SegmentDecisions = append(out.SegmentDecisions, decision)

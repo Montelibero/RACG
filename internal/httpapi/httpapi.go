@@ -1598,6 +1598,9 @@ func commandAnalysisPreview(explain rules.Explanation) string {
 	for _, segment := range explain.Segments {
 		cmd := strings.Join(segment.Argv, " ")
 		if cmd == "" {
+			cmd = segment.SourceText
+		}
+		if cmd == "" {
 			cmd = "<unknown>"
 		}
 		if segment.Allowed {
