@@ -128,6 +128,30 @@ func TestJobViewModeLabel(t *testing.T) {
 	}
 }
 
+func TestJobFollowLabel(t *testing.T) {
+	if got := jobFollowLabel(true); got != "Follow: on" {
+		t.Fatalf("follow on label=%q", got)
+	}
+	if got := jobFollowLabel(false); got != "Follow: off" {
+		t.Fatalf("follow off label=%q", got)
+	}
+}
+
+func TestJobHeaderTextIncludesCommandSummary(t *testing.T) {
+	info := httpapi.TUIRequestInfo{
+		ID:       "req1",
+		Status:   "SUCCEEDED",
+		Summary:  "cmd.run bash -lc echo ok",
+		ClientID: "cli",
+	}
+	got := jobHeaderText(info, true)
+	for _, want := range []string{"job: req1", "status=SUCCEEDED", "follow=on", "client=cli", "cmd: cmd.run bash -lc echo ok"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("header missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestPendingActionHintNamesKeyboardAndMouse(t *testing.T) {
 	got := pendingActionHint()
 	for _, want := range []string{"a once", "s session", "A always", "d deny", "mouse"} {

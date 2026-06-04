@@ -400,6 +400,32 @@ func jobViewModeLabel(mode string) string {
 	return b.String()
 }
 
+func jobFollowLabel(follow bool) string {
+	if follow {
+		return "Follow: on"
+	}
+	return "Follow: off"
+}
+
+func jobHeaderText(info httpapi.TUIRequestInfo, follow bool) string {
+	exitCode := ""
+	if info.Result != nil {
+		exitCode = fmt.Sprintf("  exit_code=%d  duration_ms=%d", info.Result.ExitCode, info.Result.DurationMs)
+	}
+	header := fmt.Sprintf("job: %s  status=%s%s  follow=%s  client=%s", info.ID, info.Status, exitCode, boolLabel(follow), info.ClientID)
+	if strings.TrimSpace(info.Summary) != "" {
+		header += "\ncmd: " + info.Summary
+	}
+	return header
+}
+
+func boolLabel(v bool) string {
+	if v {
+		return "on"
+	}
+	return "off"
+}
+
 func (s *uiState) showDashboard(app *tview.Application, pages *tview.Pages) {
 	s.closeOverlay(pages)
 	s.switchMainPage(pages, "dashboard")
@@ -925,11 +951,7 @@ func (s *uiState) refreshJobHeader(requestID string) {
 		s.jobHeader.SetText("")
 		return
 	}
-	exitCode := ""
-	if info.Result != nil {
-		exitCode = fmt.Sprintf("  exit_code=%d  duration_ms=%d", info.Result.ExitCode, info.Result.DurationMs)
-	}
-	s.jobHeader.SetText(fmt.Sprintf("job: %s  status=%s%s  client=%s", info.ID, info.Status, exitCode, info.ClientID))
+	s.jobHeader.SetText(jobHeaderText(info, s.follow))
 }
 
 func (s *uiState) refreshJobLog(requestID string) {
@@ -1430,10 +1452,13 @@ func buildJobPage(app *tview.Application, pages *tview.Pages, s *uiState, cfg Se
 		pages.AddPage("confirm_kill", m, true, true)
 	}
 	btnKill := tview.NewButton("Kill").SetSelectedFunc(openKillConfirm)
+	btnFollow := tview.NewButton(jobFollowLabel(s.follow))
 	toggleFollow := func() {
 		s.follow = !s.follow
+		btnFollow.SetLabel(jobFollowLabel(s.follow))
+		s.refreshJobHeader(activeRequestID)
 	}
-	btnFollow := tview.NewButton("Toggle follow").SetSelectedFunc(toggleFollow)
+	btnFollow.SetSelectedFunc(toggleFollow)
 
 	back := func() {
 		s.leaveJobPage(app, pages, s.jobsList)
@@ -1447,7 +1472,7 @@ func buildJobPage(app *tview.Application, pages *tview.Pages, s *uiState, cfg Se
 	header := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(tabs, 1, 0, false).
 		AddItem(s.jobTabs, 1, 0, false).
-		AddItem(s.jobHeader, 1, 0, false).
+		AddItem(s.jobHeader, 2, 0, false).
 		AddItem(btns, 1, 0, true)
 	log := s.jobLog
 	log.SetBorder(true).SetTitle("Output")
@@ -1456,7 +1481,7 @@ func buildJobPage(app *tview.Application, pages *tview.Pages, s *uiState, cfg Se
 	s.refreshJobLog(activeRequestID)
 
 	root := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(header, 4, 0, true).
+		AddItem(header, 5, 0, true).
 		AddItem(log, 0, 1, true)
 
 	setMode := func(mode string) {
