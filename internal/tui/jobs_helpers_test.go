@@ -76,22 +76,25 @@ func TestJobListSignatureChangesOnStatusAndOrder(t *testing.T) {
 		{ID: "new", Status: "RUNNING", CreatedAt: "2026-02-11T01:01:00Z", Summary: "cmd"},
 		{ID: "old", Status: "SUCCEEDED", CreatedAt: "2026-02-11T01:00:00Z", Summary: "cmd"},
 	}
-	base := jobListSignature(items)
+	base := jobListSignature(true, items)
 	if base == "" {
 		t.Fatal("empty signature")
 	}
-	if got := jobListSignature(append([]httpapi.TUIRequest(nil), items...)); got != base {
+	if got := jobListSignature(true, append([]httpapi.TUIRequest(nil), items...)); got != base {
 		t.Fatalf("same items signature changed")
+	}
+	if got := jobListSignature(false, items); got == base {
+		t.Fatalf("mode change did not change signature")
 	}
 
 	items[0].Status = "KILLED"
-	if got := jobListSignature(items); got == base {
+	if got := jobListSignature(true, items); got == base {
 		t.Fatalf("status change did not change signature")
 	}
 
 	items[0].Status = "RUNNING"
 	items[0], items[1] = items[1], items[0]
-	if got := jobListSignature(items); got == base {
+	if got := jobListSignature(true, items); got == base {
 		t.Fatalf("order change did not change signature")
 	}
 }

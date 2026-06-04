@@ -745,7 +745,7 @@ func (s *uiState) refreshDetails(requestID string) {
 
 func (s *uiState) refreshJobs() {
 	items := s.api.ListJobsForTUI(s.showAllJobs)
-	sig := jobListSignature(items)
+	sig := jobListSignature(s.showAllJobs, items)
 	if sig == s.jobListSig {
 		return
 	}
@@ -768,8 +768,14 @@ func (s *uiState) refreshJobs() {
 	s.jobListSig = sig
 }
 
-func jobListSignature(items []httpapi.TUIRequest) string {
+func jobListSignature(showAll bool, items []httpapi.TUIRequest) string {
 	var b strings.Builder
+	if showAll {
+		b.WriteString("all")
+	} else {
+		b.WriteString("running")
+	}
+	b.WriteByte('\x00')
 	for _, it := range items {
 		b.WriteString(it.ID)
 		b.WriteByte('\x00')
@@ -936,6 +942,7 @@ func buildDashboardPage(app *tview.Application, pages *tview.Pages, s *uiState, 
 	s.statusBar = tview.NewTextView().SetDynamicColors(false)
 	s.jobsModeBtn = tview.NewButton("").SetSelectedFunc(func() {
 		s.toggleJobsMode()
+		app.SetFocus(s.jobsList)
 	})
 	s.setJobsModeLabel()
 
@@ -1029,6 +1036,14 @@ func buildDashboardPage(app *tview.Application, pages *tview.Pages, s *uiState, 
 			return
 		}
 		s.openJobPage(app, pages, cfg, id)
+	})
+	s.jobsList.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
+		switch hotkeyRune(ev.Rune()) {
+		case 'm':
+			s.toggleJobsMode()
+			return nil
+		}
+		return ev
 	})
 
 	root.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
