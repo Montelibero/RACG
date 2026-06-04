@@ -31,6 +31,9 @@ func TestOpenAPIDocumentCoversCoreEndpoints(t *testing.T) {
 		"/v1/requests/{request_id}",
 		"/v1/requests/{request_id}/decision",
 		"/v1/requests/{request_id}/kill",
+		"/v1/requests/{request_id}/logs/live",
+		"/v1/requests/{request_id}/logs/stdout",
+		"/v1/requests/{request_id}/logs/stderr",
 		"/v1/events",
 	}
 	for _, p := range wantPaths {

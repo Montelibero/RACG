@@ -60,8 +60,7 @@ func RunServeUI(ctx context.Context, cfg ServeUIConfig) error {
 
 	app.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
 		if ev.Key() == tcell.KeyEsc {
-			if state.overlayClose != nil {
-				state.overlayClose()
+			if state.closeOverlay(pages) {
 				return nil
 			}
 		}
@@ -70,25 +69,35 @@ func RunServeUI(ctx context.Context, cfg ServeUIConfig) error {
 			state.cycleFocus(app)
 			return nil
 		case tcell.KeyF1:
-			state.openHelp(pages)
+			state.openHelp(app, pages)
 			return nil
 		case tcell.KeyEsc:
 			state.back(app, pages)
 			return nil
 		}
+		if state.page != "job" {
+			switch ev.Rune() {
+			case '1':
+				state.showDashboard(app, pages)
+				return nil
+			case '2':
+				state.showDashboard(app, pages)
+				if state.jobsList != nil {
+					app.SetFocus(state.jobsList)
+				}
+				return nil
+			case '3':
+				state.showRules(app, pages)
+				return nil
+			case '4':
+				state.showHistory(app, pages)
+				return nil
+			}
+		}
 		switch hotkeyRune(ev.Rune()) {
 		case 'q':
 			cfg.ExitFunc()
 			app.Stop()
-			return nil
-		case '?':
-			state.openHelp(pages)
-			return nil
-		case 'r':
-			state.showRules(app, pages)
-			return nil
-		case 'h':
-			state.showHistory(app, pages)
 			return nil
 		}
 		return ev
@@ -144,6 +153,7 @@ type uiState struct {
 	page string
 
 	// Dashboard widgets.
+	mainTabs    *tview.TextView
 	pendingList *tview.List
 	filter      *tview.InputField
 	details     *tview.TextView
@@ -154,6 +164,8 @@ type uiState struct {
 	// Job view widgets.
 	jobHeader *tview.TextView
 	jobLog    *tview.TextView
+	jobTabs   *tview.TextView
+	jobMode   string
 	follow    bool
 
 	// Focus cycle order.
@@ -179,7 +191,7 @@ type uiState struct {
 }
 
 func newUIState(api *httpapi.API, st *store.Store) *uiState {
-	return &uiState{api: api, store: st, follow: true, page: "pairing", showAllJobs: false}
+	return &uiState{api: api, store: st, follow: true, page: "pairing", showAllJobs: true, jobMode: "combined"}
 }
 
 func (s *uiState) setCurrentPage(p string) { s.page = p }
@@ -248,13 +260,71 @@ func (s *uiState) switchMainPage(pages *tview.Pages, name string) {
 	if pages == nil {
 		return
 	}
-	for _, p := range []string{"pairing", "dashboard", "rules", "history"} {
+	s.closeOverlay(pages)
+	for _, p := range []string{"pairing", "dashboard", "rules", "history", "help", "copy", "confirm_kill"} {
 		pages.HidePage(p)
 	}
 	pages.ShowPage(name)
+	pages.SendToFront(name)
+}
+
+func (s *uiState) renderMainTabs() string {
+	type tab struct {
+		page  string
+		key   string
+		label string
+	}
+	tabs := []tab{
+		{page: "dashboard", key: "1", label: "Pending"},
+		{page: "dashboard", key: "2", label: "Jobs"},
+		{page: "rules", key: "3", label: "Rules"},
+		{page: "history", key: "4", label: "History"},
+	}
+	var b strings.Builder
+	for i, t := range tabs {
+		if i > 0 {
+			b.WriteString("   ")
+		}
+		text := t.key + " " + t.label
+		if s.page == t.page {
+			if t.key == "2" && s.jobsList != nil {
+				// Jobs shares the dashboard page; focus marks it active.
+				text = t.key + " " + t.label
+			}
+			if t.key != "2" || s.pendingList == nil {
+				b.WriteString("[" + text + "]")
+				continue
+			}
+		}
+		b.WriteString(text)
+	}
+	return b.String()
+}
+
+func pendingActionHint() string {
+	return "Actions: a once | s session | A always | d deny | mouse"
+}
+
+func jobViewModeLabel(mode string) string {
+	modes := []string{"combined", "stdout", "stderr", "meta"}
+	labels := map[string]string{"combined": "Combined", "stdout": "stdout", "stderr": "stderr", "meta": "meta"}
+	var b strings.Builder
+	for i, m := range modes {
+		if i > 0 {
+			b.WriteString(" ")
+		}
+		label := labels[m]
+		if mode == m {
+			b.WriteString("[" + label + "]")
+		} else {
+			b.WriteString(label)
+		}
+	}
+	return b.String()
 }
 
 func (s *uiState) showDashboard(app *tview.Application, pages *tview.Pages) {
+	s.closeOverlay(pages)
 	s.switchMainPage(pages, "dashboard")
 	s.page = "dashboard"
 	s.refresh()
@@ -272,6 +342,7 @@ func (s *uiState) maybeAutoSwitchToDashboard(app *tview.Application, pages *tvie
 }
 
 func (s *uiState) showRules(app *tview.Application, pages *tview.Pages) {
+	s.closeOverlay(pages)
 	s.switchMainPage(pages, "rules")
 	s.page = "rules"
 	if s.rulesRefresh != nil {
@@ -280,6 +351,7 @@ func (s *uiState) showRules(app *tview.Application, pages *tview.Pages) {
 }
 
 func (s *uiState) showHistory(app *tview.Application, pages *tview.Pages) {
+	s.closeOverlay(pages)
 	s.switchMainPage(pages, "history")
 	s.page = "history"
 	if s.historyRefresh != nil {
@@ -288,16 +360,31 @@ func (s *uiState) showHistory(app *tview.Application, pages *tview.Pages) {
 }
 
 func (s *uiState) back(app *tview.Application, pages *tview.Pages) {
-	if s.page == "dashboard" {
-		s.switchMainPage(pages, "pairing")
-		s.page = "pairing"
+	if s.page == "dashboard" || s.page == "pairing" {
 		return
 	}
-	// If we're leaving a job page via global Esc, remove it to avoid stacking stale job pages.
-	if s.page == "job" && pages != nil {
-		pages.RemovePage("job")
+	if s.page == "job" {
+		s.leaveJobPage(app, pages, s.pendingList)
+		return
 	}
 	s.showDashboard(app, pages)
+}
+
+func (s *uiState) leaveJobPage(app *tview.Application, pages *tview.Pages, focus tview.Primitive) {
+	s.closeOverlay(pages)
+	if pages != nil {
+		// Keep a normal page visible before removing "job". tview otherwise
+		// auto-shows the last remaining page, which is the hidden help overlay.
+		pages.ShowPage("dashboard")
+		pages.RemovePage("job")
+		pages.HidePage("help")
+		pages.SendToFront("dashboard")
+	}
+	s.setCurrentPage("dashboard")
+	s.refresh()
+	if app != nil && focus != nil {
+		app.SetFocus(focus)
+	}
 }
 
 func (s *uiState) cycleFocus(app *tview.Application) {
@@ -322,11 +409,58 @@ func (s *uiState) cycleFocusTo(app *tview.Application, p tview.Primitive) {
 	app.SetFocus(p)
 }
 
-func (s *uiState) openHelp(pages *tview.Pages) {
+func (s *uiState) closeOverlay(pages *tview.Pages) bool {
+	closed := false
+	if s.overlayClose != nil {
+		close := s.overlayClose
+		close()
+		closed = true
+	}
+	if pages != nil {
+		if pageVisible(pages, "help") {
+			pages.HidePage("help")
+			closed = true
+		}
+		if pageVisible(pages, "copy") {
+			pages.RemovePage("copy")
+			closed = true
+		}
+		if pageVisible(pages, "confirm_kill") {
+			pages.RemovePage("confirm_kill")
+			closed = true
+		}
+	}
+	return closed
+}
+
+func pageVisible(pages *tview.Pages, name string) bool {
+	for _, visible := range pages.GetPageNames(true) {
+		if visible == name {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *uiState) openHelp(app *tview.Application, pages *tview.Pages) {
+	s.closeOverlay(pages)
+	var prevFocus tview.Primitive
+	if app != nil {
+		prevFocus = app.GetFocus()
+	}
 	pages.ShowPage("help")
+	pages.SendToFront("help")
+	if app != nil {
+		if p := pages.GetPage("help"); p != nil {
+			app.SetFocus(p)
+		}
+	}
 	s.overlayClose = func() {
 		pages.HidePage("help")
 		s.overlayClose = nil
+		if app != nil && prevFocus != nil {
+			app.SetFocus(prevFocus)
+		}
 	}
 }
 
@@ -483,7 +617,7 @@ func (s *uiState) onEvent(e events.Event) {
 		if s.selectedJob == e.RequestID && s.jobLog != nil {
 			chunk, _ := e.Data["chunk"].(string)
 			stream, _ := e.Data["stream"].(string)
-			if chunk != "" {
+			if chunk != "" && s.jobMode == "combined" {
 				pfx := "O: "
 				if stream == "stderr" {
 					pfx = "E: "
@@ -499,6 +633,9 @@ func (s *uiState) onEvent(e events.Event) {
 }
 
 func (s *uiState) refresh() {
+	if s.mainTabs != nil {
+		s.mainTabs.SetText(s.renderMainTabs())
+	}
 	if s.pendingList != nil {
 		s.refreshPending()
 	}
@@ -514,13 +651,16 @@ func (s *uiState) refresh() {
 	if s.jobHeader != nil && s.selectedJob != "" {
 		s.refreshJobHeader(s.selectedJob)
 	}
+	if s.jobLog != nil && s.selectedJob != "" {
+		s.refreshJobLog(s.selectedJob)
+	}
 }
 
 func (s *uiState) refreshStatus() {
 	pn := len(s.api.ListPendingForTUI())
 	rn := len(s.api.ListRunningForTUI())
 	mode := "ROOT MODE"
-	line := fmt.Sprintf("F1/? Help | Tab focus | a once | s session | A always | d deny | r rules | h history | q quit   %s   pending=%d running=%d",
+	line := fmt.Sprintf("F1 help | 1 pending | 2 jobs | 3 rules | 4 history | Esc back | q quit   %s   pending=%d running=%d",
 		mode, pn, rn)
 	if time.Now().Before(s.toastUntil) && s.toastText != "" {
 		line = s.toastText + "   |   " + line
@@ -628,7 +768,31 @@ func (s *uiState) refreshJobHeader(requestID string) {
 		s.jobHeader.SetText("")
 		return
 	}
-	s.jobHeader.SetText(fmt.Sprintf("job: %s  status=%s  client=%s", info.ID, info.Status, info.ClientID))
+	exitCode := ""
+	if info.Result != nil {
+		exitCode = fmt.Sprintf("  exit_code=%d  duration_ms=%d", info.Result.ExitCode, info.Result.DurationMs)
+	}
+	s.jobHeader.SetText(fmt.Sprintf("job: %s  status=%s%s  client=%s", info.ID, info.Status, exitCode, info.ClientID))
+}
+
+func (s *uiState) refreshJobLog(requestID string) {
+	if s.jobLog == nil || s.api == nil {
+		return
+	}
+	if s.jobTabs != nil {
+		s.jobTabs.SetText("Streams: " + jobViewModeLabel(s.jobMode) + "    keys: 1 combined 2 stdout 3 stderr 4 meta | k kill | f follow | Esc/b back")
+	}
+	info, ok := s.api.GetRequestInfoForTUI(requestID)
+	if !ok {
+		s.jobLog.SetText("")
+		return
+	}
+	combined, truncated := s.api.GetLiveJobOutput(requestID)
+	text := jobViewText(s.jobMode, info, combined, truncated)
+	s.jobLog.SetText(text)
+	if s.follow {
+		s.jobLog.ScrollToEnd()
+	}
 }
 
 func buildPairingPage(ctx context.Context, app *tview.Application, pages *tview.Pages, s *uiState, cfg ServeUIConfig) tview.Primitive {
@@ -724,6 +888,7 @@ func buildPairingPage(ctx context.Context, app *tview.Application, pages *tview.
 }
 
 func buildDashboardPage(app *tview.Application, pages *tview.Pages, s *uiState, cfg ServeUIConfig) tview.Primitive {
+	s.mainTabs = tview.NewTextView().SetDynamicColors(false).SetTextAlign(tview.AlignLeft)
 	s.filter = tview.NewInputField().SetLabel("filter: ")
 	s.pendingList = tview.NewList().ShowSecondaryText(false)
 	s.details = tview.NewTextView().SetDynamicColors(false).SetScrollable(true)
@@ -749,6 +914,8 @@ func buildDashboardPage(app *tview.Application, pages *tview.Pages, s *uiState, 
 	center := tview.NewFlex().SetDirection(tview.FlexRow)
 	center.SetBorder(true).SetTitle("Request details")
 	center.AddItem(s.details, 0, 1, false)
+	actionHint := tview.NewTextView().SetDynamicColors(false).SetText(pendingActionHint())
+	center.AddItem(actionHint, 1, 0, false)
 
 	btnOnce := tview.NewButton("Allow once").SetSelectedFunc(func() { s.doDecision("ALLOW_ONCE") })
 	btnSess := tview.NewButton("Allow session").SetSelectedFunc(func() { s.doDecision("ALLOW_SESSION") })
@@ -764,7 +931,7 @@ func buildDashboardPage(app *tview.Application, pages *tview.Pages, s *uiState, 
 	right := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(s.jobsModeBtn, 1, 0, false).
 		AddItem(s.jobsList, 0, 1, true)
-	right.SetBorder(true).SetTitle("Running jobs")
+	right.SetBorder(true).SetTitle("Jobs")
 
 	body := tview.NewFlex().SetDirection(tview.FlexColumn).
 		AddItem(left, 0, 3, true).
@@ -772,6 +939,7 @@ func buildDashboardPage(app *tview.Application, pages *tview.Pages, s *uiState, 
 		AddItem(right, 0, 3, false)
 
 	root := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(s.mainTabs, 1, 0, false).
 		AddItem(body, 0, 1, true).
 		AddItem(s.statusBar, 1, 0, false)
 
@@ -823,6 +991,24 @@ func buildDashboardPage(app *tview.Application, pages *tview.Pages, s *uiState, 
 		s.openJobPage(app, pages, cfg, id)
 	})
 
+	root.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
+		switch ev.Rune() {
+		case '1':
+			app.SetFocus(s.pendingList)
+			return nil
+		case '2':
+			app.SetFocus(s.jobsList)
+			return nil
+		case '3':
+			s.showRules(app, pages)
+			return nil
+		case '4':
+			s.showHistory(app, pages)
+			return nil
+		}
+		return ev
+	})
+
 	s.focus = []tview.Primitive{s.pendingList, s.details, s.jobsList}
 	s.setCurrentPage("dashboard")
 	s.refresh()
@@ -838,16 +1024,63 @@ func (s *uiState) doDecision(dec string) {
 	s.refresh()
 }
 
+func jobViewText(mode string, info httpapi.TUIRequestInfo, combined string, liveTruncated bool) string {
+	if mode == "" {
+		mode = "combined"
+	}
+	switch mode {
+	case "stdout":
+		if info.Result == nil {
+			return "stdout is available after the request finishes.\n"
+		}
+		return info.Result.Stdout
+	case "stderr":
+		if info.Result == nil {
+			return "stderr is available after the request finishes.\n"
+		}
+		return info.Result.Stderr
+	case "meta":
+		var b strings.Builder
+		fmt.Fprintf(&b, "request_id: %s\nstatus: %s\nclient_id: %s\nsession_id: %s\ncreated_at: %s\n",
+			info.ID, info.Status, info.ClientID, info.SessionID, info.CreatedAt)
+		if len(info.RiskFlags) > 0 {
+			fmt.Fprintf(&b, "risk: %s\n", strings.Join(info.RiskFlags, ", "))
+		}
+		if info.Decision != nil {
+			fmt.Fprintf(&b, "\ndecision: %s\nsource: %s\nrule_id: %s\ndecided_at: %s\n",
+				info.Decision.Decision, info.Decision.DecisionSource, info.Decision.RuleID, info.Decision.DecidedAt)
+		}
+		if info.Result != nil {
+			fmt.Fprintf(&b, "\nresult: %s\nexit_code: %d\nduration_ms: %d\nstdout_truncated: %t\nstderr_truncated: %t\nstdout_sha256: %s\nstderr_sha256: %s\n",
+				info.Result.Status, info.Result.ExitCode, info.Result.DurationMs, info.Result.StdoutTruncated, info.Result.StderrTruncated, info.Result.StdoutSHA256, info.Result.StderrSHA256)
+		}
+		return b.String()
+	default:
+		if combined == "" && info.Result != nil {
+			combined = "O: " + info.Result.Stdout
+			if info.Result.Stderr != "" {
+				combined += "E: " + info.Result.Stderr
+			}
+		}
+		if liveTruncated {
+			return "[live output truncated; showing tail]\n" + combined
+		}
+		return combined
+	}
+}
+
 func buildJobPage(app *tview.Application, pages *tview.Pages, s *uiState, cfg ServeUIConfig, requestID string) tview.Primitive {
 	s.selectedJob = requestID
 	activeRequestID := requestID
 	s.jobHeader = tview.NewTextView().SetDynamicColors(false)
 	s.jobLog = tview.NewTextView().SetDynamicColors(false).SetScrollable(true)
+	s.jobTabs = tview.NewTextView().SetDynamicColors(false).SetTextAlign(tview.AlignLeft)
+	s.jobMode = "combined"
 	s.follow = true
 	tabs := tview.NewTextView().SetDynamicColors(false).SetTextAlign(tview.AlignLeft)
 	tabs.SetText(s.renderJobTabs(activeRequestID))
 
-	btnKill := tview.NewButton("Kill").SetSelectedFunc(func() {
+	openKillConfirm := func() {
 		m := tview.NewModal().
 			SetText("Kill selected job?").
 			AddButtons([]string{"Cancel", "Kill"}).
@@ -857,19 +1090,23 @@ func buildJobPage(app *tview.Application, pages *tview.Pages, s *uiState, cfg Se
 					_ = cfg.API.KillForTUI(activeRequestID)
 				}
 			})
+		m.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
+			if ev.Key() == tcell.KeyEsc {
+				pages.RemovePage("confirm_kill")
+				return nil
+			}
+			return ev
+		})
 		pages.AddPage("confirm_kill", m, true, true)
-	})
+	}
+	btnKill := tview.NewButton("Kill").SetSelectedFunc(openKillConfirm)
 	toggleFollow := func() {
 		s.follow = !s.follow
 	}
 	btnFollow := tview.NewButton("Toggle follow").SetSelectedFunc(toggleFollow)
 
 	back := func() {
-		pages.RemovePage("job")
-		pages.ShowPage("dashboard")
-		s.setCurrentPage("dashboard")
-		s.refresh()
-		app.SetFocus(s.jobsList)
+		s.leaveJobPage(app, pages, s.jobsList)
 	}
 	btnBack := tview.NewButton("Back").SetSelectedFunc(back)
 	btns := tview.NewFlex().SetDirection(tview.FlexColumn).
@@ -879,24 +1116,41 @@ func buildJobPage(app *tview.Application, pages *tview.Pages, s *uiState, cfg Se
 
 	header := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(tabs, 1, 0, false).
+		AddItem(s.jobTabs, 1, 0, false).
 		AddItem(s.jobHeader, 1, 0, false).
 		AddItem(btns, 1, 0, true)
 	log := s.jobLog
 	log.SetBorder(true).SetTitle("Output")
 
-	combined, _ := cfg.API.GetLiveJobOutput(activeRequestID)
-	log.SetText(combined)
-	log.ScrollToEnd()
 	s.refreshJobHeader(activeRequestID)
+	s.refreshJobLog(activeRequestID)
 
 	root := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(header, 2, 0, true).
+		AddItem(header, 4, 0, true).
 		AddItem(log, 0, 1, true)
 
+	setMode := func(mode string) {
+		s.jobMode = mode
+		s.refreshJobLog(activeRequestID)
+	}
 	root.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
 		switch ev.Key() {
 		case tcell.KeyEsc:
 			back()
+			return nil
+		}
+		switch ev.Rune() {
+		case '1':
+			setMode("combined")
+			return nil
+		case '2':
+			setMode("stdout")
+			return nil
+		case '3':
+			setMode("stderr")
+			return nil
+		case '4':
+			setMode("meta")
 			return nil
 		}
 		if ev.Modifiers()&tcell.ModAlt != 0 {
@@ -910,8 +1164,14 @@ func buildJobPage(app *tview.Application, pages *tview.Pages, s *uiState, cfg Se
 			}
 		}
 		switch hotkeyRune(ev.Rune()) {
+		case 'b':
+			back()
+			return nil
 		case 'f':
 			toggleFollow()
+			return nil
+		case 'k':
+			openKillConfirm()
 			return nil
 		case '[':
 			if id := s.nextJobID(-1); id != "" {
@@ -932,15 +1192,37 @@ func buildJobPage(app *tview.Application, pages *tview.Pages, s *uiState, cfg Se
 
 func buildHelpModal(pages *tview.Pages, s *uiState) tview.Primitive {
 	m := tview.NewModal().
-		SetText("Keys:\n  Tab focus\n  a once / s session / A always / d deny\n  r rules / h history\n  Esc back / q quit\n  F1 or ? help\n").
+		SetText(helpText()).
 		AddButtons([]string{"Close"}).
 		SetDoneFunc(func(_ int, _ string) {
-			pages.HidePage("help")
 			if s.overlayClose != nil {
-				s.overlayClose = nil
+				s.closeOverlay(pages)
+				return
 			}
+			pages.HidePage("help")
 		})
+	m.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
+		if ev.Key() == tcell.KeyEsc {
+			if s.overlayClose != nil {
+				s.closeOverlay(pages)
+				return nil
+			}
+			pages.HidePage("help")
+			return nil
+		}
+		return ev
+	})
 	return m
+}
+
+func helpText() string {
+	return "Keys:\n" +
+		"  Tab focus\n" +
+		"  1 pending / 2 jobs / 3 rules / 4 history\n" +
+		"  pending: a once / s session / A always / d deny\n" +
+		"  job view: 1 combined / 2 stdout / 3 stderr / 4 meta\n" +
+		"  job view: b or Esc back / k kill / f follow\n" +
+		"  q quit / F1 help\n"
 }
 
 func buildRulesPage(app *tview.Application, pages *tview.Pages, s *uiState, cfg ServeUIConfig) tview.Primitive {

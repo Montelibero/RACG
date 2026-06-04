@@ -46,6 +46,52 @@ curl -sS http://127.0.0.1:8777/v1/info
 curl -sS http://127.0.0.1:8777/openapi.json
 ```
 
+## Client helper commands
+
+Log in once with the pairing code shown by `racg serve`:
+
+```bash
+racg login --host http://127.0.0.1:8777 --pairing-code ABC123
+racg session status
+```
+
+Then run client helper commands without passing a token each time:
+
+```bash
+racg run -- bash -lc 'date && uname -a'
+racg request cancel <request_id>
+racg request logs <request_id> --live
+racg request tail <request_id>
+racg request logs <request_id> --stdout
+racg request logs <request_id> --stderr
+racg logout
+```
+
+You can still override saved config with `--host`, `--token`, `RACG_HOST`, and `RACG_TOKEN`. Client login state is stored in `~/.config/racg/client.json` by default; set `RACG_CLIENT_CONFIG` to use a different path.
+
+`racg run` creates a `cmd.run` request and waits until it reaches a terminal status, then prints compact sections: `request_id`, `status`, `exit_code`, `stdout`, `stderr`.
+`racg request logs` reads raw stream endpoints (`/v1/requests/<id>/logs/stdout` and `/v1/requests/<id>/logs/stderr`) so large output can be consumed without parsing the full request JSON.
+Use `racg request logs <id> --live` for the current in-memory live output snapshot while a request is still running, or `racg request tail <id>` to follow live output until the request reaches a terminal status.
+
+## Rule presets
+
+Install narrow read-only diagnostics rules into the SQLite rules store:
+
+```bash
+racg rules presets list
+racg rules presets install readonly-diagnostics --db racg.db
+```
+
+`readonly-diagnostics` auto-approves:
+- `git status`
+- `git log`
+- `kubectl get`
+- `kubectl describe`
+- `kubectl logs`
+- `curl *health*`
+
+It does not include write/destructive operations such as `kubectl apply/delete/patch`, `git push`, `sudo`, firewall commands, or filesystem deletion.
+
 ## Safe vs Dangerous (`ALLOW_ALWAYS`)
 
 `ALLOW_ALWAYS` разрешен для запросов без dangerous-флагов.

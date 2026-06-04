@@ -117,6 +117,12 @@ func argvHasPrefix(argv, prefix []string) bool {
 		return false
 	}
 	for i := range prefix {
+		if strings.Contains(prefix[i], "*") {
+			if !globMatch(prefix[i], argv[i]) {
+				return false
+			}
+			continue
+		}
 		if argv[i] != prefix[i] {
 			return false
 		}
@@ -142,6 +148,9 @@ func globMatch(pattern, s string) bool {
 	if pattern == "*" {
 		return true
 	}
+	if strings.Count(pattern, "*") > 1 {
+		return multiStarGlobMatch(pattern, s)
+	}
 	idx := strings.Index(pattern, "*")
 	if idx < 0 {
 		return pattern == s
@@ -155,4 +164,27 @@ func globMatch(pattern, s string) bool {
 		return true
 	}
 	return strings.HasSuffix(s, suf)
+}
+
+func multiStarGlobMatch(pattern, s string) bool {
+	parts := strings.Split(pattern, "*")
+	pos := 0
+	for i, part := range parts {
+		if part == "" {
+			continue
+		}
+		if i == 0 && !strings.HasPrefix(s, part) {
+			return false
+		}
+		idx := strings.Index(s[pos:], part)
+		if idx < 0 {
+			return false
+		}
+		pos += idx + len(part)
+	}
+	last := parts[len(parts)-1]
+	if last != "" && !strings.HasSuffix(s, last) {
+		return false
+	}
+	return true
 }

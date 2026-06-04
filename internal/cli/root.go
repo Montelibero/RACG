@@ -44,6 +44,16 @@ func (r *Root) Run(args []string) int {
 	switch rest[0] {
 	case "serve":
 		return NewServeCmd(r.stdout, r.stderr).Run(rest[1:])
+	case "login":
+		return NewAuthCmd(r.stdout, r.stderr).RunLogin(rest[1:])
+	case "logout":
+		return NewAuthCmd(r.stdout, r.stderr).RunLogout(rest[1:])
+	case "session":
+		return NewAuthCmd(r.stdout, r.stderr).RunSession(rest[1:])
+	case "run":
+		return NewRequestCmd(r.stdout, r.stderr).RunRun(rest[1:])
+	case "request":
+		return NewRequestCmd(r.stdout, r.stderr).Run(rest[1:])
 	case "rules":
 		return NewRulesCmd(r.stdout, r.stderr, config.Defaults().DBPath).Run(rest[1:])
 	case "sessions":
@@ -55,5 +65,5 @@ func (r *Root) Run(args []string) int {
 }
 
 func usage() string {
-	return "usage: racg [--version] <command>\n\ncommands:\n  serve\n  rules\n  sessions\n\nquick start:\n  sudo racg serve -listen-addr 127.0.0.1 -port 8777\n"
+	return "usage: racg [--version] <command>\n\ncommands:\n  serve\n  login\n  logout\n  session\n  run\n  request\n  rules\n  sessions\n\nquick start:\n  sudo racg serve -listen-addr 127.0.0.1 -port 8777\n"
 }

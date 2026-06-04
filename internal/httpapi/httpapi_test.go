@@ -663,6 +663,61 @@ func TestKillRunningRequest(t *testing.T) {
 	<-fr.done
 }
 
+func TestKillPendingRequestCancelsIt(t *testing.T) {
+	cfg := config.Defaults()
+	clk := auth.NewFakeClock(time.Unix(1000, 0).UTC())
+	pair := auth.NewPairing(6, 3*time.Minute, clk)
+	tm := auth.NewTokenManager(clk)
+
+	api := New(cfg, WithPairing(pair), WithTokenManager(tm))
+
+	open := []byte(`{"client_id":"codex-home","pairing_code":"` + pair.Code() + `"}`)
+	rwOpen := httptest.NewRecorder()
+	api.Handler().ServeHTTP(rwOpen, httptest.NewRequest(http.MethodPost, "http://example/v1/session/open", bytes.NewReader(open)))
+	if rwOpen.Code != 200 {
+		t.Fatalf("open status=%d body=%s", rwOpen.Code, rwOpen.Body.String())
+	}
+	var openResp struct {
+		SessionToken string `json:"session_token"`
+	}
+	_ = json.Unmarshal(rwOpen.Body.Bytes(), &openResp)
+
+	createBody := []byte(`{"op":{"type":"cmd.run","payload":{"argv":["/bin/echo","hi"]}}}`)
+	createReq := httptest.NewRequest(http.MethodPost, "http://example/v1/requests", bytes.NewReader(createBody))
+	createReq.Header.Set("Authorization", "Bearer "+openResp.SessionToken)
+	createReq.Header.Set("Content-Type", "application/json")
+	createRw := httptest.NewRecorder()
+	api.Handler().ServeHTTP(createRw, createReq)
+	if createRw.Code != 200 {
+		t.Fatalf("create status=%d body=%s", createRw.Code, createRw.Body.String())
+	}
+	var created struct {
+		RequestID string `json:"request_id"`
+	}
+	_ = json.Unmarshal(createRw.Body.Bytes(), &created)
+
+	killReq := httptest.NewRequest(http.MethodPost, "http://example/v1/requests/"+created.RequestID+"/kill", nil)
+	killReq.Header.Set("Authorization", "Bearer "+openResp.SessionToken)
+	killRw := httptest.NewRecorder()
+	api.Handler().ServeHTTP(killRw, killReq)
+	if killRw.Code != 200 {
+		t.Fatalf("kill status=%d body=%s", killRw.Code, killRw.Body.String())
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "http://example/v1/requests/"+created.RequestID, nil)
+	getReq.Header.Set("Authorization", "Bearer "+openResp.SessionToken)
+	getRw := httptest.NewRecorder()
+	api.Handler().ServeHTTP(getRw, getReq)
+	if getRw.Code != 200 {
+		t.Fatalf("get status=%d body=%s", getRw.Code, getRw.Body.String())
+	}
+	var rec map[string]any
+	_ = json.Unmarshal(getRw.Body.Bytes(), &rec)
+	if rec["status"] != "CANCELED" {
+		t.Fatalf("status=%v body=%s", rec["status"], getRw.Body.String())
+	}
+}
+
 func TestFSReadExecution(t *testing.T) {
 	cfg := config.Defaults()
 	clk := auth.NewFakeClock(time.Unix(1000, 0).UTC())
@@ -740,6 +795,111 @@ func TestFSReadExecution(t *testing.T) {
 			t.Fatalf("stdout=%q", res["stdout"])
 		}
 		return
+	}
+}
+
+func TestRequestLogsEndpointsReturnRawStreams(t *testing.T) {
+	cfg := config.Defaults()
+	clk := auth.NewFakeClock(time.Unix(1000, 0).UTC())
+	pair := auth.NewPairing(6, 3*time.Minute, clk)
+	tm := auth.NewTokenManager(clk)
+
+	re := rules.NewEngine()
+	re.AddAlways(rules.Rule{ID: "allow-sh", OpType: "cmd.run", Cmd: &rules.CmdRule{ArgvPrefix: []string{"/bin/sh"}}})
+
+	api := New(cfg, WithPairing(pair), WithTokenManager(tm), WithRulesEngine(re))
+
+	open := []byte(`{"client_id":"codex-home","pairing_code":"` + pair.Code() + `"}`)
+	rwOpen := httptest.NewRecorder()
+	api.Handler().ServeHTTP(rwOpen, httptest.NewRequest(http.MethodPost, "http://example/v1/session/open", bytes.NewReader(open)))
+	if rwOpen.Code != 200 {
+		t.Fatalf("open status=%d body=%s", rwOpen.Code, rwOpen.Body.String())
+	}
+	var openResp struct {
+		SessionToken string `json:"session_token"`
+	}
+	_ = json.Unmarshal(rwOpen.Body.Bytes(), &openResp)
+
+	createBody := []byte(`{"op":{"type":"cmd.run","payload":{"argv":["/bin/sh","-c","echo out; echo err >&2"]}}}`)
+	createReq := httptest.NewRequest(http.MethodPost, "http://example/v1/requests", bytes.NewReader(createBody))
+	createReq.Header.Set("Authorization", "Bearer "+openResp.SessionToken)
+	createReq.Header.Set("Content-Type", "application/json")
+	createRw := httptest.NewRecorder()
+	api.Handler().ServeHTTP(createRw, createReq)
+	if createRw.Code != 200 {
+		t.Fatalf("create status=%d body=%s", createRw.Code, createRw.Body.String())
+	}
+	var created struct {
+		RequestID string `json:"request_id"`
+	}
+	_ = json.Unmarshal(createRw.Body.Bytes(), &created)
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for {
+		if time.Now().After(deadline) {
+			t.Fatalf("request did not finish in time")
+		}
+		getReq := httptest.NewRequest(http.MethodGet, "http://example/v1/requests/"+created.RequestID, nil)
+		getReq.Header.Set("Authorization", "Bearer "+openResp.SessionToken)
+		getRw := httptest.NewRecorder()
+		api.Handler().ServeHTTP(getRw, getReq)
+		var rec map[string]any
+		_ = json.Unmarshal(getRw.Body.Bytes(), &rec)
+		if rec["status"] == "SUCCEEDED" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	stdoutReq := httptest.NewRequest(http.MethodGet, "http://example/v1/requests/"+created.RequestID+"/logs/stdout", nil)
+	stdoutReq.Header.Set("Authorization", "Bearer "+openResp.SessionToken)
+	stdoutRw := httptest.NewRecorder()
+	api.Handler().ServeHTTP(stdoutRw, stdoutReq)
+	if stdoutRw.Code != 200 {
+		t.Fatalf("stdout status=%d body=%s", stdoutRw.Code, stdoutRw.Body.String())
+	}
+	if got := stdoutRw.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
+		t.Fatalf("stdout content-type=%q", got)
+	}
+	if stdoutRw.Body.String() != "out\n" {
+		t.Fatalf("stdout=%q", stdoutRw.Body.String())
+	}
+
+	stderrReq := httptest.NewRequest(http.MethodGet, "http://example/v1/requests/"+created.RequestID+"/logs/stderr", nil)
+	stderrReq.Header.Set("Authorization", "Bearer "+openResp.SessionToken)
+	stderrRw := httptest.NewRecorder()
+	api.Handler().ServeHTTP(stderrRw, stderrReq)
+	if stderrRw.Code != 200 {
+		t.Fatalf("stderr status=%d body=%s", stderrRw.Code, stderrRw.Body.String())
+	}
+	if stderrRw.Body.String() != "err\n" {
+		t.Fatalf("stderr=%q", stderrRw.Body.String())
+	}
+}
+
+func TestLiveLogEndpointReturnsRunningOutput(t *testing.T) {
+	api := New(config.Defaults())
+	token, _ := api.tokens.Issue("sess1", "client1", time.Hour)
+
+	api.reqsMu.Lock()
+	api.reqs["req-live"] = requestRecord{ID: "req-live", Status: "RUNNING", SessionID: "sess1", ClientID: "client1"}
+	api.reqsMu.Unlock()
+	api.liveMu.Lock()
+	api.live["req-live"] = &liveOutput{combined: []byte("O: first\nE: warn\n"), maxBytes: 1024, requestID: "req-live"}
+	api.liveMu.Unlock()
+
+	req := httptest.NewRequest(http.MethodGet, "http://example/v1/requests/req-live/logs/live", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rw := httptest.NewRecorder()
+	api.Handler().ServeHTTP(rw, req)
+	if rw.Code != 200 {
+		t.Fatalf("status=%d body=%s", rw.Code, rw.Body.String())
+	}
+	if got := rw.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
+		t.Fatalf("content-type=%q", got)
+	}
+	if rw.Body.String() != "O: first\nE: warn\n" {
+		t.Fatalf("body=%q", rw.Body.String())
 	}
 }
 
@@ -899,6 +1059,7 @@ func TestAllowAlwaysCreatesPatchRuleAndAutoApprovesNext(t *testing.T) {
 	if decRw.Code != 200 {
 		t.Fatalf("dec status=%d body=%s", decRw.Code, decRw.Body.String())
 	}
+	waitRequestTerminalForTest(t, api, openResp.SessionToken, created1.RequestID)
 
 	always, err := st.LoadEnabledAlwaysRules(ctx)
 	if err != nil {
@@ -949,6 +1110,33 @@ func TestAllowAlwaysCreatesPatchRuleAndAutoApprovesNext(t *testing.T) {
 	}
 	if gotDec.RuleID != ruleID {
 		t.Fatalf("RuleID=%q want=%q", gotDec.RuleID, ruleID)
+	}
+	waitRequestTerminalForTest(t, api, openResp.SessionToken, created2.RequestID)
+}
+
+func waitRequestTerminalForTest(t *testing.T, api *API, token string, requestID string) map[string]any {
+	t.Helper()
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for {
+		if time.Now().After(deadline) {
+			t.Fatalf("request %s did not finish in time", requestID)
+		}
+		getReq := httptest.NewRequest(http.MethodGet, "http://example/v1/requests/"+requestID, nil)
+		getReq.Header.Set("Authorization", "Bearer "+token)
+		getRw := httptest.NewRecorder()
+		api.Handler().ServeHTTP(getRw, getReq)
+		if getRw.Code != 200 {
+			t.Fatalf("get status=%d body=%s", getRw.Code, getRw.Body.String())
+		}
+		var rec map[string]any
+		_ = json.Unmarshal(getRw.Body.Bytes(), &rec)
+		switch rec["status"] {
+		case "RUNNING", "APPROVED", "PENDING_APPROVAL":
+			time.Sleep(10 * time.Millisecond)
+			continue
+		default:
+			return rec
+		}
 	}
 }
 

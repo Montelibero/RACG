@@ -117,7 +117,7 @@
       },
       "RequestStatus": {
         "type": "string",
-        "enum": ["PENDING_APPROVAL", "APPROVED", "RUNNING", "SUCCEEDED", "FAILED", "TIMED_OUT", "KILLED", "DENIED"]
+        "enum": ["PENDING_APPROVAL", "APPROVED", "RUNNING", "SUCCEEDED", "FAILED", "TIMED_OUT", "KILLED", "DENIED", "CANCELED"]
       },
       "OpType": {
         "type": "string",
@@ -384,6 +384,53 @@
           "200": { "description": "ok", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OKResponse" } } } },
           "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
           "404": { "description": "not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+        }
+      }
+    },
+    "/v1/requests/{request_id}/logs/stdout": {
+      "get": {
+        "summary": "Get request stdout",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "request_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "raw stdout", "content": { "text/plain": { "schema": { "type": "string" } } } },
+          "400": { "description": "bad request", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "404": { "description": "not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "409": { "description": "request has no result yet", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+        }
+      }
+    },
+    "/v1/requests/{request_id}/logs/live": {
+      "get": {
+        "summary": "Get current live combined request output",
+        "description": "Returns the in-memory combined live output buffer for a request. This is available while a request is running and may be empty before the first output chunk.",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "request_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "live combined output", "content": { "text/plain": { "schema": { "type": "string" } } } },
+          "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "404": { "description": "not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+        }
+      }
+    },
+    "/v1/requests/{request_id}/logs/stderr": {
+      "get": {
+        "summary": "Get request stderr",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "request_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "raw stderr", "content": { "text/plain": { "schema": { "type": "string" } } } },
+          "400": { "description": "bad request", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "404": { "description": "not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "409": { "description": "request has no result yet", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
         }
       }
     },

@@ -3,11 +3,11 @@ package httpapi
 import (
 	"bytes"
 	"context"
-	"database/sql"
-	"crypto/subtle"
 	"crypto/sha256"
-	"encoding/hex"
+	"crypto/subtle"
+	"database/sql"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -153,11 +153,11 @@ type resultRecord struct {
 }
 
 type liveOutput struct {
-	combined   []byte
-	truncated  bool
-	updatedAt  time.Time
-	maxBytes   int
-	requestID  string
+	combined  []byte
+	truncated bool
+	updatedAt time.Time
+	maxBytes  int
+	requestID string
 }
 
 func (o *liveOutput) append(stream string, b []byte) {
@@ -231,18 +231,18 @@ func (a *API) RehydrateFromStore(ctx context.Context) error {
 				if errors.Is(err, sql.ErrNoRows) {
 					msg := "server restarted"
 					_ = a.st.InsertExecution(ctx, store.Execution{
-						RequestID:        r.ID,
-						StartedAt:        now,
-						FinishedAt:       now,
-						DurationMs:       0,
-						ExitCode:         -1,
-						Status:           "FAILED",
-						Stdout:           "",
-						Stderr:           msg,
-						StdoutTruncated:  false,
-						StderrTruncated:  false,
-						StdoutSHA256:     sha256Hex(nil),
-						StderrSHA256:     sha256Hex([]byte(msg)),
+						RequestID:       r.ID,
+						StartedAt:       now,
+						FinishedAt:      now,
+						DurationMs:      0,
+						ExitCode:        -1,
+						Status:          "FAILED",
+						Stdout:          "",
+						Stderr:          msg,
+						StdoutTruncated: false,
+						StderrTruncated: false,
+						StdoutSHA256:    sha256Hex(nil),
+						StderrSHA256:    sha256Hex([]byte(msg)),
 					})
 				}
 			}
@@ -362,39 +362,49 @@ func (a *API) killInternal(ctx context.Context, requestID string, c auth.Claims)
 		return errors.New("REQUEST_NOT_FOUND")
 	}
 
-	// If not running yet, mark killed and do not execute.
-	if rec.Status == "APPROVED" {
+	// If not running yet, mark terminal and do not execute.
+	if rec.Status == "PENDING_APPROVAL" || rec.Status == "APPROVED" {
+		status := "KILLED"
+		message := "killed before start"
+		if rec.Status == "PENDING_APPROVAL" {
+			status = "CANCELED"
+			message = "canceled before approval"
+		}
 		now := time.Now().UTC()
 		a.reqsMu.Lock()
 		rec2 := a.reqs[requestID]
-		rec2.Status = "KILLED"
-		rec2.Result = &resultRecord{
-			StartedAt:  now.Format(time.RFC3339Nano),
-			FinishedAt: now.Format(time.RFC3339Nano),
-			DurationMs: 0,
-			ExitCode:   -1,
-			Status:     "KILLED",
-			Stderr:     "killed before start",
+		rec2.Status = status
+		if status == "KILLED" {
+			rec2.Result = &resultRecord{
+				StartedAt:  now.Format(time.RFC3339Nano),
+				FinishedAt: now.Format(time.RFC3339Nano),
+				DurationMs: 0,
+				ExitCode:   -1,
+				Status:     status,
+				Stderr:     message,
+			}
 		}
 		a.reqs[requestID] = rec2
 		a.reqsMu.Unlock()
 
 		if a.st != nil {
-			_ = a.st.UpdateRequestStatus(ctx, requestID, "KILLED")
-			_ = a.st.InsertExecution(ctx, store.Execution{
-				RequestID:        requestID,
-				StartedAt:        now,
-				FinishedAt:       now,
-				DurationMs:       0,
-				ExitCode:         -1,
-				Status:           "KILLED",
-				Stdout:           "",
-				Stderr:           "killed before start",
-				StdoutTruncated:  false,
-				StderrTruncated:  false,
-				StdoutSHA256:     sha256Hex(nil),
-				StderrSHA256:     sha256Hex([]byte("killed before start")),
-			})
+			_ = a.st.UpdateRequestStatus(ctx, requestID, status)
+			if status == "KILLED" {
+				_ = a.st.InsertExecution(ctx, store.Execution{
+					RequestID:       requestID,
+					StartedAt:       now,
+					FinishedAt:      now,
+					DurationMs:      0,
+					ExitCode:        -1,
+					Status:          status,
+					Stdout:          "",
+					Stderr:          message,
+					StdoutTruncated: false,
+					StderrTruncated: false,
+					StdoutSHA256:    sha256Hex(nil),
+					StderrSHA256:    sha256Hex([]byte(message)),
+				})
+			}
 		}
 
 		a.hub.Publish(events.Event{
@@ -403,7 +413,7 @@ func (a *API) killInternal(ctx context.Context, requestID string, c auth.Claims)
 			SessionID: c.SessionID,
 			ClientID:  c.ClientID,
 			Data: map[string]any{
-				"status": "KILLED",
+				"status": status,
 			},
 		})
 		return nil
@@ -1035,18 +1045,18 @@ func (a *API) executeApprovedRequest(requestID string, c auth.Claims, op rules.O
 	if a.st != nil && rr != nil {
 		_ = a.st.UpdateRequestStatus(context.Background(), requestID, terminalStatus)
 		_ = a.st.InsertExecution(context.Background(), store.Execution{
-			RequestID:        requestID,
-			StartedAt:        startedAt,
-			FinishedAt:       finishedAt,
-			DurationMs:       rr.DurationMs,
-			ExitCode:         rr.ExitCode,
-			Status:           terminalStatus,
-			Stdout:           rr.Stdout,
-			Stderr:           rr.Stderr,
-			StdoutTruncated:  rr.StdoutTruncated,
-			StderrTruncated:  rr.StderrTruncated,
-			StdoutSHA256:     rr.StdoutSHA256,
-			StderrSHA256:     rr.StderrSHA256,
+			RequestID:       requestID,
+			StartedAt:       startedAt,
+			FinishedAt:      finishedAt,
+			DurationMs:      rr.DurationMs,
+			ExitCode:        rr.ExitCode,
+			Status:          terminalStatus,
+			Stdout:          rr.Stdout,
+			Stderr:          rr.Stderr,
+			StdoutTruncated: rr.StdoutTruncated,
+			StderrTruncated: rr.StderrTruncated,
+			StdoutSHA256:    rr.StdoutSHA256,
+			StderrSHA256:    rr.StderrSHA256,
 		})
 	}
 
@@ -1367,17 +1377,29 @@ func tuiDetails(rec requestRecord) string {
 	switch op.Type {
 	case "cmd.run":
 		var p struct {
-			Argv []string `json:"argv"`
-			Cwd  string   `json:"cwd"`
+			Argv       []string `json:"argv"`
+			Cwd        string   `json:"cwd"`
+			TimeoutSec int      `json:"timeout_sec"`
 		}
 		_ = json.Unmarshal(op.Payload, &p)
 		if len(p.Argv) == 0 {
 			return ""
 		}
+		var b strings.Builder
 		if p.Cwd != "" {
-			return "cwd: " + p.Cwd + "\nargv: " + strings.Join(p.Argv, " ")
+			fmt.Fprintf(&b, "cwd: %s\n", p.Cwd)
 		}
-		return "argv: " + strings.Join(p.Argv, " ")
+		if p.TimeoutSec > 0 {
+			fmt.Fprintf(&b, "timeout_sec: %d\n", p.TimeoutSec)
+		}
+		b.WriteString("argv:\n")
+		for i, arg := range p.Argv {
+			fmt.Fprintf(&b, "  [%d] %s\n", i, arg)
+		}
+		if hints := commandReviewHints(p.Argv); len(hints) > 0 {
+			fmt.Fprintf(&b, "\nreview_hints: %s", strings.Join(hints, ", "))
+		}
+		return strings.TrimRight(b.String(), "\n")
 	case "fs.read":
 		var p struct {
 			Path     string `json:"path"`
@@ -1411,6 +1433,27 @@ func tuiDetails(rec requestRecord) string {
 	default:
 		return ""
 	}
+}
+
+func commandReviewHints(argv []string) []string {
+	text := strings.ToLower(strings.Join(argv, " "))
+	terms := []string{"delete", "patch", "secret", "sudo", "ufw"}
+	type hit struct {
+		term string
+		pos  int
+	}
+	var hits []hit
+	for _, term := range terms {
+		if pos := strings.Index(text, term); pos >= 0 {
+			hits = append(hits, hit{term: term, pos: pos})
+		}
+	}
+	sort.SliceStable(hits, func(i, j int) bool { return hits[i].pos < hits[j].pos })
+	out := make([]string, 0, len(hits))
+	for _, h := range hits {
+		out = append(out, h.term)
+	}
+	return out
 }
 
 func readPreview(path string, maxBytes int) string {
@@ -1513,7 +1556,53 @@ func (a *API) handleRequestByID(w http.ResponseWriter, r *http.Request, c auth.C
 		return
 	}
 
+	if len(parts) == 3 && parts[1] == "logs" {
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "", "")
+			return
+		}
+		a.handleRequestLog(w, r, c, id, parts[2])
+		return
+	}
+
 	writeError(w, http.StatusNotFound, "REQUEST_NOT_FOUND", "request not found", id)
+}
+
+func (a *API) handleRequestLog(w http.ResponseWriter, r *http.Request, c auth.Claims, requestID string, stream string) {
+	_ = c
+	a.reqsMu.Lock()
+	rec, ok := a.reqs[requestID]
+	a.reqsMu.Unlock()
+	if !ok {
+		writeError(w, http.StatusNotFound, "REQUEST_NOT_FOUND", "request not found", requestID)
+		return
+	}
+	if stream == "live" {
+		text, _ := a.GetLiveJobOutput(requestID)
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(text))
+		return
+	}
+	if rec.Result == nil {
+		writeError(w, http.StatusConflict, "REQUEST_NOT_FINISHED", "request has no result yet", requestID)
+		return
+	}
+
+	var text string
+	switch stream {
+	case "stdout":
+		text = rec.Result.Stdout
+	case "stderr":
+		text = rec.Result.Stderr
+	default:
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "stream must be stdout or stderr", requestID)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, text)
 }
 
 type authHandler func(http.ResponseWriter, *http.Request, auth.Claims)

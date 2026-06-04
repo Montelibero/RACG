@@ -1,6 +1,9 @@
 package tui
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestNextJobIDCycles(t *testing.T) {
 	s := newUIState(nil, nil)
@@ -17,6 +20,16 @@ func TestNextJobIDCycles(t *testing.T) {
 	s.selectedJob = "j1"
 	if got := s.nextJobID(-1); got != "j3" {
 		t.Fatalf("wrap -1 = %q, want j3", got)
+	}
+}
+
+func TestNewUIStateShowsAllJobsByDefault(t *testing.T) {
+	s := newUIState(nil, nil)
+	if !s.showAllJobs {
+		t.Fatalf("showAllJobs=false, want true")
+	}
+	if got := s.jobsModeLabel(); got != "Only running" {
+		t.Fatalf("jobsModeLabel=%q", got)
 	}
 }
 
@@ -44,5 +57,31 @@ func TestShortStatus(t *testing.T) {
 	}
 	if got := shortStatus("PENDING_APPROVAL"); got != "PENDING_APPROVAL" {
 		t.Fatalf("fallback -> %q", got)
+	}
+}
+
+func TestJobViewModeLabel(t *testing.T) {
+	tests := []struct {
+		mode string
+		want string
+	}{
+		{"combined", "[Combined] stdout stderr meta"},
+		{"stdout", "Combined [stdout] stderr meta"},
+		{"stderr", "Combined stdout [stderr] meta"},
+		{"meta", "Combined stdout stderr [meta]"},
+	}
+	for _, tt := range tests {
+		if got := jobViewModeLabel(tt.mode); got != tt.want {
+			t.Fatalf("mode %q label=%q want %q", tt.mode, got, tt.want)
+		}
+	}
+}
+
+func TestPendingActionHintNamesKeyboardAndMouse(t *testing.T) {
+	got := pendingActionHint()
+	for _, want := range []string{"a once", "s session", "A always", "d deny", "mouse"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("hint=%q want %q", got, want)
+		}
 	}
 }

@@ -28,6 +28,26 @@ func TestMatchCmdRunArgvPrefix(t *testing.T) {
 	}
 }
 
+func TestMatchCmdRunArgvPrefixWithGlobArg(t *testing.T) {
+	e := NewEngine()
+	e.AddAlways(Rule{
+		ID:     "curl-health",
+		OpType: "cmd.run",
+		Cmd: &CmdRule{
+			ArgvPrefix: []string{"curl", "*health*"},
+		},
+	})
+
+	op := Op{Type: "cmd.run", Payload: mustJSON(t, map[string]any{"argv": []string{"curl", "https://example.test/healthz"}})}
+	m, ok := e.Match("sess1", op)
+	if !ok {
+		t.Fatalf("expected match")
+	}
+	if m.RuleID != "curl-health" {
+		t.Fatalf("RuleID=%q", m.RuleID)
+	}
+}
+
 func TestMatchPathPrefix(t *testing.T) {
 	e := NewEngine()
 	e.AddSession("sess1", Rule{ID: "s1", OpType: "fs.read", Path: &PathRule{Prefix: "/home/itolstov/"}})
