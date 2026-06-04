@@ -743,6 +743,7 @@ func (s *uiState) refreshDetails(requestID string) {
 
 func (s *uiState) refreshJobs() {
 	items := s.api.ListJobsForTUI(s.showAllJobs)
+	prevIndex := s.jobsList.GetCurrentItem()
 	s.jobsList.Clear()
 	s.jobIDs = s.jobIDs[:0]
 	for _, it := range items {
@@ -754,12 +755,26 @@ func (s *uiState) refreshJobs() {
 		s.selectedJob = ""
 		return
 	}
-	idx := s.jobIndex(s.selectedJob)
-	if idx < 0 {
-		idx = 0
-		s.selectedJob = s.jobIDs[0]
-	}
+	idx := jobSelectionIndex(s.jobIDs, s.selectedJob, prevIndex)
+	s.selectedJob = s.jobIDs[idx]
 	s.jobsList.SetCurrentItem(idx)
+}
+
+func jobSelectionIndex(ids []string, prevSelectedID string, prevIndex int) int {
+	if len(ids) == 0 {
+		return -1
+	}
+	if prevSelectedID != "" {
+		for i, id := range ids {
+			if id == prevSelectedID {
+				return i
+			}
+		}
+	}
+	if prevIndex >= 0 && prevIndex < len(ids) {
+		return prevIndex
+	}
+	return 0
 }
 
 func (s *uiState) refreshJobHeader(requestID string) {

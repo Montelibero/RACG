@@ -48,6 +48,27 @@ func TestNthJobID(t *testing.T) {
 	}
 }
 
+func TestJobSelectionIndexKeepsSelectedID(t *testing.T) {
+	ids := []string{"new", "middle", "old"}
+	if got := jobSelectionIndex(ids, "middle", 0); got != 1 {
+		t.Fatalf("index=%d, want 1", got)
+	}
+}
+
+func TestJobSelectionIndexFallsBackToPreviousIndex(t *testing.T) {
+	ids := []string{"new", "middle", "old"}
+	if got := jobSelectionIndex(ids, "missing", 2); got != 2 {
+		t.Fatalf("index=%d, want 2", got)
+	}
+}
+
+func TestJobSelectionIndexFallsBackToFirst(t *testing.T) {
+	ids := []string{"new", "middle", "old"}
+	if got := jobSelectionIndex(ids, "missing", 10); got != 0 {
+		t.Fatalf("index=%d, want 0", got)
+	}
+}
+
 func TestShortStatus(t *testing.T) {
 	if got := shortStatus("RUNNING"); got != "RUN" {
 		t.Fatalf("RUNNING -> %q", got)

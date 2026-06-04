@@ -438,7 +438,7 @@ func (a *API) ListRunningForTUI() []TUIRequest {
 func (a *API) ListJobsForTUI(includeFinished bool) []TUIRequest {
 	a.reqsMu.Lock()
 	defer a.reqsMu.Unlock()
-	return listForTUI(a.reqs, func(st string) bool {
+	out := listForTUI(a.reqs, func(st string) bool {
 		if st == "RUNNING" || st == "APPROVED" {
 			return true
 		}
@@ -446,12 +446,14 @@ func (a *API) ListJobsForTUI(includeFinished bool) []TUIRequest {
 			return false
 		}
 		switch st {
-		case "SUCCEEDED", "FAILED", "TIMED_OUT", "KILLED":
+		case "SUCCEEDED", "FAILED", "TIMED_OUT", "KILLED", "CANCELED":
 			return true
 		default:
 			return false
 		}
 	})
+	sort.SliceStable(out, func(i, j int) bool { return out[i].CreatedAt > out[j].CreatedAt })
+	return out
 }
 
 func (a *API) ListApprovedForTUI() []TUIRequest {
