@@ -1293,6 +1293,37 @@ func (s *uiState) openRuleScopeOverlay(app *tview.Application, pages *tview.Page
 			app.SetFocus(focusables[0])
 		}
 	}
+	setFocusIndex := func(idx int) {
+		if len(focusables) == 0 {
+			return
+		}
+		if idx < 0 {
+			idx = len(focusables) - 1
+		}
+		app.SetFocus(focusables[idx%len(focusables)])
+	}
+	for i, input := range inputs {
+		idx := i
+		input.SetDoneFunc(func(key tcell.Key) {
+			switch key {
+			case tcell.KeyTAB, tcell.KeyDown, tcell.KeyEnter:
+				setFocusIndex(idx + 1)
+			case tcell.KeyBacktab, tcell.KeyUp:
+				setFocusIndex(idx - 1)
+			}
+		})
+		input.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
+			switch ev.Key() {
+			case tcell.KeyTAB, tcell.KeyDown:
+				setFocusIndex(idx + 1)
+				return nil
+			case tcell.KeyBacktab, tcell.KeyUp:
+				setFocusIndex(idx - 1)
+				return nil
+			}
+			return ev
+		})
+	}
 
 	root := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(info, 2, 0, false).
