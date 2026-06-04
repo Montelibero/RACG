@@ -153,7 +153,7 @@ type uiState struct {
 	page string
 
 	// Dashboard widgets.
-	mainTabs    *tview.TextView
+	mainTabs    []*tview.TextView
 	pendingList *tview.List
 	filter      *tview.InputField
 	details     *tview.TextView
@@ -300,9 +300,82 @@ func (s *uiState) renderMainTabs() string {
 
 func (s *uiState) setActiveMainTab(name string) {
 	s.activeMainTab = name
-	if s.mainTabs != nil {
-		s.mainTabs.SetText(s.renderMainTabs())
+	s.refreshMainTabs()
+}
+
+func (s *uiState) refreshMainTabs() {
+	for _, tabs := range s.mainTabs {
+		if tabs != nil {
+			tabs.SetText(s.renderMainTabs())
+		}
 	}
+}
+
+func (s *uiState) buildMainTabs(app *tview.Application, pages *tview.Pages) *tview.TextView {
+	tabs := tview.NewTextView().SetDynamicColors(false).SetTextAlign(tview.AlignLeft)
+	tabs.SetText(s.renderMainTabs())
+	tabs.SetMouseCapture(func(action tview.MouseAction, event *tcell.EventMouse) (tview.MouseAction, *tcell.EventMouse) {
+		if action != tview.MouseLeftClick {
+			return action, event
+		}
+		x, y := event.Position()
+		if !tabs.InRect(x, y) {
+			return action, event
+		}
+		rectX, _, _, _ := tabs.GetRect()
+		switch mainTabAt(x-rectX, tabs.GetText(false)) {
+		case "pending":
+			s.showDashboard(app, pages)
+		case "jobs":
+			s.switchMainPage(pages, "dashboard")
+			s.page = "dashboard"
+			s.setActiveMainTab("jobs")
+			s.refresh()
+			if app != nil && s.jobsList != nil {
+				app.SetFocus(s.jobsList)
+			}
+		case "rules":
+			s.showRules(app, pages)
+		case "history":
+			s.showHistory(app, pages)
+		default:
+			return action, event
+		}
+		return tview.MouseConsumed, nil
+	})
+	s.mainTabs = append(s.mainTabs, tabs)
+	return tabs
+}
+
+func mainTabAt(x int, text string) string {
+	if x < 0 {
+		return ""
+	}
+	for _, tab := range []struct {
+		name  string
+		label string
+	}{
+		{name: "pending", label: "1 Pending"},
+		{name: "jobs", label: "2 Jobs"},
+		{name: "rules", label: "3 Rules"},
+		{name: "history", label: "4 History"},
+	} {
+		start := strings.Index(text, tab.label)
+		if start < 0 {
+			continue
+		}
+		end := start + len(tab.label)
+		if start > 0 && text[start-1] == '[' {
+			start--
+		}
+		if end < len(text) && text[end] == ']' {
+			end++
+		}
+		if x >= start && x < end {
+			return tab.name
+		}
+	}
+	return ""
 }
 
 func pendingActionHint() string {
@@ -642,9 +715,7 @@ func (s *uiState) onEvent(e events.Event) {
 }
 
 func (s *uiState) refresh() {
-	if s.mainTabs != nil {
-		s.mainTabs.SetText(s.renderMainTabs())
-	}
+	s.refreshMainTabs()
 	if s.pendingList != nil {
 		s.refreshPending()
 	}
@@ -941,7 +1012,6 @@ func buildPairingPage(ctx context.Context, app *tview.Application, pages *tview.
 }
 
 func buildDashboardPage(app *tview.Application, pages *tview.Pages, s *uiState, cfg ServeUIConfig) tview.Primitive {
-	s.mainTabs = tview.NewTextView().SetDynamicColors(false).SetTextAlign(tview.AlignLeft)
 	s.filter = tview.NewInputField().SetLabel("filter: ")
 	s.pendingList = tview.NewList().ShowSecondaryText(false)
 	s.details = tview.NewTextView().SetDynamicColors(false).SetScrollable(true)
@@ -999,7 +1069,7 @@ func buildDashboardPage(app *tview.Application, pages *tview.Pages, s *uiState, 
 		AddItem(right, 0, 3, false)
 
 	root := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(s.mainTabs, 1, 0, false).
+		AddItem(s.buildMainTabs(app, pages), 1, 0, false).
 		AddItem(body, 0, 1, true).
 		AddItem(s.statusBar, 1, 0, false)
 
@@ -1426,14 +1496,17 @@ func buildRulesPage(app *tview.Application, pages *tview.Pages, s *uiState, cfg 
 	}
 	btnBack := tview.NewButton("Back").SetSelectedFunc(back)
 
+	body := tview.NewFlex().SetDirection(tview.FlexColumn).
+		AddItem(list, 0, 2, true).
+		AddItem(details, 0, 3, false)
 	root := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(s.buildMainTabs(app, pages), 1, 0, false).
 		AddItem(tview.NewFlex().SetDirection(tview.FlexColumn).
-			AddItem(list, 0, 2, true).
-			AddItem(details, 0, 3, false), 0, 1, true).
-		AddItem(tview.NewFlex().SetDirection(tview.FlexColumn).
-			AddItem(btnToggle, 0, 1, false).
-			AddItem(btnDelete, 0, 1, false).
-			AddItem(btnBack, 0, 1, true), 1, 0, true)
+			AddItem(body, 0, 1, true).
+			AddItem(tview.NewFlex().SetDirection(tview.FlexColumn).
+				AddItem(btnToggle, 0, 1, false).
+				AddItem(btnDelete, 0, 1, false).
+				AddItem(btnBack, 0, 1, true), 1, 0, true), 0, 1, true)
 
 	root.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
 		if ev.Key() == tcell.KeyEsc {
@@ -1520,11 +1593,14 @@ func buildHistoryPage(app *tview.Application, pages *tview.Pages, s *uiState, cf
 	}
 	btnBack := tview.NewButton("Back").SetSelectedFunc(back)
 
+	body := tview.NewFlex().SetDirection(tview.FlexColumn).
+		AddItem(left, 0, 2, true).
+		AddItem(details, 0, 3, false)
 	root := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(s.buildMainTabs(app, pages), 1, 0, false).
 		AddItem(tview.NewFlex().SetDirection(tview.FlexColumn).
-			AddItem(left, 0, 2, true).
-			AddItem(details, 0, 3, false), 0, 1, true).
-		AddItem(btnBack, 1, 0, true)
+			AddItem(body, 0, 1, true).
+			AddItem(btnBack, 1, 0, true), 0, 1, true)
 
 	root.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
 		if ev.Key() == tcell.KeyEsc {

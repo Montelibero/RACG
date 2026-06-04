@@ -119,6 +119,51 @@ func TestRenderMainTabsMarksActivePage(t *testing.T) {
 	}
 }
 
+func TestMainTabAtUsesRenderedTabPositions(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		x    int
+		want string
+	}{
+		{
+			name: "active first tab bracket",
+			text: "[1 Pending]   2 Jobs   3 Rules   4 History",
+			x:    0,
+			want: "pending",
+		},
+		{
+			name: "inactive jobs after active pending",
+			text: "[1 Pending]   2 Jobs   3 Rules   4 History",
+			x:    strings.Index("[1 Pending]   2 Jobs   3 Rules   4 History", "2 Jobs"),
+			want: "jobs",
+		},
+		{
+			name: "active jobs starts earlier",
+			text: "1 Pending   [2 Jobs]   3 Rules   4 History",
+			x:    strings.Index("1 Pending   [2 Jobs]   3 Rules   4 History", "[2 Jobs]"),
+			want: "jobs",
+		},
+		{
+			name: "history",
+			text: "1 Pending   2 Jobs   3 Rules   [4 History]",
+			x:    strings.Index("1 Pending   2 Jobs   3 Rules   [4 History]", "4 History"),
+			want: "history",
+		},
+		{
+			name: "gap",
+			text: "[1 Pending]   2 Jobs   3 Rules   4 History",
+			x:    strings.Index("[1 Pending]   2 Jobs   3 Rules   4 History", "   "),
+			want: "",
+		},
+	}
+	for _, tt := range tests {
+		if got := mainTabAt(tt.x, tt.text); got != tt.want {
+			t.Fatalf("%s: mainTabAt=%q want %q", tt.name, got, tt.want)
+		}
+	}
+}
+
 func TestBackFromSecondaryPagesReturnsDashboard(t *testing.T) {
 	for _, page := range []string{"rules", "history", "job"} {
 		s := newUIState(nil, nil)
