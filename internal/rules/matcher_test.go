@@ -75,6 +75,19 @@ func TestNoMatchDifferentSession(t *testing.T) {
 	}
 }
 
+func TestSessionRulesSnapshotCopiesRules(t *testing.T) {
+	e := NewEngine()
+	e.AddSession("sess1", Rule{ID: "s1", OpType: "cmd.run", Cmd: &CmdRule{ArgvPrefix: []string{"git", "status"}}})
+
+	snap := e.SessionRulesSnapshot()
+	snap["sess1"][0].ID = "changed"
+
+	snap2 := e.SessionRulesSnapshot()
+	if snap2["sess1"][0].ID != "s1" {
+		t.Fatalf("snapshot mutated engine rule id=%q", snap2["sess1"][0].ID)
+	}
+}
+
 func mustJSON(t *testing.T, v any) json.RawMessage {
 	t.Helper()
 	b, err := json.Marshal(v)

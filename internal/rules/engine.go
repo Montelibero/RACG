@@ -56,6 +56,17 @@ func (e *Engine) AddSession(sessionID string, r Rule) {
 	e.mu.Unlock()
 }
 
+func (e *Engine) SessionRulesSnapshot() map[string][]Rule {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	out := make(map[string][]Rule, len(e.sessionRules))
+	for sessionID, rs := range e.sessionRules {
+		out[sessionID] = append([]Rule(nil), rs...)
+	}
+	return out
+}
+
 func (e *Engine) Match(sessionID string, op Op) (Match, bool) {
 	e.mu.Lock()
 	sess := append([]Rule(nil), e.sessionRules[sessionID]...)

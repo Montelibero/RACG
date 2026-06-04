@@ -130,3 +130,9 @@ Dangerous (по умолчанию `ALLOW_ALWAYS` запрещен):
 - `SERVICE_SSH_RISK` (`systemctl stop|disable ...ssh...`)
 
 Примечание: `ALLOW_ALWAYS` для dangerous можно включить флагом `allow_always_for_dangerous=true` в конфиге.
+
+## Viewing rules in TUI
+
+Press `3 Rules` in the built-in TUI to view rules without leaving `racg serve`.
+The page shows persisted `ALLOW_ALWAYS` rules and in-memory `ALLOW_SESSION` rules.
+Session rules expire when the server/session ends and cannot be disabled or deleted from the persisted rules store.

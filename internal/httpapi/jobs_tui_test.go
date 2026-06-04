@@ -1,6 +1,11 @@
 package httpapi
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/itolstov/racg/internal/config"
+	"github.com/itolstov/racg/internal/rules"
+)
 
 func TestListJobsForTUI(t *testing.T) {
 	api := &API{reqs: map[string]requestRecord{
@@ -26,5 +31,25 @@ func TestListJobsForTUI(t *testing.T) {
 	}
 	if all[0].ID != "r6" || all[1].ID != "r4" || all[2].ID != "r3" || all[3].ID != "r2" || all[4].ID != "r1" {
 		t.Fatalf("unexpected order/ids: %#v", all)
+	}
+}
+
+func TestListSessionRulesForTUI(t *testing.T) {
+	api := New(config.Defaults())
+	api.rules.AddSession("sess1", rules.Rule{
+		ID:     "rule1",
+		OpType: "cmd.run",
+		Cmd:    &rules.CmdRule{ArgvPrefix: []string{"git", "status"}},
+	})
+
+	rows := api.ListSessionRulesForTUI()
+	if len(rows) != 1 {
+		t.Fatalf("rows len=%d, want 1", len(rows))
+	}
+	if rows[0].RuleID != "rule1" || rows[0].Source != "session:sess1" || rows[0].OpType != "cmd.run" || !rows[0].Enabled {
+		t.Fatalf("row=%#v", rows[0])
+	}
+	if rows[0].CmdArgvJSON == nil || *rows[0].CmdArgvJSON != `["git","status"]` {
+		t.Fatalf("cmd json=%v", rows[0].CmdArgvJSON)
 	}
 }

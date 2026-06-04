@@ -462,6 +462,56 @@ func (a *API) ListApprovedForTUI() []TUIRequest {
 	return listForTUI(a.reqs, func(st string) bool { return st == "APPROVED" })
 }
 
+func (a *API) ListSessionRulesForTUI() []store.RuleRow {
+	if a.rules == nil {
+		return nil
+	}
+	snap := a.rules.SessionRulesSnapshot()
+	out := make([]store.RuleRow, 0)
+	for sessionID, rs := range snap {
+		for _, r := range rs {
+			row := store.RuleRow{
+				RuleID:  r.ID,
+				Source:  "session",
+				OpType:  r.OpType,
+				Enabled: true,
+			}
+			if r.Cmd != nil && len(r.Cmd.ArgvPrefix) > 0 {
+				b, err := json.Marshal(r.Cmd.ArgvPrefix)
+				if err == nil {
+					s := string(b)
+					row.CmdArgvJSON = &s
+				}
+			}
+			if r.Path != nil {
+				if r.Path.Exact != "" {
+					v := r.Path.Exact
+					row.PathExact = &v
+				}
+				if r.Path.Prefix != "" {
+					v := r.Path.Prefix
+					row.PathPrefix = &v
+				}
+				if r.Path.Glob != "" {
+					v := r.Path.Glob
+					row.PathGlob = &v
+				}
+			}
+			if sessionID != "" {
+				row.Source = "session:" + sessionID
+			}
+			out = append(out, row)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Source != out[j].Source {
+			return out[i].Source < out[j].Source
+		}
+		return out[i].RuleID < out[j].RuleID
+	})
+	return out
+}
+
 func (a *API) GetRequestInfoForTUI(requestID string) (TUIRequestInfo, bool) {
 	a.reqsMu.Lock()
 	rec, ok := a.reqs[requestID]

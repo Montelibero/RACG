@@ -161,6 +161,8 @@ The preset auto-approves:
 
 Do not auto-approve destructive or mutating operations such as `kubectl apply/delete/patch`, `git push`, `sudo`, firewall commands, or filesystem deletion.
 
+The human can view both persisted `ALLOW_ALWAYS` rules and in-memory `ALLOW_SESSION` rules in the TUI via `3 Rules`. Session rules expire when the server/session ends.
+
 ## 7. Safety Checklist
 
 Before submitting a command, identify:

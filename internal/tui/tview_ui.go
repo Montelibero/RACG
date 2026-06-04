@@ -1296,7 +1296,14 @@ func buildRulesPage(app *tview.Application, pages *tview.Pages, s *uiState, cfg 
 		b.WriteString(fmt.Sprintf("op=%s\n", r.OpType))
 		b.WriteString(fmt.Sprintf("scope=%s\n", ruleScopeLabel(r)))
 		b.WriteString(fmt.Sprintf("source=%s\n", r.Source))
-		b.WriteString(fmt.Sprintf("created_at=%s\n", r.CreatedAt.UTC().Format(time.RFC3339)))
+		if r.CreatedAt.IsZero() {
+			b.WriteString("created_at=-\n")
+		} else {
+			b.WriteString(fmt.Sprintf("created_at=%s\n", r.CreatedAt.UTC().Format(time.RFC3339)))
+		}
+		if strings.HasPrefix(r.Source, "session") {
+			b.WriteString("\nSession rules are in-memory and expire when the server/session ends.\n")
+		}
 		details.SetText(b.String())
 	}
 
@@ -1313,7 +1320,10 @@ func buildRulesPage(app *tview.Application, pages *tview.Pages, s *uiState, cfg 
 			details.SetText("error: " + err.Error())
 			return
 		}
-		rows = dbRows
+		rows = append(rows, dbRows...)
+		if cfg.API != nil {
+			rows = append(rows, cfg.API.ListSessionRulesForTUI()...)
+		}
 		if len(rows) == 0 {
 			details.SetText("rules: 0")
 			list.AddItem("No rules", "", 0, nil)
@@ -1324,7 +1334,11 @@ func buildRulesPage(app *tview.Application, pages *tview.Pages, s *uiState, cfg 
 			if r.Enabled {
 				en = "1"
 			}
-			title := fmt.Sprintf("[%s] %s  %s", en, r.OpType, ruleScopeLabel(r))
+			source := r.Source
+			if strings.HasPrefix(source, "session:") {
+				source = "session"
+			}
+			title := fmt.Sprintf("[%s] %s  %s  %s", en, source, r.OpType, ruleScopeLabel(r))
 			list.AddItem(title, "", 0, nil)
 			if i == 0 {
 				selectedIndex = 0
@@ -1345,6 +1359,9 @@ func buildRulesPage(app *tview.Application, pages *tview.Pages, s *uiState, cfg 
 			return
 		}
 		r := rows[selectedIndex]
+		if strings.HasPrefix(r.Source, "session") {
+			return
+		}
 		if r.Enabled {
 			_ = cfg.Store.DisableRule(context.Background(), r.RuleID, time.Now().UTC())
 		} else {
@@ -1355,6 +1372,9 @@ func buildRulesPage(app *tview.Application, pages *tview.Pages, s *uiState, cfg 
 
 	btnDelete := tview.NewButton("Delete").SetSelectedFunc(func() {
 		if cfg.Store == nil || selectedIndex < 0 || selectedIndex >= len(rows) {
+			return
+		}
+		if strings.HasPrefix(rows[selectedIndex].Source, "session") {
 			return
 		}
 		ruleID := rows[selectedIndex].RuleID
