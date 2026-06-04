@@ -6,7 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"io"
+	"hash"
 	"os/exec"
 	"syscall"
 	"time"
@@ -76,42 +76,16 @@ func (e *Executor) Run(ctx context.Context, s Spec) Result {
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		res.Stderr = err.Error()
-		res.DurationMs = time.Since(start).Milliseconds()
-		return res
-	}
-	stderrPipe, err := cmd.StderrPipe()
-	if err != nil {
-		res.Stderr = err.Error()
-		res.DurationMs = time.Since(start).Milliseconds()
-		return res
-	}
+	stdoutCap := newStreamCapture(e.opts.MaxOutputBytes, s.OnStdout)
+	stderrCap := newStreamCapture(e.opts.MaxOutputBytes, s.OnStderr)
+	cmd.Stdout = stdoutCap
+	cmd.Stderr = stderrCap
 
 	if err := cmd.Start(); err != nil {
 		res.Stderr = err.Error()
 		res.DurationMs = time.Since(start).Milliseconds()
 		return res
 	}
-
-	// Capture stdout/stderr concurrently to avoid deadlocks.
-	type capRes struct {
-		text      string
-		hashHex   string
-		truncated bool
-	}
-	outCh := make(chan capRes, 1)
-	errCh := make(chan capRes, 1)
-
-	go func() {
-		txt, h, trunc := captureLimited(stdoutPipe, e.opts.MaxOutputBytes, s.OnStdout)
-		outCh <- capRes{text: txt, hashHex: h, truncated: trunc}
-	}()
-	go func() {
-		txt, h, trunc := captureLimited(stderrPipe, e.opts.MaxOutputBytes, s.OnStderr)
-		errCh <- capRes{text: txt, hashHex: h, truncated: trunc}
-	}()
 
 	// If the context is canceled/deadline-exceeded, attempt to kill the whole process group ASAP.
 	killOnce := make(chan struct{})
@@ -131,15 +105,8 @@ func (e *Executor) Run(ctx context.Context, s Spec) Result {
 		_ = killProcessGroup(cmd.Process.Pid, e.opts.KillGrace)
 	}
 
-	out := <-outCh
-	errCap := <-errCh
-
-	res.Stdout = out.text
-	res.StdoutSHA256 = out.hashHex
-	res.StdoutTruncated = out.truncated
-	res.Stderr = errCap.text
-	res.StderrSHA256 = errCap.hashHex
-	res.StderrTruncated = errCap.truncated
+	res.Stdout, res.StdoutSHA256, res.StdoutTruncated = stdoutCap.result()
+	res.Stderr, res.StderrSHA256, res.StderrTruncated = stderrCap.result()
 
 	res.DurationMs = time.Since(start).Milliseconds()
 
@@ -176,44 +143,47 @@ func (e *Executor) Run(ctx context.Context, s Spec) Result {
 	return res
 }
 
-func captureLimited(r io.Reader, max int, onChunk func([]byte)) (text string, shaHex string, truncated bool) {
-	h := sha256.New()
-	var buf bytes.Buffer
+type streamCapture struct {
+	max      int
+	onChunk  func([]byte)
+	hash     hash.Hash
+	buf      bytes.Buffer
+	stored   int
+	truncate bool
+}
 
-	// Stream copy: store up to max bytes, but hash everything.
-	tmp := make([]byte, 32*1024)
-	stored := 0
-	for {
-		n, err := r.Read(tmp)
-		if n > 0 {
-			chunk := tmp[:n]
-			if onChunk != nil {
-				// Copy to decouple from tmp reuse.
-				cp := append([]byte(nil), chunk...)
-				onChunk(cp)
-			}
-			_, _ = h.Write(chunk)
+func newStreamCapture(max int, onChunk func([]byte)) *streamCapture {
+	return &streamCapture{max: max, onChunk: onChunk, hash: sha256.New()}
+}
 
-			if stored < max {
-				remain := max - stored
-				if n <= remain {
-					_, _ = buf.Write(chunk)
-					stored += n
-				} else {
-					_, _ = buf.Write(chunk[:remain])
-					stored += remain
-					truncated = true
-				}
-			} else {
-				truncated = true
-			}
-		}
-		if err != nil {
-			break
-		}
+func (c *streamCapture) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
 	}
+	if c.onChunk != nil {
+		cp := append([]byte(nil), p...)
+		c.onChunk(cp)
+	}
+	_, _ = c.hash.Write(p)
 
-	return buf.String(), hex.EncodeToString(h.Sum(nil)), truncated
+	if c.stored < c.max {
+		remain := c.max - c.stored
+		if len(p) <= remain {
+			_, _ = c.buf.Write(p)
+			c.stored += len(p)
+		} else {
+			_, _ = c.buf.Write(p[:remain])
+			c.stored += remain
+			c.truncate = true
+		}
+	} else {
+		c.truncate = true
+	}
+	return len(p), nil
+}
+
+func (c *streamCapture) result() (text string, shaHex string, truncated bool) {
+	return c.buf.String(), hex.EncodeToString(c.hash.Sum(nil)), c.truncate
 }
 
 func killProcessGroup(pid int, grace time.Duration) error {
