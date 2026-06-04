@@ -158,7 +158,7 @@ type uiState struct {
 	filter      *tview.InputField
 	details     *tview.TextView
 	jobsList    *tview.List
-	statusBar   *tview.TextView
+	statusBars  []*tview.TextView
 	jobsModeBtn *tview.Button
 
 	// Job view widgets.
@@ -722,9 +722,7 @@ func (s *uiState) refresh() {
 	if s.jobsList != nil {
 		s.refreshJobs()
 	}
-	if s.statusBar != nil {
-		s.refreshStatus()
-	}
+	s.refreshStatus()
 	if s.details != nil && s.selectedPending != "" {
 		s.refreshDetails(s.selectedPending)
 	}
@@ -737,15 +735,29 @@ func (s *uiState) refresh() {
 }
 
 func (s *uiState) refreshStatus() {
+	for _, statusBar := range s.statusBars {
+		s.refreshStatusBar(statusBar)
+	}
+}
+
+func (s *uiState) refreshStatusBar(statusBar *tview.TextView) {
+	if statusBar == nil || s.api == nil {
+		return
+	}
 	pn := len(s.api.ListPendingForTUI())
 	rn := len(s.api.ListRunningForTUI())
-	mode := "ROOT MODE"
-	line := fmt.Sprintf("F1 help | 1 pending | 2 jobs | 3 rules | 4 history | Esc back | q quit   %s   pending=%d running=%d",
-		mode, pn, rn)
+	line := fmt.Sprintf("F1 help | 1 pending | 2 jobs | 3 rules | 4 history | Esc back | q quit   pending=%d running=%d", pn, rn)
 	if time.Now().Before(s.toastUntil) && s.toastText != "" {
 		line = s.toastText + "   |   " + line
 	}
-	s.statusBar.SetText(line)
+	statusBar.SetText(line)
+}
+
+func (s *uiState) buildStatusBar() *tview.TextView {
+	statusBar := tview.NewTextView().SetDynamicColors(false)
+	s.statusBars = append(s.statusBars, statusBar)
+	s.refreshStatusBar(statusBar)
+	return statusBar
 }
 
 func (s *uiState) refreshPending() {
@@ -1016,7 +1028,6 @@ func buildDashboardPage(app *tview.Application, pages *tview.Pages, s *uiState, 
 	s.pendingList = tview.NewList().ShowSecondaryText(false)
 	s.details = tview.NewTextView().SetDynamicColors(false).SetScrollable(true)
 	s.jobsList = tview.NewList().ShowSecondaryText(true)
-	s.statusBar = tview.NewTextView().SetDynamicColors(false)
 	s.jobsModeBtn = tview.NewButton("").SetSelectedFunc(func() {
 		s.toggleJobsMode()
 		s.setActiveMainTab("jobs")
@@ -1071,7 +1082,7 @@ func buildDashboardPage(app *tview.Application, pages *tview.Pages, s *uiState, 
 	root := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(s.buildMainTabs(app, pages), 1, 0, false).
 		AddItem(body, 0, 1, true).
-		AddItem(s.statusBar, 1, 0, false)
+		AddItem(s.buildStatusBar(), 1, 0, false)
 
 	s.pendingList.SetChangedFunc(func(index int, _, _ string, _ rune) {
 		if index < 0 || index >= len(s.pendingIDs) {
@@ -1506,7 +1517,8 @@ func buildRulesPage(app *tview.Application, pages *tview.Pages, s *uiState, cfg 
 			AddItem(tview.NewFlex().SetDirection(tview.FlexColumn).
 				AddItem(btnToggle, 0, 1, false).
 				AddItem(btnDelete, 0, 1, false).
-				AddItem(btnBack, 0, 1, true), 1, 0, true), 0, 1, true)
+				AddItem(btnBack, 0, 1, true), 1, 0, true), 0, 1, true).
+		AddItem(s.buildStatusBar(), 1, 0, false)
 
 	root.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
 		if ev.Key() == tcell.KeyEsc {
@@ -1600,7 +1612,8 @@ func buildHistoryPage(app *tview.Application, pages *tview.Pages, s *uiState, cf
 		AddItem(s.buildMainTabs(app, pages), 1, 0, false).
 		AddItem(tview.NewFlex().SetDirection(tview.FlexColumn).
 			AddItem(body, 0, 1, true).
-			AddItem(btnBack, 1, 0, true), 0, 1, true)
+			AddItem(btnBack, 1, 0, true), 0, 1, true).
+		AddItem(s.buildStatusBar(), 1, 0, false)
 
 	root.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
 		if ev.Key() == tcell.KeyEsc {

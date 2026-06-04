@@ -164,6 +164,28 @@ func TestMainTabAtUsesRenderedTabPositions(t *testing.T) {
 	}
 }
 
+func TestStatusBarDoesNotShowRootMode(t *testing.T) {
+	s := newUIState(nil, nil)
+	status := tview.NewTextView()
+
+	s.refreshStatusBar(status)
+	if got := status.GetText(false); got != "" {
+		t.Fatalf("status without api=%q, want empty", got)
+	}
+
+	s.api = httpapi.New(config.Defaults())
+	s.refreshStatusBar(status)
+	got := status.GetText(false)
+	if strings.Contains(got, "ROOT MODE") {
+		t.Fatalf("status=%q still contains ROOT MODE", got)
+	}
+	for _, want := range []string{"F1 help", "pending=0", "running=0"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status=%q want %q", got, want)
+		}
+	}
+}
+
 func TestBackFromSecondaryPagesReturnsDashboard(t *testing.T) {
 	for _, page := range []string{"rules", "history", "job"} {
 		s := newUIState(nil, nil)
