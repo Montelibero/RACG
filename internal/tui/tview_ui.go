@@ -365,7 +365,7 @@ func (s *uiState) back(app *tview.Application, pages *tview.Pages) {
 		return
 	}
 	if s.page == "job" {
-		s.leaveJobPage(app, pages, s.pendingList)
+		s.leaveJobPage(app, pages, s.jobsList)
 		return
 	}
 	s.showDashboard(app, pages)

@@ -5,6 +5,9 @@ import (
 	"testing"
 
 	"github.com/rivo/tview"
+
+	"github.com/itolstov/racg/internal/config"
+	"github.com/itolstov/racg/internal/httpapi"
 )
 
 func TestShowHistoryCallsRefresh(t *testing.T) {
@@ -168,6 +171,25 @@ func TestLeaveJobPageDoesNotRevealHiddenHelp(t *testing.T) {
 	name, _ := pages.GetFrontPage()
 	if name != "dashboard" {
 		t.Fatalf("front=%q, want dashboard", name)
+	}
+}
+
+func TestBackFromJobFocusesJobsList(t *testing.T) {
+	app := tview.NewApplication()
+	s := newUIState(httpapi.New(config.Defaults()), nil)
+	s.page = "job"
+	s.filter = tview.NewInputField()
+	s.details = tview.NewTextView()
+	s.pendingList = tview.NewList()
+	s.jobsList = tview.NewList()
+	pages := tview.NewPages()
+	pages.AddPage("dashboard", tview.NewBox(), true, false)
+	pages.AddAndSwitchToPage("job", tview.NewBox(), true)
+
+	s.back(app, pages)
+
+	if got := app.GetFocus(); got != s.jobsList {
+		t.Fatalf("focus=%T, want jobsList", got)
 	}
 }
 
