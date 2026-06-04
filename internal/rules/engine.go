@@ -21,6 +21,7 @@ type Rule struct {
 
 type CmdRule struct {
 	ArgvPrefix []string
+	TailAny    bool
 }
 
 type PathRule struct {
@@ -30,8 +31,23 @@ type PathRule struct {
 }
 
 type Match struct {
-	RuleID string
-	Source string // "session" | "always"
+	RuleID           string
+	Source           string // "session" | "always"
+	SegmentDecisions []SegmentDecision
+}
+
+type SegmentDecision struct {
+	Argv        []string
+	Source      string
+	RuleID      string
+	Allowed     bool
+	Unsupported string
+	Reason      string
+}
+
+type Explanation struct {
+	Allowed  bool
+	Segments []SegmentDecision
 }
 
 type Engine struct {
@@ -73,6 +89,12 @@ func (e *Engine) Match(sessionID string, op Op) (Match, bool) {
 	always := append([]Rule(nil), e.always...)
 	e.mu.Unlock()
 
+	if op.Type == "cmd.run" {
+		if m, ok := matchAnalyzedCommand(sess, always, op); ok || len(m.SegmentDecisions) > 0 {
+			return m, ok
+		}
+	}
+
 	for _, r := range sess {
 		if ruleMatches(r, op) {
 			return Match{RuleID: r.ID, Source: "session"}, true
@@ -84,6 +106,111 @@ func (e *Engine) Match(sessionID string, op Op) (Match, bool) {
 		}
 	}
 	return Match{}, false
+}
+
+func (e *Engine) Explain(sessionID string, op Op) Explanation {
+	e.mu.Lock()
+	sess := append([]Rule(nil), e.sessionRules[sessionID]...)
+	always := append([]Rule(nil), e.always...)
+	e.mu.Unlock()
+
+	if op.Type == "cmd.run" {
+		if m, ok := matchAnalyzedCommand(sess, always, op); ok || len(m.SegmentDecisions) > 0 {
+			fillSegmentReasons(m.SegmentDecisions)
+			return Explanation{Allowed: ok, Segments: m.SegmentDecisions}
+		}
+	}
+
+	analysis := AnalyzeCommandOp(op)
+	segments := make([]SegmentDecision, 0, len(analysis.Segments))
+	for _, segment := range analysis.Segments {
+		decision := SegmentDecision{Argv: append([]string(nil), segment.Argv...), Unsupported: segment.Unsupported}
+		if segment.Unsupported != "" {
+			decision.Reason = segment.Unsupported
+		} else if r, ok := matchCmdArgvRules(sess, segment.Argv); ok {
+			decision.Allowed = true
+			decision.Source = "session"
+			decision.RuleID = r.ID
+		} else if r, ok := matchCmdArgvRules(always, segment.Argv); ok {
+			decision.Allowed = true
+			decision.Source = "always"
+			decision.RuleID = r.ID
+		} else {
+			decision.Reason = "no matching rule"
+		}
+		segments = append(segments, decision)
+	}
+	allowed := len(segments) > 0
+	for _, segment := range segments {
+		if !segment.Allowed {
+			allowed = false
+			break
+		}
+	}
+	return Explanation{Allowed: allowed, Segments: segments}
+}
+
+func fillSegmentReasons(segments []SegmentDecision) {
+	for i := range segments {
+		if segments[i].Allowed {
+			continue
+		}
+		if segments[i].Unsupported != "" {
+			segments[i].Reason = segments[i].Unsupported
+			continue
+		}
+		segments[i].Reason = "no matching rule"
+	}
+}
+
+func matchAnalyzedCommand(sess []Rule, always []Rule, op Op) (Match, bool) {
+	analysis := AnalyzeCommandOp(op)
+	if !analysis.Shell {
+		return Match{}, false
+	}
+	if analysis.Unsupported != "" || len(analysis.Segments) == 0 {
+		return Match{SegmentDecisions: []SegmentDecision{{Unsupported: analysis.Unsupported}}}, false
+	}
+
+	out := Match{RuleID: "shell-segments", Source: "segments"}
+	allAllowed := true
+	for _, segment := range analysis.Segments {
+		decision := SegmentDecision{Argv: append([]string(nil), segment.Argv...), Unsupported: segment.Unsupported}
+		if segment.Unsupported != "" {
+			allAllowed = false
+			out.SegmentDecisions = append(out.SegmentDecisions, decision)
+			continue
+		}
+		if r, ok := matchCmdArgvRules(sess, segment.Argv); ok {
+			decision.Allowed = true
+			decision.Source = "session"
+			decision.RuleID = r.ID
+			out.SegmentDecisions = append(out.SegmentDecisions, decision)
+			continue
+		}
+		if r, ok := matchCmdArgvRules(always, segment.Argv); ok {
+			decision.Allowed = true
+			decision.Source = "always"
+			decision.RuleID = r.ID
+			out.SegmentDecisions = append(out.SegmentDecisions, decision)
+			continue
+		}
+		allAllowed = false
+		out.SegmentDecisions = append(out.SegmentDecisions, decision)
+	}
+	return out, allAllowed
+}
+
+func matchCmdArgvRules(rs []Rule, argv []string) (Rule, bool) {
+	for _, r := range rs {
+		if r.OpType != "cmd.run" || r.Cmd == nil {
+			continue
+		}
+		if argvHasPrefix(argv, r.Cmd.ArgvPrefix) {
+			return r, true
+		}
+	}
+	return Rule{}, false
 }
 
 func ruleMatches(r Rule, op Op) bool {

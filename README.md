@@ -114,6 +114,25 @@ racg rules presets install readonly-diagnostics --db racg.db
 
 It does not include write/destructive operations such as `kubectl apply/delete/patch`, `git push`, `sudo`, firewall commands, or filesystem deletion.
 
+## Rule scopes
+
+In the TUI, `Allow session` and `Allow always` open a scope editor for command requests. The scope is one command pattern, for example:
+
+```text
+docker stop nginx
+docker stop n*
+```
+
+Command scopes are stored as argv-prefix rules. `*` inside an argument is a glob, and extra arguments after the scope are allowed. Shell separators are rejected in scope patterns: `&&`, `||`, `|`, `;`, and `&` must be approved as separate command segments.
+
+For shell requests such as:
+
+```bash
+bash -lc 'docker stop nginx && echo ok && rm /'
+```
+
+RACG analyzes each shell segment independently. Auto-approve only happens when every segment matches a rule. The TUI request details show `[ALLOW]` and `[BLOCK]` lines with the matching rule or block reason.
+
 ## Safe vs Dangerous (`ALLOW_ALWAYS`)
 
 `ALLOW_ALWAYS` разрешен для запросов без dangerous-флагов.

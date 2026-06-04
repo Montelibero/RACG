@@ -263,7 +263,7 @@ func (s *uiState) switchMainPage(pages *tview.Pages, name string) {
 		return
 	}
 	s.closeOverlay(pages)
-	for _, p := range []string{"pairing", "dashboard", "rules", "history", "help", "copy", "confirm_kill"} {
+	for _, p := range []string{"pairing", "dashboard", "rules", "history", "help", "copy", "confirm_kill", "rule_scope"} {
 		pages.HidePage(p)
 	}
 	pages.ShowPage(name)
@@ -510,6 +510,10 @@ func (s *uiState) closeOverlay(pages *tview.Pages) bool {
 			pages.RemovePage("confirm_kill")
 			closed = true
 		}
+		if pageVisible(pages, "rule_scope") {
+			pages.RemovePage("rule_scope")
+			closed = true
+		}
 	}
 	return closed
 }
@@ -582,6 +586,16 @@ func (s *uiState) openCopyOverlay(app *tview.Application, pages *tview.Pages, ti
 
 	pages.AddPage("copy", root, true, true)
 	app.SetFocus(box)
+}
+
+func centered(p tview.Primitive, width int, height int) tview.Primitive {
+	return tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(nil, 0, 1, false).
+		AddItem(tview.NewFlex().SetDirection(tview.FlexColumn).
+			AddItem(nil, 0, 1, false).
+			AddItem(p, width, 0, true).
+			AddItem(nil, 0, 1, false), height, 0, true).
+		AddItem(nil, 0, 1, false)
 }
 
 func (s *uiState) jobsModeLabel() string {
@@ -1026,7 +1040,7 @@ func buildPairingPage(ctx context.Context, app *tview.Application, pages *tview.
 func buildDashboardPage(app *tview.Application, pages *tview.Pages, s *uiState, cfg ServeUIConfig) tview.Primitive {
 	s.filter = tview.NewInputField().SetLabel("filter: ")
 	s.pendingList = tview.NewList().ShowSecondaryText(false)
-	s.details = tview.NewTextView().SetDynamicColors(false).SetScrollable(true)
+	s.details = tview.NewTextView().SetDynamicColors(true).SetScrollable(true)
 	s.jobsList = tview.NewList().ShowSecondaryText(true)
 	s.jobsModeBtn = tview.NewButton("").SetSelectedFunc(func() {
 		s.toggleJobsMode()
@@ -1059,8 +1073,8 @@ func buildDashboardPage(app *tview.Application, pages *tview.Pages, s *uiState, 
 	center.AddItem(actionHint, 1, 0, false)
 
 	btnOnce := tview.NewButton("Allow once").SetSelectedFunc(func() { s.doDecision("ALLOW_ONCE") })
-	btnSess := tview.NewButton("Allow session").SetSelectedFunc(func() { s.doDecision("ALLOW_SESSION") })
-	btnAlways := tview.NewButton("Allow always").SetSelectedFunc(func() { s.doDecision("ALLOW_ALWAYS") })
+	btnSess := tview.NewButton("Allow session").SetSelectedFunc(func() { s.openRuleScopeOverlay(app, pages, "ALLOW_SESSION") })
+	btnAlways := tview.NewButton("Allow always").SetSelectedFunc(func() { s.openRuleScopeOverlay(app, pages, "ALLOW_ALWAYS") })
 	btnDeny := tview.NewButton("Deny").SetSelectedFunc(func() { s.doDecision("DENY") })
 	btnRow := tview.NewFlex().SetDirection(tview.FlexColumn).
 		AddItem(btnOnce, 0, 1, false).
@@ -1101,13 +1115,13 @@ func buildDashboardPage(app *tview.Application, pages *tview.Pages, s *uiState, 
 		case 'a':
 			// Shift+A (including RU layout "Ф") keeps "allow always" shortcut.
 			if ev.Rune() == 'A' || ev.Rune() == 'Ф' {
-				s.doDecision("ALLOW_ALWAYS")
+				s.openRuleScopeOverlay(app, pages, "ALLOW_ALWAYS")
 				return nil
 			}
 			s.doDecision("ALLOW_ONCE")
 			return nil
 		case 's':
-			s.doDecision("ALLOW_SESSION")
+			s.openRuleScopeOverlay(app, pages, "ALLOW_SESSION")
 			return nil
 		case 'd':
 			s.doDecision("DENY")
@@ -1173,6 +1187,84 @@ func (s *uiState) doDecision(dec string) {
 	_ = s.api.DecideForTUI(s.selectedPending, dec)
 	s.selectedPending = ""
 	s.refresh()
+}
+
+func (s *uiState) openRuleScopeOverlay(app *tview.Application, pages *tview.Pages, decision string) {
+	if s.selectedPending == "" || app == nil || pages == nil {
+		return
+	}
+	requestID := s.selectedPending
+	candidates := s.api.RuleScopeCandidatesForTUI(requestID)
+	defaultScope := ""
+	if len(candidates) > 0 {
+		defaultScope = candidates[0]
+	}
+
+	prevFocus := app.GetFocus()
+	title := "Allow scope"
+	if decision == "ALLOW_ALWAYS" {
+		title = "Allow always scope"
+	} else if decision == "ALLOW_SESSION" {
+		title = "Allow session scope"
+	}
+
+	info := tview.NewTextView().SetDynamicColors(false)
+	info.SetText("Edit one command pattern. Shell separators like &&, |, ; are rejected.\nExamples: docker stop nginx | docker stop n*")
+
+	input := tview.NewInputField().SetLabel("scope: ").SetText(defaultScope)
+	errText := tview.NewTextView().SetDynamicColors(false).SetTextColor(tcell.ColorRed)
+
+	close := func() {
+		pages.RemovePage("rule_scope")
+		s.overlayClose = nil
+		if prevFocus != nil {
+			app.SetFocus(prevFocus)
+		}
+	}
+	save := func() {
+		scope := strings.TrimSpace(input.GetText())
+		if scope == "" {
+			errText.SetText("scope is empty")
+			return
+		}
+		if err := s.api.DecideWithRulePatternForTUI(requestID, decision, scope); err != nil {
+			errText.SetText(err.Error())
+			return
+		}
+		close()
+		if s.selectedPending == requestID {
+			s.selectedPending = ""
+		}
+		s.refresh()
+	}
+
+	btnSave := tview.NewButton("Save").SetSelectedFunc(save)
+	btnCancel := tview.NewButton("Cancel").SetSelectedFunc(close)
+	buttons := tview.NewFlex().SetDirection(tview.FlexColumn).
+		AddItem(btnSave, 0, 1, false).
+		AddItem(btnCancel, 0, 1, false)
+
+	root := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(info, 2, 0, false).
+		AddItem(input, 1, 0, true).
+		AddItem(errText, 1, 0, false).
+		AddItem(buttons, 1, 0, false)
+	root.SetBorder(true).SetTitle(title)
+	root.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
+		switch ev.Key() {
+		case tcell.KeyEsc:
+			close()
+			return nil
+		case tcell.KeyEnter:
+			save()
+			return nil
+		}
+		return ev
+	})
+
+	s.overlayClose = close
+	pages.AddPage("rule_scope", centered(root, 80, 9), true, true)
+	app.SetFocus(input)
 }
 
 func jobViewText(mode string, info httpapi.TUIRequestInfo, combined string, liveTruncated bool) string {

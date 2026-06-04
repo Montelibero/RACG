@@ -343,6 +343,83 @@ func (a *API) DecideForTUI(requestID string, decision string) error {
 	return a.decideInternal(context.Background(), requestID, decision, claims)
 }
 
+func (a *API) DecideWithRuleForTUI(requestID string, decision string, rule rules.Rule) error {
+	a.reqsMu.Lock()
+	rec, ok := a.reqs[requestID]
+	a.reqsMu.Unlock()
+	if !ok {
+		return errors.New("REQUEST_NOT_FOUND")
+	}
+	claims := auth.Claims{SessionID: rec.SessionID, ClientID: rec.ClientID}
+	return a.decideInternalWithRule(context.Background(), requestID, decision, claims, &rule)
+}
+
+func (a *API) DecideWithRulePatternForTUI(requestID string, decision string, pattern string) error {
+	rule, err := ruleFromScopePattern(pattern)
+	if err != nil {
+		return err
+	}
+	return a.DecideWithRuleForTUI(requestID, decision, rule)
+}
+
+func (a *API) RuleScopeCandidatesForTUI(requestID string) []string {
+	a.reqsMu.Lock()
+	rec, ok := a.reqs[requestID]
+	a.reqsMu.Unlock()
+	if !ok {
+		return nil
+	}
+	var op rules.Op
+	if err := json.Unmarshal(rec.Op, &op); err != nil {
+		return nil
+	}
+	analysis := rules.AnalyzeCommandOp(op)
+	out := make([]string, 0, len(analysis.Segments)*2)
+	for _, segment := range analysis.Segments {
+		if segment.Unsupported != "" || len(segment.Argv) == 0 {
+			continue
+		}
+		exact := strings.Join(segment.Argv, " ")
+		out = append(out, exact)
+		if len(segment.Argv) == 1 {
+			out = append(out, segment.Argv[0]+"*")
+		} else if len(segment.Argv) > 1 {
+			out = append(out, strings.Join(segment.Argv[:len(segment.Argv)-1], " ")+" "+segment.Argv[len(segment.Argv)-1]+"*")
+		}
+	}
+	return dedupeStrings(out)
+}
+
+func ruleFromScopePattern(pattern string) (rules.Rule, error) {
+	argv := strings.Fields(strings.TrimSpace(pattern))
+	if len(argv) == 0 {
+		return rules.Rule{}, errors.New("empty rule pattern")
+	}
+	for _, arg := range argv {
+		switch arg {
+		case "&&", "||", "|", ";", "&":
+			return rules.Rule{}, errors.New("shell separators are not allowed in rule pattern")
+		}
+		if strings.Contains(arg, "\n") || strings.ContainsAny(arg, "|;&") {
+			return rules.Rule{}, errors.New("shell separators are not allowed in rule pattern")
+		}
+	}
+	return rules.Rule{OpType: "cmd.run", Cmd: &rules.CmdRule{ArgvPrefix: argv, TailAny: true}}, nil
+}
+
+func dedupeStrings(in []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if strings.TrimSpace(s) == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out
+}
+
 func (a *API) KillForTUI(requestID string) error {
 	a.reqsMu.Lock()
 	rec, ok := a.reqs[requestID]
@@ -523,7 +600,7 @@ func (a *API) GetRequestInfoForTUI(requestID string) (TUIRequestInfo, bool) {
 		ID:        rec.ID,
 		Status:    rec.Status,
 		Summary:   summarizeOp(rec),
-		Details:   tuiDetails(rec),
+		Details:   a.tuiDetails(rec),
 		SessionID: rec.SessionID,
 		ClientID:  rec.ClientID,
 		RiskFlags: append([]string(nil), rec.RiskFlags...),
@@ -1152,6 +1229,10 @@ func (a *API) handleDecision(w http.ResponseWriter, r *http.Request, c auth.Clai
 }
 
 func (a *API) decideInternal(ctx context.Context, requestID string, decision string, c auth.Claims) error {
+	return a.decideInternalWithRule(ctx, requestID, decision, c, nil)
+}
+
+func (a *API) decideInternalWithRule(ctx context.Context, requestID string, decision string, c auth.Claims, overrideRule *rules.Rule) error {
 	decision = strings.TrimSpace(decision)
 	if decision == "" {
 		return errors.New("BAD_REQUEST")
@@ -1219,11 +1300,20 @@ func (a *API) decideInternal(ctx context.Context, requestID string, decision str
 		var createdRule rules.Rule
 		var hasRule bool
 		if decision == "ALLOW_SESSION" || decision == "ALLOW_ALWAYS" {
-			createdRuleID = uuid.NewString()
-			rule, ok := ruleFromOpExact(createdRuleID, op)
-			if ok {
-				createdRule = rule
+			if overrideRule != nil {
+				createdRule = *overrideRule
+				if createdRule.ID == "" {
+					createdRule.ID = uuid.NewString()
+				}
+				createdRuleID = createdRule.ID
 				hasRule = true
+			} else {
+				createdRuleID = uuid.NewString()
+				rule, ok := ruleFromOpExact(createdRuleID, op)
+				if ok {
+					createdRule = rule
+					hasRule = true
+				}
 			}
 		}
 
@@ -1421,6 +1511,14 @@ func summarizeOp(rec requestRecord) string {
 }
 
 func tuiDetails(rec requestRecord) string {
+	return tuiDetailsWithRules(rec, nil)
+}
+
+func (a *API) tuiDetails(rec requestRecord) string {
+	return tuiDetailsWithRules(rec, a.rules)
+}
+
+func tuiDetailsWithRules(rec requestRecord, engine *rules.Engine) string {
 	var op rules.Op
 	if err := json.Unmarshal(rec.Op, &op); err != nil {
 		return ""
@@ -1450,6 +1548,11 @@ func tuiDetails(rec requestRecord) string {
 		}
 		if hints := commandReviewHints(p.Argv); len(hints) > 0 {
 			fmt.Fprintf(&b, "\nreview_hints: %s", strings.Join(hints, ", "))
+		}
+		if engine != nil {
+			if preview := commandAnalysisPreview(engine.Explain(rec.SessionID, op)); preview != "" {
+				fmt.Fprintf(&b, "\n\ncommand_analysis:\n%s", preview)
+			}
 		}
 		return strings.TrimRight(b.String(), "\n")
 	case "fs.read":
@@ -1485,6 +1588,29 @@ func tuiDetails(rec requestRecord) string {
 	default:
 		return ""
 	}
+}
+
+func commandAnalysisPreview(explain rules.Explanation) string {
+	if len(explain.Segments) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, segment := range explain.Segments {
+		cmd := strings.Join(segment.Argv, " ")
+		if cmd == "" {
+			cmd = "<unknown>"
+		}
+		if segment.Allowed {
+			fmt.Fprintf(&b, "[green]ALLOW[-] %s  matched=%s:%s\n", cmd, segment.Source, segment.RuleID)
+			continue
+		}
+		reason := segment.Reason
+		if reason == "" {
+			reason = "no matching rule"
+		}
+		fmt.Fprintf(&b, "[red]BLOCK[-] %s  reason=%s\n", cmd, reason)
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 func commandReviewHints(argv []string) []string {

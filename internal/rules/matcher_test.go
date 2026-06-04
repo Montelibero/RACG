@@ -48,6 +48,77 @@ func TestMatchCmdRunArgvPrefixWithGlobArg(t *testing.T) {
 	}
 }
 
+func TestMatchCmdRunShellRequiresEverySegmentAllowed(t *testing.T) {
+	e := NewEngine()
+	e.AddAlways(Rule{ID: "docker-stop-nginx", OpType: "cmd.run", Cmd: &CmdRule{ArgvPrefix: []string{"docker", "stop", "nginx"}}})
+	e.AddAlways(Rule{ID: "echo", OpType: "cmd.run", Cmd: &CmdRule{ArgvPrefix: []string{"echo"}}})
+
+	allowed := Op{Type: "cmd.run", Payload: mustJSON(t, map[string]any{
+		"argv": []string{"bash", "-lc", "docker stop nginx && echo ok"},
+	})}
+	if _, ok := e.Match("sess1", allowed); !ok {
+		t.Fatalf("expected shell command to match because every segment is allowed")
+	}
+
+	blocked := Op{Type: "cmd.run", Payload: mustJSON(t, map[string]any{
+		"argv": []string{"bash", "-lc", "docker stop nginx && echo ok && rm /"},
+	})}
+	if _, ok := e.Match("sess1", blocked); ok {
+		t.Fatalf("unexpected match when one shell segment is not allowed")
+	}
+}
+
+func TestMatchCmdRunShellDoesNotAllowByShellBinaryRule(t *testing.T) {
+	e := NewEngine()
+	e.AddAlways(Rule{ID: "bash", OpType: "cmd.run", Cmd: &CmdRule{ArgvPrefix: []string{"bash"}}})
+
+	op := Op{Type: "cmd.run", Payload: mustJSON(t, map[string]any{
+		"argv": []string{"bash", "-lc", "rm /"},
+	})}
+	if _, ok := e.Match("sess1", op); ok {
+		t.Fatalf("shell binary rule must not allow unchecked inner command")
+	}
+}
+
+func TestMatchCmdRunRuleCanAllowGlobArgWithAnyTail(t *testing.T) {
+	e := NewEngine()
+	e.AddAlways(Rule{ID: "docker-stop-n", OpType: "cmd.run", Cmd: &CmdRule{ArgvPrefix: []string{"docker", "stop", "n*"}, TailAny: true}})
+
+	op := Op{Type: "cmd.run", Payload: mustJSON(t, map[string]any{
+		"argv": []string{"docker", "stop", "nginx", "--time", "10"},
+	})}
+	if _, ok := e.Match("sess1", op); !ok {
+		t.Fatalf("expected glob arg with any tail to match")
+	}
+}
+
+func TestExplainCmdRunShellMarksAllowedAndBlockedSegments(t *testing.T) {
+	e := NewEngine()
+	e.AddAlways(Rule{ID: "docker-stop-nginx", OpType: "cmd.run", Cmd: &CmdRule{ArgvPrefix: []string{"docker", "stop", "nginx"}}})
+	e.AddAlways(Rule{ID: "echo", OpType: "cmd.run", Cmd: &CmdRule{ArgvPrefix: []string{"echo"}}})
+
+	op := Op{Type: "cmd.run", Payload: mustJSON(t, map[string]any{
+		"argv": []string{"bash", "-lc", "docker stop nginx && echo ok && rm /"},
+	})}
+	explain := e.Explain("sess1", op)
+
+	if explain.Allowed {
+		t.Fatalf("explain allowed unexpectedly: %#v", explain)
+	}
+	if len(explain.Segments) != 3 {
+		t.Fatalf("segments=%d want 3", len(explain.Segments))
+	}
+	if !explain.Segments[0].Allowed || explain.Segments[0].RuleID != "docker-stop-nginx" {
+		t.Fatalf("segment 0=%#v", explain.Segments[0])
+	}
+	if !explain.Segments[1].Allowed || explain.Segments[1].RuleID != "echo" {
+		t.Fatalf("segment 1=%#v", explain.Segments[1])
+	}
+	if explain.Segments[2].Allowed || explain.Segments[2].Reason != "no matching rule" {
+		t.Fatalf("segment 2=%#v", explain.Segments[2])
+	}
+}
+
 func TestMatchPathPrefix(t *testing.T) {
 	e := NewEngine()
 	e.AddSession("sess1", Rule{ID: "s1", OpType: "fs.read", Path: &PathRule{Prefix: "/home/itolstov/"}})

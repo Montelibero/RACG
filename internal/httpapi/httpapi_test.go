@@ -804,10 +804,7 @@ func TestRequestLogsEndpointsReturnRawStreams(t *testing.T) {
 	pair := auth.NewPairing(6, 3*time.Minute, clk)
 	tm := auth.NewTokenManager(clk)
 
-	re := rules.NewEngine()
-	re.AddAlways(rules.Rule{ID: "allow-sh", OpType: "cmd.run", Cmd: &rules.CmdRule{ArgvPrefix: []string{"/bin/sh"}}})
-
-	api := New(cfg, WithPairing(pair), WithTokenManager(tm), WithRulesEngine(re))
+	api := New(cfg, WithPairing(pair), WithTokenManager(tm))
 
 	open := []byte(`{"client_id":"codex-home","pairing_code":"` + pair.Code() + `"}`)
 	rwOpen := httptest.NewRecorder()
@@ -833,6 +830,16 @@ func TestRequestLogsEndpointsReturnRawStreams(t *testing.T) {
 		RequestID string `json:"request_id"`
 	}
 	_ = json.Unmarshal(createRw.Body.Bytes(), &created)
+
+	decideBody := []byte(`{"decision":"ALLOW_ONCE"}`)
+	decideReq := httptest.NewRequest(http.MethodPost, "http://example/v1/requests/"+created.RequestID+"/decision", bytes.NewReader(decideBody))
+	decideReq.Header.Set("Authorization", "Bearer "+openResp.SessionToken)
+	decideReq.Header.Set("Content-Type", "application/json")
+	decideRw := httptest.NewRecorder()
+	api.Handler().ServeHTTP(decideRw, decideReq)
+	if decideRw.Code != 200 {
+		t.Fatalf("decision status=%d body=%s", decideRw.Code, decideRw.Body.String())
+	}
 
 	deadline := time.Now().Add(500 * time.Millisecond)
 	for {
