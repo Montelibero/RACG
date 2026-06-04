@@ -1,0 +1,94 @@
+# RACG Examples
+
+## Basic Diagnostics
+
+```bash
+racg run -- date
+racg run -- uname -a
+racg run -- df -h
+racg run -- free -m
+```
+
+## Long-Running Output
+
+Submit:
+
+```bash
+racg run --no-wait -- /bin/sh -c 'while true; do date +"tick %H:%M:%S"; sleep 3; done'
+```
+
+After approval:
+
+```bash
+racg request logs <id> --live
+racg request tail <id>
+```
+
+Stop it:
+
+```bash
+racg request cancel <id>
+```
+
+## Git
+
+Read-only:
+
+```bash
+racg run -- git status --short --branch
+racg run -- git log --oneline -20
+racg run -- git diff --stat
+```
+
+Avoid auto-approving commands that mutate history or working tree:
+
+```text
+git reset
+git checkout --
+git clean
+git push --force
+```
+
+## Kubernetes Read-Only
+
+```bash
+racg run -- kubectl get pods -A
+racg run -- kubectl describe pod <pod> -n <namespace>
+racg run -- kubectl logs <pod> -n <namespace> --tail=200
+```
+
+For live logs:
+
+```bash
+racg run --no-wait -- kubectl logs -f <pod> -n <namespace>
+racg request tail <id>
+```
+
+## Kubernetes Mutations
+
+Keep mutation requests explicit and narrow:
+
+```bash
+racg run -- kubectl apply -f /path/to/manifest.yaml
+```
+
+Before submitting, summarize:
+
+```text
+operation: kubectl apply
+target: /path/to/manifest.yaml
+namespace: <namespace if known>
+risk: cluster mutation
+rollback: known/unknown
+```
+
+Do not auto-approve apply/delete/patch operations.
+
+## Health Checks
+
+```bash
+racg run -- curl -fsS http://127.0.0.1:8080/health
+racg run -- curl -fsS https://example.com/healthz
+```
+
+If output is large or streaming, use `--no-wait` and `request tail`.
