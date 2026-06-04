@@ -598,6 +598,13 @@ func centered(p tview.Primitive, width int, height int) tview.Primitive {
 		AddItem(nil, 0, 1, false)
 }
 
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 func (s *uiState) jobsModeLabel() string {
 	if s.showAllJobs {
 		return "Only running"
@@ -1195,10 +1202,6 @@ func (s *uiState) openRuleScopeOverlay(app *tview.Application, pages *tview.Page
 	}
 	requestID := s.selectedPending
 	candidates := s.api.RuleScopeCandidatesForTUI(requestID)
-	defaultScope := ""
-	if len(candidates) > 0 {
-		defaultScope = candidates[0]
-	}
 
 	prevFocus := app.GetFocus()
 	title := "Allow scope"
@@ -1209,9 +1212,32 @@ func (s *uiState) openRuleScopeOverlay(app *tview.Application, pages *tview.Page
 	}
 
 	info := tview.NewTextView().SetDynamicColors(false)
-	info.SetText("Edit one command pattern. Shell separators like &&, |, ; are rejected.\nExamples: docker stop nginx | docker stop n*")
+	info.SetText("Edit one scope per command segment. Shell separators like &&, |, ; are rejected.\nExamples: docker stop nginx | docker stop n*")
 
-	input := tview.NewInputField().SetLabel("scope: ").SetText(defaultScope)
+	segmentsText := tview.NewTextView().SetDynamicColors(false)
+	if len(candidates) > 0 {
+		var b strings.Builder
+		for i, c := range candidates {
+			fmt.Fprintf(&b, "%d. %s\n", i+1, c.Segment)
+		}
+		segmentsText.SetText(strings.TrimRight(b.String(), "\n"))
+	}
+
+	inputs := make([]*tview.InputField, 0, len(candidates))
+	inputRows := tview.NewFlex().SetDirection(tview.FlexRow)
+	if len(candidates) == 0 {
+		input := tview.NewInputField().SetLabel("scope: ")
+		inputs = append(inputs, input)
+		inputRows.AddItem(input, 1, 0, true)
+	} else {
+		for i, c := range candidates {
+			input := tview.NewInputField().
+				SetLabel(fmt.Sprintf("scope %d: ", i+1)).
+				SetText(c.Pattern)
+			inputs = append(inputs, input)
+			inputRows.AddItem(input, 1, 0, i == 0)
+		}
+	}
 	errText := tview.NewTextView().SetDynamicColors(false).SetTextColor(tcell.ColorRed)
 
 	close := func() {
@@ -1222,12 +1248,19 @@ func (s *uiState) openRuleScopeOverlay(app *tview.Application, pages *tview.Page
 		}
 	}
 	save := func() {
-		scope := strings.TrimSpace(input.GetText())
-		if scope == "" {
-			errText.SetText("scope is empty")
+		patterns := make([]string, 0, len(inputs))
+		for _, input := range inputs {
+			scope := strings.TrimSpace(input.GetText())
+			if scope == "" {
+				continue
+			}
+			patterns = append(patterns, scope)
+		}
+		if len(patterns) == 0 {
+			errText.SetText("at least one scope is required")
 			return
 		}
-		if err := s.api.DecideWithRulePatternForTUI(requestID, decision, scope); err != nil {
+		if err := s.api.DecideWithRulePatternsForTUI(requestID, decision, patterns); err != nil {
 			errText.SetText(err.Error())
 			return
 		}
@@ -1243,15 +1276,36 @@ func (s *uiState) openRuleScopeOverlay(app *tview.Application, pages *tview.Page
 	buttons := tview.NewFlex().SetDirection(tview.FlexColumn).
 		AddItem(btnSave, 0, 1, false).
 		AddItem(btnCancel, 0, 1, false)
+	focusables := make([]tview.Primitive, 0, len(inputs)+2)
+	for _, input := range inputs {
+		focusables = append(focusables, input)
+	}
+	focusables = append(focusables, btnSave, btnCancel)
+	nextFocus := func() {
+		cur := app.GetFocus()
+		for i, p := range focusables {
+			if p == cur {
+				app.SetFocus(focusables[(i+1)%len(focusables)])
+				return
+			}
+		}
+		if len(focusables) > 0 {
+			app.SetFocus(focusables[0])
+		}
+	}
 
 	root := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(info, 2, 0, false).
-		AddItem(input, 1, 0, true).
+		AddItem(segmentsText, maxInt(1, len(candidates)), 0, false).
+		AddItem(inputRows, len(inputs), 0, true).
 		AddItem(errText, 1, 0, false).
 		AddItem(buttons, 1, 0, false)
 	root.SetBorder(true).SetTitle(title)
 	root.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
 		switch ev.Key() {
+		case tcell.KeyTAB:
+			nextFocus()
+			return nil
 		case tcell.KeyEsc:
 			close()
 			return nil
@@ -1263,8 +1317,10 @@ func (s *uiState) openRuleScopeOverlay(app *tview.Application, pages *tview.Page
 	})
 
 	s.overlayClose = close
-	pages.AddPage("rule_scope", centered(root, 80, 9), true, true)
-	app.SetFocus(input)
+	pages.AddPage("rule_scope", centered(root, 88, 9+len(inputs)+maxInt(1, len(candidates))), true, true)
+	if len(inputs) > 0 {
+		app.SetFocus(inputs[0])
+	}
 }
 
 func jobViewText(mode string, info httpapi.TUIRequestInfo, combined string, liveTruncated bool) string {

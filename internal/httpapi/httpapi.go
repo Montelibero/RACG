@@ -131,6 +131,11 @@ type TUIRequestInfo struct {
 	Result   *resultRecord
 }
 
+type RuleScopeCandidate struct {
+	Segment string
+	Pattern string
+}
+
 type decisionRecord struct {
 	Decision       string `json:"decision"`
 	DecisionSource string `json:"decision_source"`
@@ -355,14 +360,39 @@ func (a *API) DecideWithRuleForTUI(requestID string, decision string, rule rules
 }
 
 func (a *API) DecideWithRulePatternForTUI(requestID string, decision string, pattern string) error {
-	rule, err := ruleFromScopePattern(pattern)
-	if err != nil {
-		return err
-	}
-	return a.DecideWithRuleForTUI(requestID, decision, rule)
+	return a.DecideWithRulePatternsForTUI(requestID, decision, []string{pattern})
 }
 
-func (a *API) RuleScopeCandidatesForTUI(requestID string) []string {
+func (a *API) DecideWithRulePatternsForTUI(requestID string, decision string, patterns []string) error {
+	rulesToCreate := make([]rules.Rule, 0, len(patterns))
+	for _, pattern := range patterns {
+		if strings.TrimSpace(pattern) == "" {
+			continue
+		}
+		rule, err := ruleFromScopePattern(pattern)
+		if err != nil {
+			return err
+		}
+		rulesToCreate = append(rulesToCreate, rule)
+	}
+	if len(rulesToCreate) == 0 {
+		return errors.New("empty rule pattern")
+	}
+	return a.DecideWithRulesForTUI(requestID, decision, rulesToCreate)
+}
+
+func (a *API) DecideWithRulesForTUI(requestID string, decision string, rulesToCreate []rules.Rule) error {
+	a.reqsMu.Lock()
+	rec, ok := a.reqs[requestID]
+	a.reqsMu.Unlock()
+	if !ok {
+		return errors.New("REQUEST_NOT_FOUND")
+	}
+	claims := auth.Claims{SessionID: rec.SessionID, ClientID: rec.ClientID}
+	return a.decideInternalWithRules(context.Background(), requestID, decision, claims, rulesToCreate)
+}
+
+func (a *API) RuleScopeCandidatesForTUI(requestID string) []RuleScopeCandidate {
 	a.reqsMu.Lock()
 	rec, ok := a.reqs[requestID]
 	a.reqsMu.Unlock()
@@ -374,20 +404,15 @@ func (a *API) RuleScopeCandidatesForTUI(requestID string) []string {
 		return nil
 	}
 	analysis := rules.AnalyzeCommandOp(op)
-	out := make([]string, 0, len(analysis.Segments)*2)
+	out := make([]RuleScopeCandidate, 0, len(analysis.Segments))
 	for _, segment := range analysis.Segments {
 		if segment.Unsupported != "" || len(segment.Argv) == 0 {
 			continue
 		}
 		exact := strings.Join(segment.Argv, " ")
-		out = append(out, exact)
-		if len(segment.Argv) == 1 {
-			out = append(out, segment.Argv[0]+"*")
-		} else if len(segment.Argv) > 1 {
-			out = append(out, strings.Join(segment.Argv[:len(segment.Argv)-1], " ")+" "+segment.Argv[len(segment.Argv)-1]+"*")
-		}
+		out = append(out, RuleScopeCandidate{Segment: exact, Pattern: exact})
 	}
-	return dedupeStrings(out)
+	return dedupeScopeCandidates(out)
 }
 
 func ruleFromScopePattern(pattern string) (rules.Rule, error) {
@@ -407,15 +432,16 @@ func ruleFromScopePattern(pattern string) (rules.Rule, error) {
 	return rules.Rule{OpType: "cmd.run", Cmd: &rules.CmdRule{ArgvPrefix: argv, TailAny: true}}, nil
 }
 
-func dedupeStrings(in []string) []string {
+func dedupeScopeCandidates(in []RuleScopeCandidate) []RuleScopeCandidate {
 	seen := map[string]bool{}
-	out := make([]string, 0, len(in))
-	for _, s := range in {
-		if strings.TrimSpace(s) == "" || seen[s] {
+	out := make([]RuleScopeCandidate, 0, len(in))
+	for _, c := range in {
+		key := strings.TrimSpace(c.Pattern)
+		if key == "" || seen[key] {
 			continue
 		}
-		seen[s] = true
-		out = append(out, s)
+		seen[key] = true
+		out = append(out, c)
 	}
 	return out
 }
@@ -1229,10 +1255,18 @@ func (a *API) handleDecision(w http.ResponseWriter, r *http.Request, c auth.Clai
 }
 
 func (a *API) decideInternal(ctx context.Context, requestID string, decision string, c auth.Claims) error {
-	return a.decideInternalWithRule(ctx, requestID, decision, c, nil)
+	return a.decideInternalWithRules(ctx, requestID, decision, c, nil)
 }
 
 func (a *API) decideInternalWithRule(ctx context.Context, requestID string, decision string, c auth.Claims, overrideRule *rules.Rule) error {
+	var rs []rules.Rule
+	if overrideRule != nil {
+		rs = []rules.Rule{*overrideRule}
+	}
+	return a.decideInternalWithRules(ctx, requestID, decision, c, rs)
+}
+
+func (a *API) decideInternalWithRules(ctx context.Context, requestID string, decision string, c auth.Claims, overrideRules []rules.Rule) error {
 	decision = strings.TrimSpace(decision)
 	if decision == "" {
 		return errors.New("BAD_REQUEST")
@@ -1296,31 +1330,29 @@ func (a *API) decideInternalWithRule(ctx context.Context, requestID string, deci
 			return errors.New("ALLOW_ALWAYS_NOT_PERMITTED")
 		}
 
-		var createdRuleID string
-		var createdRule rules.Rule
-		var hasRule bool
+		var createdRules []rules.Rule
 		if decision == "ALLOW_SESSION" || decision == "ALLOW_ALWAYS" {
-			if overrideRule != nil {
-				createdRule = *overrideRule
-				if createdRule.ID == "" {
-					createdRule.ID = uuid.NewString()
+			if len(overrideRules) > 0 {
+				for _, overrideRule := range overrideRules {
+					createdRule := overrideRule
+					if createdRule.ID == "" {
+						createdRule.ID = uuid.NewString()
+					}
+					createdRules = append(createdRules, createdRule)
 				}
-				createdRuleID = createdRule.ID
-				hasRule = true
 			} else {
-				createdRuleID = uuid.NewString()
+				createdRuleID := uuid.NewString()
 				rule, ok := ruleFromOpExact(createdRuleID, op)
 				if ok {
-					createdRule = rule
-					hasRule = true
+					createdRules = append(createdRules, rule)
 				}
 			}
 		}
 
 		if a.st != nil {
 			ruleID := ""
-			if hasRule {
-				ruleID = createdRuleID
+			if len(createdRules) > 0 {
+				ruleID = createdRules[0].ID
 			}
 			_ = a.st.UpdateRequestStatus(ctx, requestID, "APPROVED")
 			_ = a.st.InsertDecision(ctx, store.Decision{
@@ -1330,8 +1362,10 @@ func (a *API) decideInternalWithRule(ctx context.Context, requestID string, deci
 				DecidedAt:      decidedAt,
 				RuleID:         ruleID,
 			})
-			if decision == "ALLOW_ALWAYS" && hasRule {
-				_ = a.st.InsertAlwaysRule(ctx, createdRule, decidedAt)
+			if decision == "ALLOW_ALWAYS" {
+				for _, createdRule := range createdRules {
+					_ = a.st.InsertAlwaysRule(ctx, createdRule, decidedAt)
+				}
 			}
 		}
 
@@ -1340,11 +1374,13 @@ func (a *API) decideInternalWithRule(ctx context.Context, requestID string, deci
 		a.reqs[requestID] = rec
 		a.reqsMu.Unlock()
 
-		if hasRule {
-			if decision == "ALLOW_SESSION" {
-				a.rules.AddSession(c.SessionID, createdRule)
-			} else if decision == "ALLOW_ALWAYS" {
-				a.rules.AddAlways(createdRule)
+		if len(createdRules) > 0 {
+			for _, createdRule := range createdRules {
+				if decision == "ALLOW_SESSION" {
+					a.rules.AddSession(c.SessionID, createdRule)
+				} else if decision == "ALLOW_ALWAYS" {
+					a.rules.AddAlways(createdRule)
+				}
 			}
 		}
 

@@ -116,7 +116,7 @@ It does not include write/destructive operations such as `kubectl apply/delete/p
 
 ## Rule scopes
 
-In the TUI, `Allow session` and `Allow always` open a scope editor for command requests. The scope is one command pattern, for example:
+In the TUI, `Allow session` and `Allow always` open a scope editor for command requests. For shell requests with multiple command segments, the editor shows one scope per segment. A scope is one command pattern, for example:
 
 ```text
 docker stop nginx

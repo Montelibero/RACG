@@ -110,3 +110,65 @@ func TestRuleScopePatternRejectsShellSeparators(t *testing.T) {
 		t.Fatalf("argv_prefix=%q", r.Cmd.ArgvPrefix)
 	}
 }
+
+func TestRuleScopeCandidatesIncludeEachShellSegment(t *testing.T) {
+	api := New(config.Defaults())
+	op := map[string]any{
+		"type": "cmd.run",
+		"payload": map[string]any{
+			"argv": []string{"bash", "-lc", "echo second-chain && uname -s && printf done\\n"},
+		},
+	}
+	b, err := json.Marshal(op)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	api.reqs["req1"] = requestRecord{ID: "req1", Status: "PENDING_APPROVAL", Op: b, SessionID: "sess1"}
+
+	got := api.RuleScopeCandidatesForTUI("req1")
+	if len(got) != 3 {
+		t.Fatalf("candidates=%d want 3: %#v", len(got), got)
+	}
+	want := []string{"echo second-chain", "uname -s", "printf done\\n"}
+	for i := range want {
+		if got[i].Pattern != want[i] || got[i].Segment != want[i] {
+			t.Fatalf("candidate %d=%#v want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestDecideWithRulePatternsForTUISavesEachSessionRule(t *testing.T) {
+	api := New(config.Defaults())
+	op := map[string]any{
+		"type": "cmd.run",
+		"payload": map[string]any{
+			"argv": []string{"bash", "-lc", "echo second-chain && uname -s && printf done\\n"},
+		},
+	}
+	b, err := json.Marshal(op)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	api.reqs["req1"] = requestRecord{ID: "req1", Status: "PENDING_APPROVAL", Op: b, SessionID: "sess1", ClientID: "cli"}
+
+	err = api.DecideWithRulePatternsForTUI("req1", "ALLOW_SESSION", []string{"echo second-chain", "uname -s", "printf done\\n"})
+	if err != nil {
+		t.Fatalf("DecideWithRulePatternsForTUI: %v", err)
+	}
+
+	rows := api.ListSessionRulesForTUI()
+	if len(rows) != 3 {
+		t.Fatalf("session rules=%d want 3: %#v", len(rows), rows)
+	}
+	got := map[string]bool{}
+	for _, row := range rows {
+		if row.CmdArgvJSON != nil {
+			got[*row.CmdArgvJSON] = true
+		}
+	}
+	for _, want := range []string{`["echo","second-chain"]`, `["uname","-s"]`, `["printf","done\\n"]`} {
+		if !got[want] {
+			t.Fatalf("missing rule %s in %#v", want, got)
+		}
+	}
+}

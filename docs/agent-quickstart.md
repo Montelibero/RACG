@@ -163,7 +163,7 @@ Do not auto-approve destructive or mutating operations such as `kubectl apply/de
 
 The human can view both persisted `ALLOW_ALWAYS` rules and in-memory `ALLOW_SESSION` rules in the TUI via `3 Rules`. Session rules expire when the server/session ends.
 
-When the human chooses `Allow session` or `Allow always` for a command request, RACG opens a scope editor. Scopes are one command pattern, such as `docker stop nginx` or `docker stop n*`. Shell separators (`&&`, `||`, `|`, `;`, `&`) are not part of a scope.
+When the human chooses `Allow session` or `Allow always` for a command request, RACG opens a scope editor. For shell requests with multiple command segments, the editor shows one scope per segment. Scopes are command patterns, such as `docker stop nginx` or `docker stop n*`. Shell separators (`&&`, `||`, `|`, `;`, `&`) are not part of a scope.
 
 For shell commands, RACG analyzes each command segment independently. A request like `bash -lc 'docker stop nginx && echo ok'` can auto-approve only if both `docker stop nginx` and `echo ok` match rules. If any segment is not allowed, the whole request stays pending.
 
