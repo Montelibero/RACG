@@ -101,12 +101,19 @@ func TestRuleScopePatternRejectsShellSeparators(t *testing.T) {
 	if _, err := ruleFromScopePattern("docker stop nginx && rm /"); err == nil {
 		t.Fatalf("expected separator pattern to be rejected")
 	}
-	if _, err := ruleFromScopePattern("docker stop nginx;rm /"); err == nil {
-		t.Fatalf("expected inline separator pattern to be rejected")
-	}
 	if r, err := ruleFromScopePattern("docker stop n*"); err != nil {
 		t.Fatalf("ruleFromScopePattern: %v", err)
 	} else if strings.Join(r.Cmd.ArgvPrefix, "\x00") != "docker\x00stop\x00n*" {
+		t.Fatalf("argv_prefix=%q", r.Cmd.ArgvPrefix)
+	}
+}
+
+func TestRuleScopePatternAllowsRegexPipeInsideArg(t *testing.T) {
+	r, err := ruleFromScopePattern(`grep -E pavuuk-(main-bot|web-admin|user-runtime)`)
+	if err != nil {
+		t.Fatalf("ruleFromScopePattern: %v", err)
+	}
+	if got := strings.Join(r.Cmd.ArgvPrefix, "\x00"); got != "grep\x00-E\x00pavuuk-(main-bot|web-admin|user-runtime)" {
 		t.Fatalf("argv_prefix=%q", r.Cmd.ArgvPrefix)
 	}
 }

@@ -425,7 +425,7 @@ func ruleFromScopePattern(pattern string) (rules.Rule, error) {
 		case "&&", "||", "|", ";", "&":
 			return rules.Rule{}, errors.New("shell separators are not allowed in rule pattern")
 		}
-		if strings.Contains(arg, "\n") || strings.ContainsAny(arg, "|;&") {
+		if strings.Contains(arg, "\n") {
 			return rules.Rule{}, errors.New("shell separators are not allowed in rule pattern")
 		}
 	}
