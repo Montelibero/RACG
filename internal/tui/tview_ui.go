@@ -1245,19 +1245,32 @@ func (s *uiState) openRuleScopeOverlay(app *tview.Application, pages *tview.Page
 		segmentsText.SetText(strings.TrimRight(b.String(), "\n"))
 	}
 
+	checks := make([]*tview.Checkbox, 0, len(candidates))
 	inputs := make([]*tview.InputField, 0, len(candidates))
 	inputRows := tview.NewFlex().SetDirection(tview.FlexRow)
 	if len(candidates) == 0 {
+		check := tview.NewCheckbox().SetLabel("save: ").SetChecked(true)
 		input := tview.NewInputField().SetLabel("scope: ")
+		checks = append(checks, check)
 		inputs = append(inputs, input)
-		inputRows.AddItem(input, 1, 0, true)
+		row := tview.NewFlex().SetDirection(tview.FlexColumn).
+			AddItem(check, 12, 0, true).
+			AddItem(input, 0, 1, false)
+		inputRows.AddItem(row, 1, 0, true)
 	} else {
 		for i, c := range candidates {
+			check := tview.NewCheckbox().
+				SetLabel(fmt.Sprintf("save %d: ", i+1)).
+				SetChecked(true)
 			input := tview.NewInputField().
 				SetLabel(fmt.Sprintf("scope %d: ", i+1)).
 				SetText(c.Pattern)
+			checks = append(checks, check)
 			inputs = append(inputs, input)
-			inputRows.AddItem(input, 1, 0, i == 0)
+			row := tview.NewFlex().SetDirection(tview.FlexColumn).
+				AddItem(check, 12, 0, i == 0).
+				AddItem(input, 0, 1, false)
+			inputRows.AddItem(row, 1, 0, i == 0)
 		}
 	}
 	errText := tview.NewTextView().SetDynamicColors(false).SetTextColor(tcell.ColorRed)
@@ -1271,7 +1284,10 @@ func (s *uiState) openRuleScopeOverlay(app *tview.Application, pages *tview.Page
 	}
 	save := func() {
 		patterns := make([]string, 0, len(inputs))
-		for _, input := range inputs {
+		for i, input := range inputs {
+			if i < len(checks) && !checks[i].IsChecked() {
+				continue
+			}
 			scope := strings.TrimSpace(input.GetText())
 			if scope == "" {
 				continue
@@ -1298,8 +1314,11 @@ func (s *uiState) openRuleScopeOverlay(app *tview.Application, pages *tview.Page
 	buttons := tview.NewFlex().SetDirection(tview.FlexColumn).
 		AddItem(btnSave, 0, 1, false).
 		AddItem(btnCancel, 0, 1, false)
-	focusables := make([]tview.Primitive, 0, len(inputs)+2)
-	for _, input := range inputs {
+	focusables := make([]tview.Primitive, 0, len(inputs)*2+2)
+	for i, input := range inputs {
+		if i < len(checks) {
+			focusables = append(focusables, checks[i])
+		}
 		focusables = append(focusables, input)
 	}
 	focusables = append(focusables, btnSave, btnCancel)
@@ -1324,8 +1343,19 @@ func (s *uiState) openRuleScopeOverlay(app *tview.Application, pages *tview.Page
 		}
 		app.SetFocus(focusables[idx%len(focusables)])
 	}
+	for i, check := range checks {
+		idx := i * 2
+		check.SetDoneFunc(func(key tcell.Key) {
+			switch key {
+			case tcell.KeyTAB, tcell.KeyDown, tcell.KeyEnter:
+				setFocusIndex(idx + 1)
+			case tcell.KeyBacktab, tcell.KeyUp:
+				setFocusIndex(idx - 1)
+			}
+		})
+	}
 	for i, input := range inputs {
-		idx := i
+		idx := i*2 + 1
 		input.SetDoneFunc(func(key tcell.Key) {
 			switch key {
 			case tcell.KeyTAB, tcell.KeyDown, tcell.KeyEnter:
@@ -1371,8 +1401,8 @@ func (s *uiState) openRuleScopeOverlay(app *tview.Application, pages *tview.Page
 
 	s.overlayClose = close
 	pages.AddPage("rule_scope", centered(root, 88, 9+len(inputs)+maxInt(1, len(candidates))), true, true)
-	if len(inputs) > 0 {
-		app.SetFocus(inputs[0])
+	if len(focusables) > 0 {
+		app.SetFocus(focusables[0])
 	}
 }
 
