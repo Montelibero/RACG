@@ -51,6 +51,23 @@ RACG_HOST="$HOST" RACG_TOKEN="$TOKEN" racg request logs <id> --live
 
 Do not print saved tokens in chat or logs.
 
+## Update RACG
+
+For an already installed binary, prefer the built-in updater over piping the installer again:
+
+```bash
+racg update --check
+racg update
+```
+
+If RACG is installed under `/usr/local/bin` and the current user cannot write there, use:
+
+```bash
+sudo racg update --target /usr/local/bin/racg
+```
+
+The updater verifies release checksums. If `racg serve` is running, restart it after update so the server process uses the new binary.
+
 ## 2. Run Commands
 
 Submit a command and wait for terminal status:
