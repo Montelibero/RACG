@@ -1573,14 +1573,14 @@ func tuiDetailsWithRules(rec requestRecord, engine *rules.Engine) string {
 		}
 		var b strings.Builder
 		if p.Cwd != "" {
-			fmt.Fprintf(&b, "cwd: %s\n", p.Cwd)
+			fmt.Fprintf(&b, "cwd: %s\n", escapeTUIViewText(p.Cwd))
 		}
 		if p.TimeoutSec > 0 {
 			fmt.Fprintf(&b, "timeout_sec: %d\n", p.TimeoutSec)
 		}
 		b.WriteString("argv:\n")
 		for i, arg := range p.Argv {
-			fmt.Fprintf(&b, "  [%d] %s\n", i, arg)
+			fmt.Fprintf(&b, "  [%d] %s\n", i, escapeTUIViewText(arg))
 		}
 		if hints := commandReviewHints(p.Argv); len(hints) > 0 {
 			fmt.Fprintf(&b, "\nreview_hints: %s", strings.Join(hints, ", "))
@@ -1639,17 +1639,22 @@ func commandAnalysisPreview(explain rules.Explanation) string {
 		if cmd == "" {
 			cmd = "<unknown>"
 		}
+		cmd = escapeTUIViewText(cmd)
 		if segment.Allowed {
-			fmt.Fprintf(&b, "[green]ALLOW[-] %s  matched=%s:%s\n", cmd, segment.Source, segment.RuleID)
+			fmt.Fprintf(&b, "[green]ALLOW[-] %s  matched=%s:%s\n", cmd, escapeTUIViewText(segment.Source), escapeTUIViewText(segment.RuleID))
 			continue
 		}
 		reason := segment.Reason
 		if reason == "" {
 			reason = "no matching rule"
 		}
-		fmt.Fprintf(&b, "[red]BLOCK[-] %s  reason=%s\n", cmd, reason)
+		fmt.Fprintf(&b, "[red]BLOCK[-] %s  reason=%s\n", cmd, escapeTUIViewText(reason))
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+func escapeTUIViewText(text string) string {
+	return strings.ReplaceAll(text, "]", "[]")
 }
 
 func commandReviewHints(argv []string) []string {

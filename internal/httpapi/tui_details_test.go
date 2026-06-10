@@ -70,6 +70,30 @@ func TestTUIDetailsShowsCommandAnalysisAllowBlock(t *testing.T) {
 	}
 }
 
+func TestTUIDetailsEscapesCommandAnalysisBrackets(t *testing.T) {
+	api := New(config.Defaults())
+	op := map[string]any{
+		"type": "cmd.run",
+		"payload": map[string]any{
+			"argv": []string{"bash", "-lc", `sed -E 's/[0-9]{8}/X/g' && grep -E 'app-(api|web)'`},
+		},
+	}
+	b, err := json.Marshal(op)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	got := api.tuiDetails(requestRecord{Op: b, SessionID: "sess1"})
+	for _, want := range []string{"[0-9[]", "app-(api|web)"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("details missing escaped text %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "s/[0-9]{8}/X/g") {
+		t.Fatalf("details contains raw dynamic-color tag text:\n%s", got)
+	}
+}
+
 func TestTUIDetailsShowsUnsupportedSegmentSource(t *testing.T) {
 	api := New(config.Defaults())
 
