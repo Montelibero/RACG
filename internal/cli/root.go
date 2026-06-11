@@ -60,6 +60,8 @@ func (r *Root) Run(args []string) int {
 		return NewSessionsCmd(r.stdout, r.stderr, config.Defaults().DBPath).Run(rest[1:])
 	case "update":
 		return NewUpdateCmd(r.stdout, r.stderr).Run(rest[1:])
+	case "config":
+		return NewConfigCmd(r.stdout, r.stderr).Run(rest[1:])
 	default:
 		fmt.Fprintln(r.stderr, usage())
 		return 2
@@ -67,5 +69,5 @@ func (r *Root) Run(args []string) int {
 }
 
 func usage() string {
-	return "usage: racg [--version] <command>\n\ncommands:\n  serve\n  login\n  logout\n  session\n  run\n  request\n  rules\n  sessions\n  update\n\nquick start:\n  sudo racg serve -listen-addr 127.0.0.1 -port 8777\n"
+	return "usage: racg [--version] <command>\n\ncommands:\n  serve\n  login\n  logout\n  session\n  run\n  request\n  rules\n  sessions\n  update\n  config\n\nquick start:\n  sudo racg serve -listen-addr 127.0.0.1 -port 8777\n"
 }

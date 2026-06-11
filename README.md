@@ -78,6 +78,9 @@ racg request logs <request_id> --live
 racg request tail <request_id>
 racg request logs <request_id> --stdout
 racg request logs <request_id> --stderr
+racg config set /app/.env PORT 8080 --format env
+racg config set values.yaml image.tag v1.2.3 --format yaml
+racg config set config.json server.debug true --format json --type bool
 racg logout
 ```
 
@@ -87,6 +90,7 @@ You can still override saved config with `--host`, `--token`, `RACG_HOST`, and `
 `racg request logs` reads raw stream endpoints (`/v1/requests/<id>/logs/stdout` and `/v1/requests/<id>/logs/stderr`) so large output can be consumed without parsing the full request JSON.
 Use `racg request logs <id> --live` for the current in-memory live output snapshot while a request is still running, or `racg request tail <id>` to follow live output until the request reaches a terminal status.
 Use `racg request cancel <id>` to cancel a pending approval or stop a running command.
+Use `racg config set` to request a format-aware config edit without shell scripts. It supports `env`, `json`, and `yaml`; writes a backup next to the file by default; validates the result before replacing the file; and uses dotted keys for `json`/`yaml`.
 
 ## Agent skill
 
@@ -152,7 +156,7 @@ RACG analyzes each shell segment independently. Auto-approve only happens when e
 - `cmd.run` с безопасными командами чтения/диагностики (`cat`, `ls`, `uname`, `date` и т.п.)
 
 Dangerous (по умолчанию `ALLOW_ALWAYS` запрещен):
-- `WRITE_ETC` (`fs.patch_unified`/`conf.set_kv` по `/etc/...`)
+- `WRITE_ETC` (`fs.patch_unified`/`conf.set` по `/etc/...`)
 - `APT_REMOVE` (`apt/apt-get remove|purge`)
 - `FIREWALL` (`iptables`, `nft`, `ufw`)
 - `DESTRUCTIVE_FS` (`rm`, `/bin/rm`)

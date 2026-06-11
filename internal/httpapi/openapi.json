@@ -121,13 +121,14 @@
       },
       "OpType": {
         "type": "string",
-        "enum": ["cmd.run", "fs.read", "fs.patch_unified", "conf.set_kv", "svc.status", "svc.restart", "svc.logs"]
+        "enum": ["cmd.run", "fs.read", "fs.patch_unified", "conf.set", "svc.status", "svc.restart", "svc.logs"]
       },
       "Op": {
         "oneOf": [
           { "$ref": "#/components/schemas/CmdRunOp" },
           { "$ref": "#/components/schemas/FsReadOp" },
           { "$ref": "#/components/schemas/FsPatchUnifiedOp" },
+          { "$ref": "#/components/schemas/ConfSetOp" },
           { "$ref": "#/components/schemas/GenericOp" }
         ],
         "discriminator": { "propertyName": "type" }
@@ -188,6 +189,27 @@
         "properties": {
           "path": { "type": "string" },
           "diff": { "type": "string", "description": "Unified diff." }
+        }
+      },
+      "ConfSetOp": {
+        "type": "object",
+        "required": ["type", "payload"],
+        "properties": {
+          "type": { "type": "string", "enum": ["conf.set"] },
+          "payload": { "$ref": "#/components/schemas/ConfSetPayload" }
+        }
+      },
+      "ConfSetPayload": {
+        "type": "object",
+        "required": ["path", "format", "key", "value"],
+        "properties": {
+          "path": { "type": "string" },
+          "format": { "type": "string", "enum": ["env", "json", "yaml"] },
+          "key": { "type": "string", "description": "Key name for env or dotted path for json/yaml." },
+          "value": { "type": "string" },
+          "value_type": { "type": "string", "enum": ["string", "bool", "int", "float", "null", "json"], "default": "string" },
+          "backup": { "type": "boolean", "default": true },
+          "backup_dir": { "type": "string" }
         }
       },
       "RequestRecord": {

@@ -1949,15 +1949,16 @@ func historyOpSummary(opJSON string) string {
 			return "fs.patch_unified"
 		}
 		return "fs.patch_unified " + p.Path
-	case "conf.set_kv":
+	case "conf.set", "conf.set_kv":
 		var p struct {
-			Key string `json:"key"`
+			Path string `json:"path"`
+			Key  string `json:"key"`
 		}
 		_ = json.Unmarshal(op.Payload, &p)
-		if p.Key == "" {
-			return "conf.set_kv"
+		if p.Path != "" && p.Key != "" {
+			return op.Type + " " + p.Path + " " + p.Key
 		}
-		return "conf.set_kv " + p.Key
+		return op.Type
 	default:
 		if strings.TrimSpace(op.Type) == "" {
 			return "<unknown op>"

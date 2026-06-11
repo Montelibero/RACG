@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -995,6 +996,90 @@ func TestFSPatchUnifiedExecution(t *testing.T) {
 		t.Fatalf("ReadFile: %v", err)
 	}
 	if string(got) != "a\nB\nc\n" {
+		t.Fatalf("file=%q", string(got))
+	}
+}
+
+func TestConfSetExecutionUpdatesConfigWithBackup(t *testing.T) {
+	cfg := config.Defaults()
+	clk := auth.NewFakeClock(time.Unix(1000, 0).UTC())
+	pair := auth.NewPairing(6, 3*time.Minute, clk)
+	tm := auth.NewTokenManager(clk)
+
+	dir := t.TempDir()
+	p := filepath.Join(dir, "values.yaml")
+	if err := os.WriteFile(p, []byte("image:\n  repository: app\n  tag: old\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	api := New(cfg, WithPairing(pair), WithTokenManager(tm))
+
+	open := []byte(`{"client_id":"codex-home","pairing_code":"` + pair.Code() + `"}`)
+	rwOpen := httptest.NewRecorder()
+	api.Handler().ServeHTTP(rwOpen, httptest.NewRequest(http.MethodPost, "http://example/v1/session/open", bytes.NewReader(open)))
+	if rwOpen.Code != 200 {
+		t.Fatalf("open status=%d body=%s", rwOpen.Code, rwOpen.Body.String())
+	}
+	var openResp struct {
+		SessionToken string `json:"session_token"`
+	}
+	_ = json.Unmarshal(rwOpen.Body.Bytes(), &openResp)
+
+	body := map[string]any{
+		"op": map[string]any{
+			"type": "conf.set",
+			"payload": map[string]any{
+				"path":       p,
+				"format":     "yaml",
+				"key":        "image.tag",
+				"value":      "v1.2.3",
+				"value_type": "string",
+				"backup":     true,
+			},
+		},
+	}
+	bodyBytes, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	createReq := httptest.NewRequest(http.MethodPost, "http://example/v1/requests", bytes.NewReader(bodyBytes))
+	createReq.Header.Set("Authorization", "Bearer "+openResp.SessionToken)
+	createReq.Header.Set("Content-Type", "application/json")
+	createRw := httptest.NewRecorder()
+	api.Handler().ServeHTTP(createRw, createReq)
+	if createRw.Code != 200 {
+		t.Fatalf("create status=%d body=%s", createRw.Code, createRw.Body.String())
+	}
+	var created struct {
+		RequestID string `json:"request_id"`
+	}
+	_ = json.Unmarshal(createRw.Body.Bytes(), &created)
+
+	decReq := httptest.NewRequest(http.MethodPost, "http://example/v1/requests/"+created.RequestID+"/decision", bytes.NewReader([]byte(`{"decision":"ALLOW_ONCE"}`)))
+	decReq.Header.Set("Authorization", "Bearer "+openResp.SessionToken)
+	decReq.Header.Set("Content-Type", "application/json")
+	decRw := httptest.NewRecorder()
+	api.Handler().ServeHTTP(decRw, decReq)
+	if decRw.Code != 200 {
+		t.Fatalf("dec status=%d body=%s", decRw.Code, decRw.Body.String())
+	}
+
+	rec := waitRequestTerminalForTest(t, api, openResp.SessionToken, created.RequestID)
+	if rec["status"] != "SUCCEEDED" {
+		t.Fatalf("status=%v body=%v", rec["status"], rec)
+	}
+	result := rec["result"].(map[string]any)
+	stdout := result["stdout"].(string)
+	for _, want := range []string{"path: " + p, "key: image.tag", "old: old", "new: v1.2.3", "backup_path:"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("stdout missing %q:\n%s", want, stdout)
+		}
+	}
+	got, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(got), "tag: v1.2.3") {
 		t.Fatalf("file=%q", string(got))
 	}
 }

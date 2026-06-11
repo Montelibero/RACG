@@ -231,7 +231,7 @@ func ruleMatches(r Rule, op Op) bool {
 			return false
 		}
 		return argvHasPrefix(p.Argv, r.Cmd.ArgvPrefix)
-	case "fs.read", "fs.patch_unified", "fs.append_block", "fs.replace_literal":
+	case "fs.read", "fs.patch_unified", "fs.append_block", "fs.replace_literal", "conf.set", "conf.set_kv":
 		if r.Path == nil {
 			return false
 		}

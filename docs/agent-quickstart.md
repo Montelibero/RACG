@@ -105,7 +105,27 @@ Useful flags:
 --wait-timeout <dur>     maximum wait duration for racg run
 ```
 
-## 3. Approval And Status
+## 3. Edit Config Values
+
+Prefer `racg config set` over generating ad-hoc scripts for simple config edits:
+
+```bash
+racg config set /app/.env PORT 8080 --format env
+racg config set values.yaml image.tag v1.2.3 --format yaml
+racg config set config.json server.debug true --format json --type bool
+```
+
+Supported formats are `env`, `json`, and `yaml`. For `json` and `yaml`, keys are dotted paths. Supported value types are `string` (default), `bool`, `int`, `float`, `null`, and `json`.
+
+Backups are enabled by default and are written next to the edited file:
+
+```text
+config.yaml.racg-backup-YYYYMMDDTHHMMSSZ
+```
+
+Use `--no-backup` only when the human explicitly does not want one. YAML/JSON may be reformatted, but RACG parses and validates the result before replacing the file.
+
+## 4. Approval And Status
 
 After request creation, status is usually `PENDING_APPROVAL`. The human decides in the TUI:
 
@@ -125,7 +145,7 @@ Terminal statuses:
 - `DENIED`
 - `CANCELED`
 
-## 4. Live And Final Output
+## 5. Live And Final Output
 
 Current live combined output while a request is running:
 

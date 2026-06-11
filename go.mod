@@ -6,6 +6,7 @@ require (
 	github.com/gdamore/tcell/v2 v2.8.1
 	github.com/google/uuid v1.6.0
 	github.com/rivo/tview v0.42.0
+	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.35.0
 	mvdan.cc/sh/v3 v3.8.0
 	nhooyr.io/websocket v1.8.17

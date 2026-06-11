@@ -24,6 +24,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/itolstov/racg/internal/auth"
 	"github.com/itolstov/racg/internal/config"
+	"github.com/itolstov/racg/internal/configedit"
 	"github.com/itolstov/racg/internal/events"
 	"github.com/itolstov/racg/internal/executor"
 	"github.com/itolstov/racg/internal/rules"
@@ -719,7 +720,7 @@ func (a *API) handleInfo(w http.ResponseWriter, r *http.Request) {
 			"cmd.run",
 			"fs.read",
 			"fs.patch_unified",
-			"conf.set_kv",
+			"conf.set",
 			"svc.status",
 			"svc.restart",
 			"svc.logs",
@@ -1166,6 +1167,58 @@ func (a *API) executeApprovedRequest(requestID string, c auth.Claims, op rules.O
 			StdoutSHA256:    sha256Hex([]byte(out)),
 			StderrSHA256:    sha256Hex(nil),
 		}
+	case "conf.set":
+		var payload struct {
+			Path      string `json:"path"`
+			Format    string `json:"format"`
+			Key       string `json:"key"`
+			Value     string `json:"value"`
+			ValueType string `json:"value_type"`
+			Backup    *bool  `json:"backup"`
+			BackupDir string `json:"backup_dir"`
+		}
+		_ = json.Unmarshal(op.Payload, &payload)
+		backup := true
+		if payload.Backup != nil {
+			backup = *payload.Backup
+		}
+		res, cerr := configedit.Set(configedit.ConfigSet{
+			Path:      payload.Path,
+			Format:    payload.Format,
+			Key:       payload.Key,
+			Value:     payload.Value,
+			ValueType: payload.ValueType,
+			Backup:    backup,
+			BackupDir: payload.BackupDir,
+		})
+		finishedAt = time.Now().UTC()
+		if cerr != nil {
+			rr = &resultRecord{
+				StartedAt:    startedAt.Format(time.RFC3339Nano),
+				FinishedAt:   finishedAt.Format(time.RFC3339Nano),
+				DurationMs:   finishedAt.Sub(startedAt).Milliseconds(),
+				ExitCode:     -1,
+				Status:       "FAILED",
+				Stderr:       cerr.Error(),
+				StdoutSHA256: sha256Hex(nil),
+				StderrSHA256: sha256Hex([]byte(cerr.Error())),
+			}
+			break
+		}
+		out := formatConfigSetResult(res)
+		rr = &resultRecord{
+			StartedAt:       startedAt.Format(time.RFC3339Nano),
+			FinishedAt:      finishedAt.Format(time.RFC3339Nano),
+			DurationMs:      finishedAt.Sub(startedAt).Milliseconds(),
+			ExitCode:        0,
+			Status:          "SUCCEEDED",
+			Stdout:          out,
+			Stderr:          "",
+			StdoutTruncated: false,
+			StderrTruncated: false,
+			StdoutSHA256:    sha256Hex([]byte(out)),
+			StderrSHA256:    sha256Hex(nil),
+		}
 	default:
 		finishedAt = time.Now().UTC()
 		rr = &resultRecord{
@@ -1442,6 +1495,14 @@ func ruleFromOpExact(ruleID string, op rules.Op) (rules.Rule, bool) {
 			return rules.Rule{}, false
 		}
 		return rules.Rule{ID: ruleID, OpType: "fs.patch_unified", Path: &rules.PathRule{Exact: p.Path}}, true
+	case "conf.set":
+		var p struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal(op.Payload, &p); err != nil || p.Path == "" {
+			return rules.Rule{}, false
+		}
+		return rules.Rule{ID: ruleID, OpType: "conf.set", Path: &rules.PathRule{Exact: p.Path}}, true
 	default:
 		return rules.Rule{}, false
 	}
@@ -1486,7 +1547,7 @@ func riskFlags(op rules.Op) []string {
 				}
 			}
 		}
-	case "fs.patch_unified", "conf.set_kv":
+	case "fs.patch_unified", "conf.set", "conf.set_kv":
 		var p struct {
 			Path string `json:"path"`
 		}
@@ -1541,6 +1602,16 @@ func summarizeOp(rec requestRecord) string {
 			return "fs.patch_unified " + p.Path
 		}
 		return "fs.patch_unified"
+	case "conf.set":
+		var p struct {
+			Path string `json:"path"`
+			Key  string `json:"key"`
+		}
+		_ = json.Unmarshal(op.Payload, &p)
+		if p.Path != "" && p.Key != "" {
+			return "conf.set " + p.Path + " " + p.Key
+		}
+		return "conf.set"
 	default:
 		return op.Type
 	}
@@ -1621,9 +1692,56 @@ func tuiDetailsWithRules(rec requestRecord, engine *rules.Engine) string {
 		}
 		out += p.Diff
 		return out
+	case "conf.set":
+		var p struct {
+			Path      string `json:"path"`
+			Format    string `json:"format"`
+			Key       string `json:"key"`
+			Value     string `json:"value"`
+			ValueType string `json:"value_type"`
+			Backup    *bool  `json:"backup"`
+			BackupDir string `json:"backup_dir"`
+		}
+		_ = json.Unmarshal(op.Payload, &p)
+		if p.Path == "" && p.Key == "" {
+			return ""
+		}
+		backup := true
+		if p.Backup != nil {
+			backup = *p.Backup
+		}
+		var b strings.Builder
+		fmt.Fprintf(&b, "path: %s\n", p.Path)
+		fmt.Fprintf(&b, "format: %s\n", p.Format)
+		fmt.Fprintf(&b, "key: %s\n", p.Key)
+		fmt.Fprintf(&b, "value_type: %s\n", p.ValueType)
+		fmt.Fprintf(&b, "new: %s\n", p.Value)
+		fmt.Fprintf(&b, "backup: %t", backup)
+		if p.BackupDir != "" {
+			fmt.Fprintf(&b, "\nbackup_dir: %s", p.BackupDir)
+		}
+		return b.String()
 	default:
 		return ""
 	}
+}
+
+func formatConfigSetResult(res configedit.Result) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "path: %s\n", res.Path)
+	fmt.Fprintf(&b, "format: %s\n", res.Format)
+	fmt.Fprintf(&b, "key: %s\n", res.Key)
+	if res.Created {
+		fmt.Fprintln(&b, "created: true")
+	} else {
+		fmt.Fprintln(&b, "created: false")
+	}
+	fmt.Fprintf(&b, "old: %s\n", res.OldValue)
+	fmt.Fprintf(&b, "new: %s\n", res.NewValue)
+	if res.BackupPath != "" {
+		fmt.Fprintf(&b, "backup_path: %s\n", res.BackupPath)
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 func commandAnalysisPreview(explain rules.Explanation) string {
