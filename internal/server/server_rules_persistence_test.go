@@ -48,6 +48,7 @@ func TestServerLoadsAlwaysRulesFromSQLiteOnStart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	defer s.Store().Close()
 
 	openBody := []byte(`{"client_id":"codex-home","pairing_code":"` + s.PairingCode() + `"}`)
 	openReq := httptest.NewRequest(http.MethodPost, "http://example/v1/session/open", bytes.NewReader(openBody))
@@ -89,4 +90,3 @@ func TestServerLoadsAlwaysRulesFromSQLiteOnStart(t *testing.T) {
 		t.Fatalf("db stat: %v", err)
 	}
 }
-
