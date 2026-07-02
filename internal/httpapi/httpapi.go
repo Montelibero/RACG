@@ -133,6 +133,7 @@ type TUIRequestInfo struct {
 }
 
 type RuleScopeCandidate struct {
+	OpType  string
 	Segment string
 	Pattern string
 }
@@ -365,12 +366,23 @@ func (a *API) DecideWithRulePatternForTUI(requestID string, decision string, pat
 }
 
 func (a *API) DecideWithRulePatternsForTUI(requestID string, decision string, patterns []string) error {
+	a.reqsMu.Lock()
+	rec, ok := a.reqs[requestID]
+	a.reqsMu.Unlock()
+	if !ok {
+		return errors.New("REQUEST_NOT_FOUND")
+	}
+	var op rules.Op
+	if err := json.Unmarshal(rec.Op, &op); err != nil {
+		return err
+	}
+
 	rulesToCreate := make([]rules.Rule, 0, len(patterns))
 	for _, pattern := range patterns {
 		if strings.TrimSpace(pattern) == "" {
 			continue
 		}
-		rule, err := ruleFromScopePattern(pattern)
+		rule, err := ruleFromScopePatternForOp(op, pattern)
 		if err != nil {
 			return err
 		}
@@ -404,6 +416,16 @@ func (a *API) RuleScopeCandidatesForTUI(requestID string) []RuleScopeCandidate {
 	if err := json.Unmarshal(rec.Op, &op); err != nil {
 		return nil
 	}
+	switch op.Type {
+	case "fs.read", "fs.patch_unified", "conf.set":
+		var p struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal(op.Payload, &p); err != nil || strings.TrimSpace(p.Path) == "" {
+			return nil
+		}
+		return []RuleScopeCandidate{{OpType: op.Type, Segment: p.Path, Pattern: p.Path}}
+	}
 	analysis := rules.AnalyzeCommandOp(op)
 	out := make([]RuleScopeCandidate, 0, len(analysis.Segments))
 	for _, segment := range analysis.Segments {
@@ -411,9 +433,22 @@ func (a *API) RuleScopeCandidatesForTUI(requestID string) []RuleScopeCandidate {
 			continue
 		}
 		exact := strings.Join(segment.Argv, " ")
-		out = append(out, RuleScopeCandidate{Segment: exact, Pattern: exact})
+		out = append(out, RuleScopeCandidate{OpType: "cmd.run", Segment: exact, Pattern: exact})
 	}
 	return dedupeScopeCandidates(out)
+}
+
+func ruleFromScopePatternForOp(op rules.Op, pattern string) (rules.Rule, error) {
+	switch op.Type {
+	case "fs.read", "fs.patch_unified", "conf.set":
+		path := strings.TrimSpace(pattern)
+		if path == "" {
+			return rules.Rule{}, errors.New("empty path pattern")
+		}
+		return rules.Rule{OpType: op.Type, Path: &rules.PathRule{Exact: path}}, nil
+	default:
+		return ruleFromScopePattern(pattern)
+	}
 }
 
 func ruleFromScopePattern(pattern string) (rules.Rule, error) {

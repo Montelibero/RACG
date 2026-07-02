@@ -1261,7 +1261,7 @@ func (s *uiState) openRuleScopeOverlay(app *tview.Application, pages *tview.Page
 	}
 
 	info := tview.NewTextView().SetDynamicColors(false)
-	info.SetText("Edit one scope per command segment. Shell separators like &&, |, ; are rejected.\nExamples: docker stop nginx | docker stop n*")
+	info.SetText(ruleScopeHelpText(candidates))
 
 	segmentsText := tview.NewTextView().SetDynamicColors(false)
 	if len(candidates) > 0 {
@@ -1476,6 +1476,20 @@ func jobViewText(mode string, info httpapi.TUIRequestInfo, combined string, live
 		}
 		return combined
 	}
+}
+
+func ruleScopeHelpText(candidates []httpapi.RuleScopeCandidate) string {
+	if len(candidates) > 0 {
+		switch candidates[0].OpType {
+		case "fs.read":
+			return "Allow reading this exact file path for the selected scope."
+		case "fs.patch_unified":
+			return "Allow patching this exact file path for the selected scope. The diff itself is not scoped."
+		case "conf.set":
+			return "Allow structured config edits for this exact file path for the selected scope."
+		}
+	}
+	return "Edit one scope per command segment. Shell separators like &&, |, ; are rejected.\nExamples: docker stop nginx | docker stop n*"
 }
 
 func buildJobPage(app *tview.Application, pages *tview.Pages, s *uiState, cfg ServeUIConfig, requestID string) tview.Primitive {

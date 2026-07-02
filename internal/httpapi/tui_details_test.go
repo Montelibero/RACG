@@ -168,6 +168,60 @@ func TestRuleScopeCandidatesIncludeEachShellSegment(t *testing.T) {
 	}
 }
 
+func TestRuleScopeCandidatesIncludePathOps(t *testing.T) {
+	api := New(config.Defaults())
+	op := map[string]any{
+		"type": "fs.read",
+		"payload": map[string]any{
+			"path": "/apps/haproxy/haproxy.cfg",
+		},
+	}
+	b, err := json.Marshal(op)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	api.reqs["req1"] = requestRecord{ID: "req1", Status: "PENDING_APPROVAL", Op: b, SessionID: "sess1", ClientID: "cli"}
+
+	got := api.RuleScopeCandidatesForTUI("req1")
+	if len(got) != 1 {
+		t.Fatalf("candidates=%d want 1: %#v", len(got), got)
+	}
+	if got[0].OpType != "fs.read" || got[0].Segment != "/apps/haproxy/haproxy.cfg" || got[0].Pattern != "/apps/haproxy/haproxy.cfg" {
+		t.Fatalf("candidate=%#v", got[0])
+	}
+}
+
+func TestDecideWithRulePatternsForTUISavesPathRule(t *testing.T) {
+	api := New(config.Defaults())
+	op := map[string]any{
+		"type": "fs.read",
+		"payload": map[string]any{
+			"path": "/apps/haproxy/haproxy.cfg",
+		},
+	}
+	b, err := json.Marshal(op)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	api.reqs["req1"] = requestRecord{ID: "req1", Status: "PENDING_APPROVAL", Op: b, SessionID: "sess1", ClientID: "cli"}
+
+	err = api.DecideWithRulePatternsForTUI("req1", "ALLOW_SESSION", []string{"/apps/haproxy/haproxy.cfg"})
+	if err != nil {
+		t.Fatalf("DecideWithRulePatternsForTUI: %v", err)
+	}
+
+	rows := api.ListSessionRulesForTUI()
+	if len(rows) != 1 {
+		t.Fatalf("session rules=%d want 1: %#v", len(rows), rows)
+	}
+	if rows[0].OpType != "fs.read" {
+		t.Fatalf("op_type=%q", rows[0].OpType)
+	}
+	if rows[0].PathExact == nil || *rows[0].PathExact != "/apps/haproxy/haproxy.cfg" {
+		t.Fatalf("path_exact=%v", rows[0].PathExact)
+	}
+}
+
 func TestDecideWithRulePatternsForTUISavesEachSessionRule(t *testing.T) {
 	api := New(config.Defaults())
 	op := map[string]any{
