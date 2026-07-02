@@ -125,7 +125,28 @@ config.yaml.racg-backup-YYYYMMDDTHHMMSSZ
 
 Use `--no-backup` only when the human explicitly does not want one. YAML/JSON may be reformatted, but RACG parses and validates the result before replacing the file.
 
-## 4. Approval And Status
+## 4. Read And Patch Plain Text Files
+
+Use `racg file read` and `racg file patch` for non-structured text configs such as HAProxy, nginx, systemd unit files, or application-specific `.cfg` files:
+
+```bash
+racg file read /apps/haproxy/haproxy.cfg
+racg file read /apps/haproxy/haproxy.cfg --max-bytes 65536
+racg file patch /apps/haproxy/haproxy.cfg --diff-file /tmp/haproxy.patch
+```
+
+`racg file patch` sends `fs.patch_unified`, so the patch must be a unified diff against the current file content:
+
+```diff
+@@ -1,3 +1,3 @@
+ global
+-    maxconn 2000
++    maxconn 4000
+```
+
+Do not use `racg config set --format yaml` for native configs like `haproxy.cfg`; they are plain text, not YAML.
+
+## 5. Approval And Status
 
 After request creation, status is usually `PENDING_APPROVAL`. The human decides in the TUI:
 
@@ -145,7 +166,7 @@ Terminal statuses:
 - `DENIED`
 - `CANCELED`
 
-## 5. Live And Final Output
+## 6. Live And Final Output
 
 Current live combined output while a request is running:
 

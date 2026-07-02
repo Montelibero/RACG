@@ -20,14 +20,14 @@ func NewConfigCmd(stdout, stderr io.Writer) *ConfigCmd {
 
 func (c *ConfigCmd) Run(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(c.stderr, "usage: racg config <set> [args]")
+		fmt.Fprintln(c.stderr, configUsage())
 		return 2
 	}
 	switch args[0] {
 	case "set":
 		return c.runSet(args[1:])
 	default:
-		fmt.Fprintln(c.stderr, "usage: racg config <set> [args]")
+		fmt.Fprintln(c.stderr, configUsage())
 		return 2
 	}
 }
@@ -150,4 +150,39 @@ func interspersedConfigSetArgs(args []string) []string {
 		positional = append(positional, arg)
 	}
 	return append(flags, positional...)
+}
+
+func configUsage() string {
+	return `usage: racg config <set> [args]
+
+Set structured config values through RACG approval:
+  racg config set /app/.env PORT 8080 --format env
+  racg config set /app/config.json server.debug true --format json --type bool
+  racg config set /app/values.yaml image.tag v1.2.3 --format yaml
+
+Supported formats:
+  env
+  json
+  yaml
+
+Supported value types for json/yaml:
+  string
+  bool
+  int
+  float
+  null
+  json
+
+Backups are enabled by default:
+  <file>.racg-backup-YYYYMMDDTHHMMSSZ
+
+Common flags:
+  --format env|json|yaml
+  --type string|bool|int|float|null|json
+  --no-backup
+  --backup-dir DIR
+  --host URL
+  --token TOKEN
+  --no-wait
+`
 }

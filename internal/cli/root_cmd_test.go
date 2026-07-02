@@ -20,3 +20,25 @@ func TestRootUsageIncludesQuickStartServeCommand(t *testing.T) {
 		t.Fatalf("stderr=%q, want contains %q", errOut.String(), want)
 	}
 }
+
+func TestRootHelpIncludesFileAndConfigExamples(t *testing.T) {
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	root := NewRoot(&out, &errOut)
+
+	if code := root.Run([]string{"--help"}); code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+
+	got := out.String()
+	for _, want := range []string{
+		"racg file read /path/file.txt",
+		"racg file patch /path/file.txt --diff-file /tmp/change.patch",
+		"racg config set values.yaml image.tag v1.2.3 --format yaml",
+		"racg run -- bash -lc",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("help missing %q:\n%s", want, got)
+		}
+	}
+}

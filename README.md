@@ -78,6 +78,8 @@ racg request logs <request_id> --live
 racg request tail <request_id>
 racg request logs <request_id> --stdout
 racg request logs <request_id> --stderr
+racg file read /apps/haproxy/haproxy.cfg
+racg file patch /apps/haproxy/haproxy.cfg --diff-file /tmp/haproxy.patch
 racg config set /app/.env PORT 8080 --format env
 racg config set values.yaml image.tag v1.2.3 --format yaml
 racg config set config.json server.debug true --format json --type bool
@@ -91,6 +93,7 @@ You can still override saved config with `--host`, `--token`, `RACG_HOST`, and `
 Use `racg request logs <id> --live` for the current in-memory live output snapshot while a request is still running, or `racg request tail <id>` to follow live output until the request reaches a terminal status.
 Use `racg request cancel <id>` to cancel a pending approval or stop a running command.
 Use `racg config set` to request a format-aware config edit without shell scripts. It supports `env`, `json`, and `yaml`; writes a backup next to the file by default; validates the result before replacing the file; and uses dotted keys for `json`/`yaml`.
+Use `racg file read` and `racg file patch` for plain text files such as HAProxy, nginx, systemd unit files, or other non-JSON/YAML configs. `file patch` submits an `fs.patch_unified` request and expects a unified diff.
 
 ## Agent skill
 

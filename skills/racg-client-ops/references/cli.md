@@ -100,7 +100,38 @@ Useful flags:
 --no-wait                 print request id and return immediately
 ```
 
-Prefer `racg config set` over generating Python, sed, jq, yq, or shell scripts for a single config key update. For arbitrary text edits, use `fs.patch_unified` through the API or a narrow shell command if the human approves.
+Prefer `racg config set` over generating Python, sed, jq, yq, or shell scripts for a single structured config key update. For arbitrary text edits, use `racg file read` and `racg file patch`.
+
+## Plain Text File Reads And Patches
+
+Use `racg file read` and `racg file patch` for non-structured text files such as HAProxy configs, nginx configs, systemd unit files, and application-specific `.cfg` files.
+
+Read a file:
+
+```bash
+racg file read /apps/haproxy/haproxy.cfg
+racg file read /apps/haproxy/haproxy.cfg --max-bytes 65536
+```
+
+Patch a file with a unified diff:
+
+```bash
+racg file patch /apps/haproxy/haproxy.cfg --diff-file /tmp/haproxy.patch
+racg file patch /apps/haproxy/haproxy.cfg --diff '@@ -1,2 +1,2 @@
+ global
+-    maxconn 2000
++    maxconn 4000
+'
+```
+
+Underlying operations:
+
+```text
+racg file read   -> fs.read
+racg file patch  -> fs.patch_unified
+```
+
+Do not use `racg config set --format yaml` for native configs like `haproxy.cfg`; they are plain text, not YAML. Always read the current file before generating a patch.
 
 ## Logs
 

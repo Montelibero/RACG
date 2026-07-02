@@ -20,13 +20,16 @@ Use RACG when command execution must go through a human-approved gateway instead
    - Use dotted keys for `json`/`yaml`, for example `server.port` or `image.tag`.
    - Set `--type` for non-string values such as booleans, integers, floats, null, or JSON fragments.
    - Keep backups enabled unless the human explicitly asks not to.
-4. For running requests, inspect partial output with:
+4. For plain text files such as HAProxy, nginx, systemd units, or native `.cfg` files, use `racg file read` and `racg file patch` with a unified diff.
+   - Do not treat native text configs as YAML just because a compose/stack file references them.
+   - Read the current file before generating the unified diff.
+5. For running requests, inspect partial output with:
    - `racg request logs <id> --live`
    - `racg request tail <id>`
-5. For finished requests, inspect final streams with:
+6. For finished requests, inspect final streams with:
    - `racg request logs <id> --stdout`
    - `racg request logs <id> --stderr`
-6. Stop requests with `racg request cancel <id>` when the user asks to interrupt, cancel, kill, or stop a pending/running request.
+7. Stop requests with `racg request cancel <id>` when the user asks to interrupt, cancel, kill, or stop a pending/running request.
 
 ## When To Read References
 
@@ -38,6 +41,7 @@ Use RACG when command execution must go through a human-approved gateway instead
 
 - Use narrow commands and explicit argv. Avoid large opaque shell strings unless the user specifically needs shell composition.
 - For simple `env`/`json`/`yaml` config key updates, use `racg config set` instead of generating scripts or raw patches.
+- For arbitrary text edits, use `racg file read` plus `racg file patch`; avoid ad-hoc scripts when a unified diff is enough.
 - Prefer read-only diagnostics before mutating operations.
 - If a request is pending approval, do not repeatedly resubmit the same command; wait, tail live output after approval, or cancel if requested.
 - When reporting results, summarize `status`, `exit_code`, and relevant stdout/stderr sections. Do not paste huge logs unless asked; use live/final log commands to retrieve focused snippets.

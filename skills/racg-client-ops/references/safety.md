@@ -53,6 +53,15 @@ racg config set <path> <key> <value> --format <env|json|yaml>
 
 This is safer than ad-hoc scripts because RACG validates structured formats and writes a backup by default. Use `--type` for non-string JSON/YAML values. Treat config edits under `/etc/` or production service directories as mutations requiring clear human approval.
 
+For non-structured text files, prefer:
+
+```bash
+racg file read <path>
+racg file patch <path> --diff-file <patch>
+```
+
+`racg file patch` applies a unified diff through `fs.patch_unified`. Read the current file first, keep the diff narrow, and explain the changed lines. Native configs such as `haproxy.cfg` are not YAML.
+
 ## Auto-Approve Rules
 
 Auto-approve only narrow read-only prefixes. Good candidates:

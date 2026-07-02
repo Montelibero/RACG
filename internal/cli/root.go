@@ -25,11 +25,17 @@ func (r *Root) Run(args []string) int {
 
 	showVersion := fs.Bool("version", false, "print version")
 	fs.BoolVar(showVersion, "v", false, "print version")
+	showHelp := fs.Bool("help", false, "print help")
+	fs.BoolVar(showHelp, "h", false, "print help")
 
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 
+	if *showHelp {
+		fmt.Fprintln(r.stdout, usage())
+		return 0
+	}
 	if *showVersion {
 		fmt.Fprintln(r.stdout, version.Version)
 		return 0
@@ -62,6 +68,8 @@ func (r *Root) Run(args []string) int {
 		return NewUpdateCmd(r.stdout, r.stderr).Run(rest[1:])
 	case "config":
 		return NewConfigCmd(r.stdout, r.stderr).Run(rest[1:])
+	case "file":
+		return NewFileCmd(r.stdout, r.stderr).Run(rest[1:])
 	default:
 		fmt.Fprintln(r.stderr, usage())
 		return 2
@@ -69,5 +77,45 @@ func (r *Root) Run(args []string) int {
 }
 
 func usage() string {
-	return "usage: racg [--version] <command>\n\ncommands:\n  serve\n  login\n  logout\n  session\n  run\n  request\n  rules\n  sessions\n  update\n  config\n\nquick start:\n  sudo racg serve -listen-addr 127.0.0.1 -port 8777\n"
+	return `usage: racg [--version] <command>
+
+commands:
+  serve      start RACG server and TUI
+  login      save client auth from a pairing code
+  logout     remove saved client auth
+  session    inspect saved/current session
+  run        submit cmd.run and wait by default
+  request    cancel, tail, or read request logs
+  file       read or patch plain text files through approval
+  config     set env/json/yaml config keys through approval
+  rules      list, enable/disable/delete, and install presets
+  sessions   inspect persisted audit sessions
+  update     update racg from GitHub Releases
+
+quick start:
+  sudo racg serve -listen-addr 127.0.0.1 -port 8777
+  racg login --host http://127.0.0.1:8777 --pairing-code ABC123
+
+common commands:
+  racg run -- bash -lc 'date && uname -a'
+  racg run --no-wait -- /bin/sh -c 'while true; do date; sleep 3; done'
+  racg request logs <id> --live
+  racg request tail <id>
+  racg request cancel <id>
+
+file helpers:
+  racg file read /path/file.txt
+  racg file read /path/file.txt --max-bytes 65536
+  racg file patch /path/file.txt --diff-file /tmp/change.patch
+  racg file patch /path/file.txt --diff '@@ -1 +1 @@...'
+
+config helpers:
+  racg config set /app/.env PORT 8080 --format env
+  racg config set values.yaml image.tag v1.2.3 --format yaml
+  racg config set config.json server.debug true --format json --type bool
+
+auth:
+  most client commands accept --host and --token, or use RACG_HOST/RACG_TOKEN,
+  or use saved auth from racg login.
+`
 }

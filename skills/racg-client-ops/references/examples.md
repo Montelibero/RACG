@@ -114,3 +114,28 @@ racg config set /srv/app/values.yaml image.tag v1.2.3 --format yaml
 ```
 
 For non-string YAML/JSON values, pass `--type bool`, `--type int`, `--type float`, `--type null`, or `--type json`. Leave backups enabled unless the human explicitly requests `--no-backup`.
+
+## Plain Text Config Edits
+
+HAProxy config is plain text, not YAML. Read it first:
+
+```bash
+racg file read /apps/haproxy/haproxy.cfg --max-bytes 65536
+```
+
+Then submit a unified diff:
+
+```bash
+racg file patch /apps/haproxy/haproxy.cfg --diff-file /tmp/haproxy.patch
+```
+
+Example diff body:
+
+```diff
+@@ -1,3 +1,3 @@
+ global
+-    maxconn 2000
++    maxconn 4000
+```
+
+Use this same flow for nginx configs, systemd unit files, and other native text configs.
