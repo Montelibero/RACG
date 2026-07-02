@@ -30,6 +30,7 @@ import (
 	"github.com/itolstov/racg/internal/rules"
 	"github.com/itolstov/racg/internal/store"
 	"github.com/itolstov/racg/internal/version"
+	"mvdan.cc/sh/v3/syntax"
 	"nhooyr.io/websocket"
 	"nhooyr.io/websocket/wsjson"
 )
@@ -432,7 +433,7 @@ func (a *API) RuleScopeCandidatesForTUI(requestID string) []RuleScopeCandidate {
 		if segment.Unsupported != "" || len(segment.Argv) == 0 {
 			continue
 		}
-		exact := strings.Join(segment.Argv, " ")
+		exact := shellQuoteArgv(segment.Argv)
 		out = append(out, RuleScopeCandidate{OpType: "cmd.run", Segment: exact, Pattern: exact})
 	}
 	return dedupeScopeCandidates(out)
@@ -452,6 +453,9 @@ func ruleFromScopePatternForOp(op rules.Op, pattern string) (rules.Rule, error) 
 }
 
 func ruleFromScopePattern(pattern string) (rules.Rule, error) {
+	if strings.ContainsAny(pattern, "'\"") {
+		return ruleFromQuotedScopePattern(pattern)
+	}
 	argv := strings.Fields(strings.TrimSpace(pattern))
 	if len(argv) == 0 {
 		return rules.Rule{}, errors.New("empty rule pattern")
@@ -466,6 +470,74 @@ func ruleFromScopePattern(pattern string) (rules.Rule, error) {
 		}
 	}
 	return rules.Rule{OpType: "cmd.run", Cmd: &rules.CmdRule{ArgvPrefix: argv, TailAny: true}}, nil
+}
+
+func ruleFromQuotedScopePattern(pattern string) (rules.Rule, error) {
+	parser := syntax.NewParser()
+	file, err := parser.Parse(strings.NewReader(pattern), "")
+	if err != nil {
+		return rules.Rule{}, err
+	}
+	if len(file.Stmts) != 1 || len(file.Stmts[0].Redirs) > 0 {
+		return rules.Rule{}, errors.New("shell separators are not allowed in rule pattern")
+	}
+	call, ok := file.Stmts[0].Cmd.(*syntax.CallExpr)
+	if !ok {
+		return rules.Rule{}, errors.New("shell separators are not allowed in rule pattern")
+	}
+	argv := make([]string, 0, len(call.Args))
+	for _, word := range call.Args {
+		arg, ok := staticScopeWord(word)
+		if !ok {
+			return rules.Rule{}, errors.New("dynamic shell words are not allowed in rule pattern")
+		}
+		argv = append(argv, arg)
+	}
+	if len(argv) == 0 {
+		return rules.Rule{}, errors.New("empty rule pattern")
+	}
+	return rules.Rule{OpType: "cmd.run", Cmd: &rules.CmdRule{ArgvPrefix: argv, TailAny: true}}, nil
+}
+
+func staticScopeWord(w *syntax.Word) (string, bool) {
+	var b strings.Builder
+	for _, part := range w.Parts {
+		switch p := part.(type) {
+		case *syntax.Lit:
+			b.WriteString(p.Value)
+		case *syntax.SglQuoted:
+			b.WriteString(p.Value)
+		case *syntax.DblQuoted:
+			for _, qp := range p.Parts {
+				lit, ok := qp.(*syntax.Lit)
+				if !ok {
+					return "", false
+				}
+				b.WriteString(lit.Value)
+			}
+		default:
+			return "", false
+		}
+	}
+	return b.String(), true
+}
+
+func shellQuoteArgv(argv []string) string {
+	parts := make([]string, 0, len(argv))
+	for _, arg := range argv {
+		parts = append(parts, shellQuoteArg(arg))
+	}
+	return strings.Join(parts, " ")
+}
+
+func shellQuoteArg(arg string) string {
+	if arg == "" {
+		return "''"
+	}
+	if !strings.ContainsAny(arg, " \t\r\n|&;<>") {
+		return arg
+	}
+	return "'" + strings.ReplaceAll(arg, "'", "'\\''") + "'"
 }
 
 func dedupeScopeCandidates(in []RuleScopeCandidate) []RuleScopeCandidate {

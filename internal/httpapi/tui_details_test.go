@@ -142,6 +142,17 @@ func TestRuleScopePatternAllowsRegexPipeInsideArg(t *testing.T) {
 	}
 }
 
+func TestRuleScopePatternAllowsQuotedShellOperatorInsideArg(t *testing.T) {
+	r, err := ruleFromScopePattern(`docker exec haproxy sh -lc 'printf "show table fe_https\n" | socat - /tmp/haproxy.sock'`)
+	if err != nil {
+		t.Fatalf("ruleFromScopePattern: %v", err)
+	}
+	want := []string{"docker", "exec", "haproxy", "sh", "-lc", `printf "show table fe_https\n" | socat - /tmp/haproxy.sock`}
+	if strings.Join(r.Cmd.ArgvPrefix, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("argv_prefix=%q want %q", r.Cmd.ArgvPrefix, want)
+	}
+}
+
 func TestRuleScopeCandidatesIncludeEachShellSegment(t *testing.T) {
 	api := New(config.Defaults())
 	op := map[string]any{
@@ -165,6 +176,33 @@ func TestRuleScopeCandidatesIncludeEachShellSegment(t *testing.T) {
 		if got[i].Pattern != want[i] || got[i].Segment != want[i] {
 			t.Fatalf("candidate %d=%#v want %q", i, got[i], want[i])
 		}
+	}
+}
+
+func TestRuleScopeCandidatesQuoteArgsWithShellOperators(t *testing.T) {
+	api := New(config.Defaults())
+	op := map[string]any{
+		"type": "cmd.run",
+		"payload": map[string]any{
+			"argv": []string{"docker", "exec", "haproxy", "sh", "-lc", `printf "show table fe_https\n" | socat - /tmp/haproxy.sock`},
+		},
+	}
+	b, err := json.Marshal(op)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	api.reqs["req1"] = requestRecord{ID: "req1", Status: "PENDING_APPROVAL", Op: b, SessionID: "sess1"}
+
+	got := api.RuleScopeCandidatesForTUI("req1")
+	if len(got) != 1 {
+		t.Fatalf("candidates=%d want 1: %#v", len(got), got)
+	}
+	want := `docker exec haproxy sh -lc 'printf "show table fe_https\n" | socat - /tmp/haproxy.sock'`
+	if got[0].Pattern != want {
+		t.Fatalf("pattern=%q want %q", got[0].Pattern, want)
+	}
+	if got[0].Segment != want {
+		t.Fatalf("segment=%q want %q", got[0].Segment, want)
 	}
 }
 
