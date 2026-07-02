@@ -92,3 +92,25 @@ racg run -- curl -fsS https://example.com/healthz
 ```
 
 If output is large or streaming, use `--no-wait` and `request tail`.
+
+## Config Edits
+
+Update a `.env` value:
+
+```bash
+racg config set /srv/app/.env PORT 8080 --format env
+```
+
+Update JSON with a boolean value:
+
+```bash
+racg config set /srv/app/config.json server.debug false --format json --type bool
+```
+
+Update YAML with a dotted key:
+
+```bash
+racg config set /srv/app/values.yaml image.tag v1.2.3 --format yaml
+```
+
+For non-string YAML/JSON values, pass `--type bool`, `--type int`, `--type float`, `--type null`, or `--type json`. Leave backups enabled unless the human explicitly requests `--no-backup`.

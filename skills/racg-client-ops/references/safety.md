@@ -43,6 +43,16 @@ kubectl apply
 
 If a command includes these words, state the risk and keep the operation narrow.
 
+## Config Edits
+
+For `env`, `json`, and `yaml` key updates, prefer:
+
+```bash
+racg config set <path> <key> <value> --format <env|json|yaml>
+```
+
+This is safer than ad-hoc scripts because RACG validates structured formats and writes a backup by default. Use `--type` for non-string JSON/YAML values. Treat config edits under `/etc/` or production service directories as mutations requiring clear human approval.
+
 ## Auto-Approve Rules
 
 Auto-approve only narrow read-only prefixes. Good candidates:

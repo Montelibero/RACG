@@ -16,23 +16,28 @@ Use RACG when command execution must go through a human-approved gateway instead
 2. Submit commands with `racg run -- <argv...>`.
    - Use `--no-wait` for long-running commands or when the user wants to approve in TUI first.
    - Use `--wait-timeout` for bounded waits.
-3. For running requests, inspect partial output with:
+3. For config edits in `env`, `json`, or `yaml`, prefer `racg config set` over ad-hoc shell/Python scripts.
+   - Use dotted keys for `json`/`yaml`, for example `server.port` or `image.tag`.
+   - Set `--type` for non-string values such as booleans, integers, floats, null, or JSON fragments.
+   - Keep backups enabled unless the human explicitly asks not to.
+4. For running requests, inspect partial output with:
    - `racg request logs <id> --live`
    - `racg request tail <id>`
-4. For finished requests, inspect final streams with:
+5. For finished requests, inspect final streams with:
    - `racg request logs <id> --stdout`
    - `racg request logs <id> --stderr`
-5. Stop requests with `racg request cancel <id>` when the user asks to interrupt, cancel, kill, or stop a pending/running request.
+6. Stop requests with `racg request cancel <id>` when the user asks to interrupt, cancel, kill, or stop a pending/running request.
 
 ## When To Read References
 
-- Read `references/cli.md` for exact command syntax, flags, output expectations, and common polling patterns.
+- Read `references/cli.md` for exact command syntax, config editing, flags, output expectations, and common polling patterns.
 - Read `references/safety.md` before proposing auto-approve rules or sending commands with destructive words such as delete, patch, apply, secret, sudo, or firewall tooling.
 - Read `references/examples.md` for concrete diagnostics, Kubernetes, Git, and long-running command examples.
 
 ## Operating Rules
 
 - Use narrow commands and explicit argv. Avoid large opaque shell strings unless the user specifically needs shell composition.
+- For simple `env`/`json`/`yaml` config key updates, use `racg config set` instead of generating scripts or raw patches.
 - Prefer read-only diagnostics before mutating operations.
 - If a request is pending approval, do not repeatedly resubmit the same command; wait, tail live output after approval, or cancel if requested.
 - When reporting results, summarize `status`, `exit_code`, and relevant stdout/stderr sections. Do not paste huge logs unless asked; use live/final log commands to retrieve focused snippets.

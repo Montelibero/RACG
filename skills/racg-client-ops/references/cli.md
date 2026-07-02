@@ -63,6 +63,45 @@ stderr:
 ...
 ```
 
+## Config Edits
+
+Use `racg config set` for simple key updates in `env`, `json`, and `yaml` files. This creates a `conf.set` approval request; after human approval RACG parses the file, changes the key, validates the result, writes a backup by default, and atomically replaces the file.
+
+```bash
+racg config set /app/.env PORT 8080 --format env
+racg config set /app/config.json server.debug true --format json --type bool
+racg config set /app/values.yaml image.tag v1.2.3 --format yaml
+```
+
+Supported `--type` values for `json`/`yaml` are:
+
+```text
+string
+bool
+int
+float
+null
+json
+```
+
+Backups are enabled by default and are written next to the edited file:
+
+```text
+<file>.racg-backup-YYYYMMDDTHHMMSSZ
+```
+
+Useful flags:
+
+```text
+--format <env|json|yaml>  required format
+--type <type>             value type, default string
+--no-backup               disable backup only when explicitly requested
+--backup-dir <dir>        write backup somewhere else
+--no-wait                 print request id and return immediately
+```
+
+Prefer `racg config set` over generating Python, sed, jq, yq, or shell scripts for a single config key update. For arbitrary text edits, use `fs.patch_unified` through the API or a narrow shell command if the human approves.
+
 ## Logs
 
 Current live combined output while a request is running:
