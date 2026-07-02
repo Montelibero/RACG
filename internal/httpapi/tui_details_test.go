@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -26,6 +28,8 @@ func TestTUIDetailsForCmdRunShowsStructuredPreviewAndRiskHints(t *testing.T) {
 	got := tuiDetails(requestRecord{Op: b})
 
 	for _, want := range []string{
+		"operation: RUN COMMAND",
+		"effect: executes argv on the server",
 		"cwd: /repo",
 		"timeout_sec: 45",
 		"argv:",
@@ -33,6 +37,99 @@ func TestTUIDetailsForCmdRunShowsStructuredPreviewAndRiskHints(t *testing.T) {
 		"  [1] -lc",
 		"  [2] sudo kubectl delete secret app-secret",
 		"review_hints: sudo, delete, secret",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("details missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestTUIDetailsForFSReadShowsOperationAndEffect(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "haproxy.cfg")
+	if err := os.WriteFile(path, []byte("global\n    maxconn 2000\n"), 0o600); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+	op := map[string]any{
+		"type": "fs.read",
+		"payload": map[string]any{
+			"path":      path,
+			"max_bytes": 128,
+		},
+	}
+	b, err := json.Marshal(op)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	got := tuiDetails(requestRecord{Op: b})
+
+	for _, want := range []string{
+		"operation: READ FILE",
+		"effect: reads file content only",
+		"path: " + path,
+		"max_bytes: 128",
+		"preview:",
+		"global",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("details missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestTUIDetailsForFSPatchShowsOperationAndEffect(t *testing.T) {
+	op := map[string]any{
+		"type": "fs.patch_unified",
+		"payload": map[string]any{
+			"path": "/apps/haproxy/haproxy.cfg",
+			"diff": "--- a/haproxy.cfg\n+++ b/haproxy.cfg\n@@\n-global\n+global\n",
+		},
+	}
+	b, err := json.Marshal(op)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	got := tuiDetails(requestRecord{Op: b})
+
+	for _, want := range []string{
+		"operation: PATCH FILE",
+		"effect: applies unified diff to one file",
+		"path: /apps/haproxy/haproxy.cfg",
+		"diff:",
+		"--- a/haproxy.cfg",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("details missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestTUIDetailsForConfSetShowsOperationAndEffect(t *testing.T) {
+	op := map[string]any{
+		"type": "conf.set",
+		"payload": map[string]any{
+			"path":       "/apps/app/config.yaml",
+			"format":     "yaml",
+			"key":        "image.tag",
+			"value":      "v1.2.3",
+			"value_type": "string",
+		},
+	}
+	b, err := json.Marshal(op)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	got := tuiDetails(requestRecord{Op: b})
+
+	for _, want := range []string{
+		"operation: SET CONFIG",
+		"effect: updates one structured config key",
+		"path: /apps/app/config.yaml",
+		"format: yaml",
+		"key: image.tag",
+		"new: v1.2.3",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("details missing %q:\n%s", want, got)

@@ -657,7 +657,7 @@ func (a *API) ListJobsForTUI(includeFinished bool) []TUIRequest {
 			return false
 		}
 		switch st {
-		case "SUCCEEDED", "FAILED", "TIMED_OUT", "KILLED", "CANCELED":
+		case "SUCCEEDED", "FAILED", "TIMED_OUT", "KILLED", "CANCELED", "DENIED":
 			return true
 		default:
 			return false
@@ -1750,6 +1750,8 @@ func tuiDetailsWithRules(rec requestRecord, engine *rules.Engine) string {
 			return ""
 		}
 		var b strings.Builder
+		b.WriteString("operation: RUN COMMAND\n")
+		b.WriteString("effect: executes argv on the server\n")
 		if p.Cwd != "" {
 			fmt.Fprintf(&b, "cwd: %s\n", escapeTUIViewText(p.Cwd))
 		}
@@ -1783,7 +1785,14 @@ func tuiDetailsWithRules(rec requestRecord, engine *rules.Engine) string {
 			max = 4096
 		}
 		preview := readPreview(p.Path, max)
-		return "path: " + p.Path + "\n\n" + preview
+		var b strings.Builder
+		b.WriteString("operation: READ FILE\n")
+		b.WriteString("effect: reads file content only\n")
+		fmt.Fprintf(&b, "path: %s\n", escapeTUIViewText(p.Path))
+		fmt.Fprintf(&b, "max_bytes: %d\n\n", max)
+		b.WriteString("preview:\n")
+		b.WriteString(escapeTUIViewText(preview))
+		return strings.TrimRight(b.String(), "\n")
 	case "fs.patch_unified":
 		var p struct {
 			Path string `json:"path"`
@@ -1793,12 +1802,17 @@ func tuiDetailsWithRules(rec requestRecord, engine *rules.Engine) string {
 		if p.Path == "" && p.Diff == "" {
 			return ""
 		}
-		out := ""
+		var b strings.Builder
+		b.WriteString("operation: PATCH FILE\n")
+		b.WriteString("effect: applies unified diff to one file\n")
 		if p.Path != "" {
-			out += "path: " + p.Path + "\n\n"
+			fmt.Fprintf(&b, "path: %s\n", escapeTUIViewText(p.Path))
 		}
-		out += p.Diff
-		return out
+		if p.Diff != "" {
+			b.WriteString("\ndiff:\n")
+			b.WriteString(escapeTUIViewText(p.Diff))
+		}
+		return strings.TrimRight(b.String(), "\n")
 	case "conf.set":
 		var p struct {
 			Path      string `json:"path"`
@@ -1818,14 +1832,16 @@ func tuiDetailsWithRules(rec requestRecord, engine *rules.Engine) string {
 			backup = *p.Backup
 		}
 		var b strings.Builder
-		fmt.Fprintf(&b, "path: %s\n", p.Path)
-		fmt.Fprintf(&b, "format: %s\n", p.Format)
-		fmt.Fprintf(&b, "key: %s\n", p.Key)
-		fmt.Fprintf(&b, "value_type: %s\n", p.ValueType)
-		fmt.Fprintf(&b, "new: %s\n", p.Value)
+		b.WriteString("operation: SET CONFIG\n")
+		b.WriteString("effect: updates one structured config key\n")
+		fmt.Fprintf(&b, "path: %s\n", escapeTUIViewText(p.Path))
+		fmt.Fprintf(&b, "format: %s\n", escapeTUIViewText(p.Format))
+		fmt.Fprintf(&b, "key: %s\n", escapeTUIViewText(p.Key))
+		fmt.Fprintf(&b, "value_type: %s\n", escapeTUIViewText(p.ValueType))
+		fmt.Fprintf(&b, "new: %s\n", escapeTUIViewText(p.Value))
 		fmt.Fprintf(&b, "backup: %t", backup)
 		if p.BackupDir != "" {
-			fmt.Fprintf(&b, "\nbackup_dir: %s", p.BackupDir)
+			fmt.Fprintf(&b, "\nbackup_dir: %s", escapeTUIViewText(p.BackupDir))
 		}
 		return b.String()
 	default:

@@ -26,10 +26,10 @@ func TestListJobsForTUI(t *testing.T) {
 	}
 
 	all := api.ListJobsForTUI(true)
-	if len(all) != 5 {
-		t.Fatalf("all len=%d, want 5", len(all))
+	if len(all) != 6 {
+		t.Fatalf("all len=%d, want 6", len(all))
 	}
-	if all[0].ID != "r6" || all[1].ID != "r4" || all[2].ID != "r3" || all[3].ID != "r2" || all[4].ID != "r1" {
+	if all[0].ID != "r6" || all[1].ID != "r5" || all[2].ID != "r4" || all[3].ID != "r3" || all[4].ID != "r2" || all[5].ID != "r1" {
 		t.Fatalf("unexpected order/ids: %#v", all)
 	}
 }
