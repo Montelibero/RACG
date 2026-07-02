@@ -39,6 +39,7 @@ func RunServeUI(ctx context.Context, cfg ServeUIConfig) error {
 	pages := tview.NewPages()
 
 	state := newUIState(cfg.API, cfg.Store)
+	state.refreshTerminalTitle(app, cfg)
 
 	pairingPage := buildPairingPage(ctx, app, pages, state, cfg)
 	dashboardPage := buildDashboardPage(app, pages, state, cfg)
@@ -118,6 +119,7 @@ func RunServeUI(ctx context.Context, cfg ServeUIConfig) error {
 				}
 				app.QueueUpdateDraw(func() {
 					state.onEvent(e)
+					state.refreshTerminalTitle(app, cfg)
 					state.maybeAutoSwitchToDashboard(app, pages, len(cfg.API.ListPendingForTUI()))
 				})
 			}
@@ -135,6 +137,7 @@ func RunServeUI(ctx context.Context, cfg ServeUIConfig) error {
 			case <-tick.C:
 				app.QueueUpdateDraw(func() {
 					state.refresh()
+					state.refreshTerminalTitle(app, cfg)
 					state.maybeAutoSwitchToDashboard(app, pages, len(cfg.API.ListPendingForTUI()))
 				})
 			}
@@ -160,6 +163,7 @@ type uiState struct {
 	jobsList    *tview.List
 	statusBars  []*tview.TextView
 	jobsModeBtn *tview.Button
+	titleFrame  int
 
 	// Job view widgets.
 	jobHeader *tview.TextView
@@ -197,6 +201,29 @@ func newUIState(api *httpapi.API, st *store.Store) *uiState {
 }
 
 func (s *uiState) setCurrentPage(p string) { s.page = p }
+
+func (s *uiState) refreshTerminalTitle(app *tview.Application, cfg ServeUIConfig) {
+	if app == nil || s.api == nil {
+		return
+	}
+	pending := len(s.api.ListPendingForTUI())
+	running := len(s.api.ListRunningForTUI())
+	if pending > 0 || running > 0 {
+		s.titleFrame++
+	} else {
+		s.titleFrame = 0
+	}
+	app.SetTitle(terminalTitle(cfg.Version, pending, running, s.titleFrame))
+}
+
+func terminalTitle(version string, pending, running, frame int) string {
+	base := fmt.Sprintf("RACG v%s", version)
+	if pending == 0 && running == 0 {
+		return base
+	}
+	spinner := []string{"|", "/", "-", "\\"}
+	return fmt.Sprintf("%s %s pending=%d running=%d", spinner[frame%len(spinner)], base, pending, running)
+}
 
 func hotkeyRune(r rune) rune {
 	r = unicode.ToLower(r)
