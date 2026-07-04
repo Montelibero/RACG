@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"strings"
+	"unicode"
 
 	"mvdan.cc/sh/v3/syntax"
 )
@@ -85,10 +86,46 @@ func segmentsFromStmt(stmt *syntax.Stmt) []CommandSegment {
 	if stmt == nil {
 		return nil
 	}
-	if len(stmt.Redirs) > 0 {
+	if len(stmt.Redirs) > 0 && !allRedirsAreFdDup(stmt.Redirs) {
 		return []CommandSegment{{Source: nodeSource(stmt), Unsupported: "redirect"}}
 	}
 	return segmentsFromCommand(stmt.Cmd)
+}
+
+func allRedirsAreFdDup(redirs []*syntax.Redirect) bool {
+	for _, redir := range redirs {
+		if !isFdDupRedir(redir) {
+			return false
+		}
+	}
+	return true
+}
+
+func isFdDupRedir(redir *syntax.Redirect) bool {
+	if redir == nil {
+		return false
+	}
+	op := redir.Op.String()
+	if op != ">&" && op != "<&" {
+		return false
+	}
+	word, ok := staticWord(redir.Word)
+	if !ok {
+		return false
+	}
+	return word == "-" || isDigits(word)
+}
+
+func isDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if !unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return true
 }
 
 func segmentsFromCommand(cmd syntax.Command) []CommandSegment {

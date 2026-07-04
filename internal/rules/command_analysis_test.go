@@ -41,6 +41,27 @@ func TestAnalyzeCmdRunShellMarksRedirectsUnsupported(t *testing.T) {
 	}
 }
 
+func TestAnalyzeCmdRunShellAllowsFdDupRedirect(t *testing.T) {
+	op := Op{Type: "cmd.run", Payload: mustJSON(t, map[string]any{
+		"argv": []string{"sh", "-c", "docker logs --since 90m ipkernel25 2>&1 | tail -120"},
+	})}
+
+	analysis := AnalyzeCommandOp(op)
+	if analysis.Unsupported != "" {
+		t.Fatalf("unsupported=%q", analysis.Unsupported)
+	}
+	if len(analysis.Segments) != 2 {
+		t.Fatalf("segments=%d want 2: %#v", len(analysis.Segments), analysis.Segments)
+	}
+	if analysis.Segments[0].Unsupported != "" {
+		t.Fatalf("fd dup redirect should not make segment unsupported: %#v", analysis.Segments[0])
+	}
+	want := []string{"docker", "logs", "--since", "90m", "ipkernel25"}
+	if got := joinNUL(analysis.Segments[0].Argv); got != joinNUL(want) {
+		t.Fatalf("segment 0 argv=%q want=%q", analysis.Segments[0].Argv, want)
+	}
+}
+
 func TestAnalyzeCmdRunPlainArgvIsSingleSegment(t *testing.T) {
 	op := Op{Type: "cmd.run", Payload: mustJSON(t, map[string]any{
 		"argv": []string{"docker", "stop", "nginx"},

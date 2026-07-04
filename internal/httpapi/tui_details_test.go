@@ -167,6 +167,36 @@ func TestTUIDetailsShowsCommandAnalysisAllowBlock(t *testing.T) {
 	}
 }
 
+func TestTUIDetailsShowsAllowedCommandWithFdDupRedirect(t *testing.T) {
+	api := New(config.Defaults())
+	api.rules.AddAlways(rules.Rule{ID: "docker-logs-ipkernel", OpType: "cmd.run", Cmd: &rules.CmdRule{ArgvPrefix: []string{"docker", "logs", "--since", "90m", "ipkernel25"}}})
+
+	op := map[string]any{
+		"type": "cmd.run",
+		"payload": map[string]any{
+			"argv": []string{"sh", "-c", "docker logs --since 90m ipkernel25 2>&1 | grep -Ea '13:57:4|13:58:4' | tail -120"},
+		},
+	}
+	b, err := json.Marshal(op)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	got := api.tuiDetails(requestRecord{Op: b, SessionID: "sess1"})
+	for _, want := range []string{
+		"[green]ALLOW[-] docker logs --since 90m ipkernel25  matched=always:docker-logs-ipkernel",
+		"[red]BLOCK[-] grep -Ea 13:57:4|13:58:4  reason=no matching rule",
+		"[red]BLOCK[-] tail -120  reason=no matching rule",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("details missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "reason=redirect") {
+		t.Fatalf("details should not block fd dup redirect:\n%s", got)
+	}
+}
+
 func TestTUIDetailsEscapesCommandAnalysisBrackets(t *testing.T) {
 	api := New(config.Defaults())
 	op := map[string]any{
