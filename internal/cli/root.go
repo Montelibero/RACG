@@ -54,6 +54,8 @@ func (r *Root) Run(args []string) int {
 		return NewAuthCmd(r.stdout, r.stderr).RunLogin(rest[1:])
 	case "logout":
 		return NewAuthCmd(r.stdout, r.stderr).RunLogout(rest[1:])
+	case "use":
+		return NewAuthCmd(r.stdout, r.stderr).RunUse(rest[1:])
 	case "session":
 		return NewAuthCmd(r.stdout, r.stderr).RunSession(rest[1:])
 	case "run":
@@ -83,6 +85,7 @@ commands:
   serve      start RACG server and TUI
   login      save client auth from a pairing code
   logout     remove saved client auth
+  use        select active saved client profile
   session    inspect saved/current session
   run        submit cmd.run and wait by default
   request    cancel, tail, or read request logs
@@ -94,10 +97,13 @@ commands:
 
 quick start:
   sudo racg serve -listen-addr 127.0.0.1 -port 8777
+  sudo racg serve --profile docker -listen-addr 127.0.0.1 -port 8777
   racg login --host http://127.0.0.1:8777 --pairing-code ABC123
+  racg use prod
 
 common commands:
   racg run -- bash -lc 'date && uname -a'
+  racg run --name prod -- bash -lc 'date && uname -a'
   racg run --no-wait -- /bin/sh -c 'while true; do date; sleep 3; done'
   racg request logs <id> --live
   racg request tail <id>
@@ -115,7 +121,7 @@ config helpers:
   racg config set config.json server.debug true --format json --type bool
 
 auth:
-  most client commands accept --host and --token, or use RACG_HOST/RACG_TOKEN,
-  or use saved auth from racg login.
+  most client commands accept --name, --host and --token, or use
+  RACG_CLIENT_NAME/RACG_HOST/RACG_TOKEN, or use the active saved auth profile.
 `
 }

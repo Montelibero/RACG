@@ -42,6 +42,7 @@ func (c *ConfigCmd) runSet(args []string) int {
 	backupDir := fs.String("backup-dir", "", "directory for backups; default is next to the edited file")
 	host := fs.String("host", strings.TrimSpace(os.Getenv("RACG_HOST")), "RACG server URL")
 	token := fs.String("token", strings.TrimSpace(os.Getenv("RACG_TOKEN")), "session bearer token")
+	name := fs.String("name", strings.TrimSpace(os.Getenv("RACG_CLIENT_NAME")), "client profile name")
 	noWait := fs.Bool("no-wait", false, "create request and print request id without waiting")
 	pollInterval := fs.Duration("poll-interval", 500*time.Millisecond, "poll interval while waiting")
 	waitTimeout := fs.Duration("wait-timeout", 0, "maximum time to wait for terminal status")
@@ -62,7 +63,7 @@ func (c *ConfigCmd) runSet(args []string) int {
 		backupValue = false
 	}
 
-	resolvedHost, resolvedToken, err := resolveClientAuth(*host, *token)
+	resolvedHost, resolvedToken, err := resolveClientAuthNamed(*host, *token, *name)
 	if err != nil {
 		fmt.Fprintf(c.stderr, "%v\n", err)
 		return 2
@@ -117,6 +118,7 @@ func interspersedConfigSetArgs(args []string) []string {
 		"--backup-dir":    true,
 		"--host":          true,
 		"--token":         true,
+		"--name":          true,
 		"--poll-interval": true,
 		"--wait-timeout":  true,
 	}

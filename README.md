@@ -19,6 +19,19 @@ RACG is a local Approval Gateway for privileged operations. A client sends reque
 racg serve -listen-addr 127.0.0.1 -port 8777
 ```
 
+By default the server stores audit history and `ALLOW_ALWAYS` rules in a stable user-state database:
+
+```text
+~/.local/state/racg/racg.db
+```
+
+Use a server profile when you intentionally want separate rule/history sets, for example Docker diagnostics vs network diagnostics:
+
+```bash
+racg serve --profile docker -listen-addr 127.0.0.1 -port 8777
+racg serve --profile network -listen-addr 127.0.0.1 -port 8778
+```
+
 For development-specific run settings, see `docs/developer-run.md`.
 
 ## Install on server (one line)
@@ -69,6 +82,15 @@ racg login --host http://127.0.0.1:8777 --pairing-code ABC123
 racg session status
 ```
 
+`racg login` saves a named client profile under `~/.config/racg/clients/` and makes it active. Without `--name`, the profile name is derived from the host. Use `--name` or `racg use` when working with multiple servers:
+
+```bash
+racg login --name prod --host http://prod.example:8777 --pairing-code ABC123
+racg login --name staging --host http://staging.example:8777 --pairing-code DEF456
+racg use prod
+racg run --name staging -- date
+```
+
 Then run client helper commands without passing a token each time:
 
 ```bash
@@ -86,7 +108,7 @@ racg config set config.json server.debug true --format json --type bool
 racg logout
 ```
 
-You can still override saved config with `--host`, `--token`, `RACG_HOST`, and `RACG_TOKEN`. Client login state is stored in `~/.config/racg/client.json` by default; set `RACG_CLIENT_CONFIG` to use a different path.
+You can still override saved config with `--host`, `--token`, `RACG_HOST`, and `RACG_TOKEN`. Set `RACG_CLIENT_CONFIG` to use one explicit legacy config file, or `RACG_CLIENT_NAME` to select a saved profile.
 
 `racg run` creates a `cmd.run` request and waits until it reaches a terminal status, then prints compact sections: `request_id`, `status`, `exit_code`, `stdout`, `stderr`.
 `racg request logs` reads raw stream endpoints (`/v1/requests/<id>/logs/stdout` and `/v1/requests/<id>/logs/stderr`) so large output can be consumed without parsing the full request JSON.
@@ -118,7 +140,7 @@ Install narrow read-only diagnostics rules into the SQLite rules store:
 
 ```bash
 racg rules presets list
-racg rules presets install readonly-diagnostics --db racg.db
+racg rules presets install readonly-diagnostics
 ```
 
 `readonly-diagnostics` auto-approves:

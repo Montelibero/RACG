@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -16,6 +18,12 @@ func TestDefaults(t *testing.T) {
 	if cfg.DBPath == "" {
 		t.Fatalf("DBPath empty")
 	}
+	if filepath.Base(cfg.DBPath) != "racg.db" {
+		t.Fatalf("DBPath=%q, want racg.db basename", cfg.DBPath)
+	}
+	if filepath.Dir(cfg.DBPath) == "." {
+		t.Fatalf("DBPath=%q, want user-state path by default", cfg.DBPath)
+	}
 	if cfg.MaxConcurrency != 3 {
 		t.Fatalf("MaxConcurrency=%d", cfg.MaxConcurrency)
 	}
@@ -27,6 +35,16 @@ func TestDefaults(t *testing.T) {
 	}
 	if cfg.PairingCodeTTLSeconds == 0 {
 		t.Fatalf("PairingCodeTTLSeconds=%d", cfg.PairingCodeTTLSeconds)
+	}
+}
+
+func TestProfileDBPath(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", filepath.Join(t.TempDir(), "state"))
+
+	got := ProfileDBPath("docker/prod")
+	want := filepath.Join(os.Getenv("XDG_STATE_HOME"), "racg", "profiles", "docker-prod.db")
+	if got != want {
+		t.Fatalf("ProfileDBPath=%q want %q", got, want)
 	}
 }
 

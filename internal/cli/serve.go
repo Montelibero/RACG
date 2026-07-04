@@ -31,6 +31,7 @@ func (c *ServeCmd) Run(args []string) int {
 	fs.SetOutput(c.stderr)
 
 	configPath := fs.String("config", "", "path to config.toml")
+	profile := fs.String("profile", "", "server profile name; uses a separate persisted DB/rules file")
 	fs.StringVar(&cfg.ListenAddr, "listen-addr", cfg.ListenAddr, "listen address")
 	fs.IntVar(&cfg.Port, "port", cfg.Port, "listen port")
 
@@ -51,6 +52,9 @@ func (c *ServeCmd) Run(args []string) int {
 			return 2
 		}
 	}
+	if *profile != "" {
+		cfg.DBPath = config.ProfileDBPath(*profile)
+	}
 
 	s, err := server.New(cfg)
 	if err != nil {
@@ -69,6 +73,10 @@ func (c *ServeCmd) Run(args []string) int {
 
 	<-ready
 	fmt.Fprintf(c.stdout, "listening=http://%s\n", s.Addr())
+	if *profile != "" {
+		fmt.Fprintf(c.stdout, "profile=%s\n", *profile)
+	}
+	fmt.Fprintf(c.stdout, "db_path=%s\n", cfg.DBPath)
 	fmt.Fprintf(c.stdout, "pairing_code=%s\n", s.PairingCode())
 
 	// Built-in TUI (tview): pairing page + dashboard + jobs.

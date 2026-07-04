@@ -66,6 +66,91 @@ func TestCLILoginStoresClientConfigAndRunUsesIt(t *testing.T) {
 	}
 }
 
+func TestCLILoginWithoutNameStoresAutoNamedProfileAndRunUsesActive(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+	t.Setenv("RACG_CLIENT_CONFIG", "")
+
+	var createdWithAuth string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/session/open":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"session_id":"sess1","session_token":"tok-profile","expires_at":"2030-01-01T00:00:00Z"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/requests":
+			createdWithAuth = r.Header.Get("Authorization")
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"request_id":"req1","status":"PENDING_APPROVAL"}`))
+		default:
+			t.Fatalf("%s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer ts.Close()
+
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	root := NewRoot(&out, &errOut)
+	code := root.Run([]string{"login", "--host", ts.URL, "--pairing-code", "ABC123"})
+	if code != 0 {
+		t.Fatalf("login code=%d stderr=%s", code, errOut.String())
+	}
+	profile := autoClientProfileName(ts.URL)
+	for _, want := range []string{
+		"profile: " + profile,
+		"config_path: " + filepath.Join(configHome, "racg", "clients", profile+".json"),
+		"hint: use --name " + profile,
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("login stdout=%q want %q", out.String(), want)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(configHome, "racg", "clients", profile+".json")); err != nil {
+		t.Fatalf("profile config not written: %v", err)
+	}
+
+	out.Reset()
+	errOut.Reset()
+	code = root.Run([]string{"run", "--no-wait", "--", "/bin/echo", "hi"})
+	if code != 0 {
+		t.Fatalf("run code=%d stderr=%s stdout=%s", code, errOut.String(), out.String())
+	}
+	if createdWithAuth != "Bearer tok-profile" {
+		t.Fatalf("Authorization=%q", createdWithAuth)
+	}
+}
+
+func TestCLIUseSwitchesActiveClientProfile(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+	t.Setenv("RACG_CLIENT_CONFIG", "")
+
+	if _, err := saveNamedClientConfig("server-a", clientConfig{Host: "http://a", Token: "tok-a"}); err != nil {
+		t.Fatalf("save server-a: %v", err)
+	}
+	if _, err := saveNamedClientConfig("server-b", clientConfig{Host: "http://b", Token: "tok-b"}); err != nil {
+		t.Fatalf("save server-b: %v", err)
+	}
+
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	root := NewRoot(&out, &errOut)
+	code := root.Run([]string{"use", "server-b"})
+	if code != 0 {
+		t.Fatalf("use code=%d stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "active_profile: server-b") {
+		t.Fatalf("stdout=%q", out.String())
+	}
+
+	host, token, err := resolveClientAuth("", "")
+	if err != nil {
+		t.Fatalf("resolveClientAuth: %v", err)
+	}
+	if host != "http://b" || token != "tok-b" {
+		t.Fatalf("host=%q token=%q", host, token)
+	}
+}
+
 func TestCLILogoutRemovesClientConfig(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "client.json")
 	t.Setenv("RACG_CLIENT_CONFIG", configPath)

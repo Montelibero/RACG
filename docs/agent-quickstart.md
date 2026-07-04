@@ -31,21 +31,23 @@ Inputs needed from the human:
 Log in once:
 
 ```bash
-racg login --host http://127.0.0.1:8777 --pairing-code ABC123
+racg login --name prod --host http://127.0.0.1:8777 --pairing-code ABC123
+racg use prod
 racg session status
 ```
 
-Client login state is saved in `~/.config/racg/client.json`. For isolated agent sessions, set `RACG_CLIENT_CONFIG`:
+Client login state is saved as named profiles in `~/.config/racg/clients/`, with the active profile tracked in `~/.config/racg/active_client`. If `--name` is omitted, `racg login` derives a profile name from the host and prints a hint. For isolated agent sessions, set `RACG_CLIENT_CONFIG`:
 
 ```bash
 export RACG_CLIENT_CONFIG=/tmp/racg-client.json
 racg login --host http://127.0.0.1:8777 --pairing-code ABC123
 ```
 
-Auth resolution order is explicit flags, then environment variables, then saved config:
+Auth resolution order is explicit `--host/--token`, then explicit `--name` or `RACG_CLIENT_NAME`, then the active saved profile, then the legacy single config:
 
 ```bash
 racg run --host "$HOST" --token "$TOKEN" -- date
+racg run --name prod -- date
 RACG_HOST="$HOST" RACG_TOKEN="$TOKEN" racg request logs <id> --live
 ```
 
@@ -205,7 +207,7 @@ Install narrow read-only presets when the human wants repeated diagnostics to av
 
 ```bash
 racg rules presets list
-racg rules presets install readonly-diagnostics --db racg.db
+racg rules presets install readonly-diagnostics
 ```
 
 The preset auto-approves:
@@ -220,6 +222,8 @@ The preset auto-approves:
 Do not auto-approve destructive or mutating operations such as `kubectl apply/delete/patch`, `git push`, `sudo`, firewall commands, or filesystem deletion.
 
 The human can view both persisted `ALLOW_ALWAYS` rules and in-memory `ALLOW_SESSION` rules in the TUI via `3 Rules`. Session rules expire when the server/session ends.
+
+By default `racg serve` stores persisted history and `ALLOW_ALWAYS` rules in `~/.local/state/racg/racg.db`. Humans can start separate server rule/history sets with `racg serve --profile docker` or `racg serve --profile network`; the profile selects a separate DB under the RACG state directory.
 
 When the human chooses `Allow session` or `Allow always` for a command request, RACG opens a scope editor. For shell requests with multiple command segments, the editor shows one scope per segment. Scopes are command patterns, such as `docker stop nginx` or `docker stop n*`. Shell separators (`&&`, `||`, `|`, `;`, `&`) are not part of a scope.
 

@@ -5,7 +5,8 @@
 Log in with a pairing code shown by `racg serve`:
 
 ```bash
-racg login --host http://127.0.0.1:8777 --pairing-code ABC123
+racg login --name prod --host http://127.0.0.1:8777 --pairing-code ABC123
+racg use prod
 ```
 
 Check saved auth:
@@ -14,16 +15,17 @@ Check saved auth:
 racg session status
 ```
 
-Client config defaults to `~/.config/racg/client.json`. Override it for isolated sessions:
+Client auth defaults to named profiles in `~/.config/racg/clients/`; `racg login` makes the saved profile active. If `--name` is omitted, RACG derives a profile name from the host and prints a hint. Override it for isolated sessions:
 
 ```bash
 RACG_CLIENT_CONFIG=/tmp/racg-client.json racg login --host http://127.0.0.1:8777 --pairing-code ABC123
 ```
 
-Auth precedence is explicit flags, then environment variables, then saved config:
+Auth precedence is explicit `--host/--token`, then `--name` or `RACG_CLIENT_NAME`, then the active saved profile, then the legacy single config:
 
 ```bash
 racg run --host http://127.0.0.1:8777 --token "$RACG_TOKEN" -- date
+racg run --name prod -- date
 RACG_HOST=http://127.0.0.1:8777 RACG_TOKEN=... racg request logs <id> --live
 ```
 

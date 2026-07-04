@@ -49,4 +49,3 @@ func TestCLISessionsListAndShow(t *testing.T) {
 		t.Fatalf("stdout=%q", out.String())
 	}
 }
-

@@ -4,6 +4,9 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -26,7 +29,7 @@ func Defaults() Config {
 	return Config{
 		ListenAddr:              "127.0.0.1",
 		Port:                    8777,
-		DBPath:                  "racg.db",
+		DBPath:                  defaultDBPath(),
 		DefaultTimeoutSec:       120,
 		MaxOutputBytes:          1 * 1024 * 1024,
 		MaxConcurrency:          3,
@@ -35,6 +38,52 @@ func Defaults() Config {
 		AllowAlwaysForDangerous: false,
 		KillGraceSec:            5,
 	}
+}
+
+func defaultDBPath() string {
+	return filepath.Join(stateDir(), "racg.db")
+}
+
+func ProfileDBPath(profile string) string {
+	name := safeProfileName(profile)
+	if name == "" {
+		name = "default"
+	}
+	return filepath.Join(stateDir(), "profiles", name+".db")
+}
+
+func stateDir() string {
+	if runtime.GOOS != "windows" {
+		if dir := strings.TrimSpace(os.Getenv("XDG_STATE_HOME")); dir != "" {
+			return filepath.Join(dir, "racg")
+		}
+		if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+			return filepath.Join(home, ".local", "state", "racg")
+		}
+	}
+	if dir, err := os.UserConfigDir(); err == nil && strings.TrimSpace(dir) != "" {
+		return filepath.Join(dir, "racg")
+	}
+	return "."
+}
+
+func safeProfileName(profile string) string {
+	profile = strings.TrimSpace(profile)
+	var b strings.Builder
+	lastDash := false
+	for _, r := range profile {
+		ok := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '.' || r == '_' || r == '-'
+		if ok {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	return strings.Trim(b.String(), "-")
 }
 
 // ApplyTOMLSimple applies a minimal top-level TOML subset: `key = value`.

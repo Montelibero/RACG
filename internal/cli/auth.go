@@ -27,6 +27,7 @@ func (c *AuthCmd) RunLogin(args []string) int {
 	host := fs.String("host", envOrDefault("RACG_HOST", "http://127.0.0.1:8777"), "RACG server URL")
 	pairingCode := fs.String("pairing-code", "", "pairing code from racg serve TUI")
 	clientID := fs.String("client-id", envOrDefault("RACG_CLIENT_ID", "racg-cli"), "client id")
+	name := fs.String("name", strings.TrimSpace(os.Getenv("RACG_CLIENT_NAME")), "client profile name; defaults to host-derived name")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -56,17 +57,23 @@ func (c *AuthCmd) RunLogin(args []string) int {
 		fmt.Fprintf(c.stderr, "login failed: %v\n", err)
 		return 1
 	}
-	if err := saveClientConfig(clientConfig{
+	profile := sanitizeClientProfileName(*name)
+	if profile == "" {
+		profile = autoClientProfileName(h)
+	}
+	configPath, err := saveNamedClientConfig(profile, clientConfig{
 		Host:      h,
 		Token:     resp.SessionToken,
 		SessionID: resp.SessionID,
 		ClientID:  strings.TrimSpace(*clientID),
 		ExpiresAt: resp.ExpiresAt,
-	}); err != nil {
+	})
+	if err != nil {
 		fmt.Fprintf(c.stderr, "config save failed: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(c.stdout, "logged_in=true\nhost: %s\nsession_id: %s\nexpires_at: %s\n", h, resp.SessionID, resp.ExpiresAt)
+	fmt.Fprintf(c.stdout, "logged_in=true\nprofile: %s\nhost: %s\nsession_id: %s\nexpires_at: %s\nconfig_path: %s\n", profile, h, resp.SessionID, resp.ExpiresAt, configPath)
+	fmt.Fprintf(c.stdout, "hint: use --name %s to target this server explicitly, or racg use %s to make it active\n", profile, profile)
 	return 0
 }
 
@@ -98,15 +105,35 @@ func (c *AuthCmd) RunSession(args []string) int {
 	}
 }
 
+func (c *AuthCmd) RunUse(args []string) int {
+	if len(args) != 1 || strings.TrimSpace(args[0]) == "" {
+		fmt.Fprintln(c.stderr, "usage: racg use <profile_name>")
+		return 2
+	}
+	name := sanitizeClientProfileName(args[0])
+	cfg, err := loadNamedClientConfig(name)
+	if err != nil {
+		fmt.Fprintf(c.stderr, "profile not found: %v\n", err)
+		return 1
+	}
+	if err := setActiveClientProfile(name); err != nil {
+		fmt.Fprintf(c.stderr, "use failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(c.stdout, "active_profile: %s\nhost: %s\n", name, cfg.Host)
+	return 0
+}
+
 func (c *AuthCmd) runSessionStatus(args []string) int {
 	fs := flag.NewFlagSet("racg session status", flag.ContinueOnError)
 	fs.SetOutput(c.stderr)
 	host := fs.String("host", strings.TrimSpace(os.Getenv("RACG_HOST")), "RACG server URL")
 	token := fs.String("token", strings.TrimSpace(os.Getenv("RACG_TOKEN")), "session bearer token")
+	name := fs.String("name", strings.TrimSpace(os.Getenv("RACG_CLIENT_NAME")), "client profile name")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	h, tok, err := resolveClientAuth(*host, *token)
+	h, tok, err := resolveClientAuthNamed(*host, *token, *name)
 	if err != nil {
 		fmt.Fprintf(c.stderr, "%v\n", err)
 		return 2

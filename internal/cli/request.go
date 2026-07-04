@@ -47,6 +47,7 @@ func (c *RequestCmd) RunRun(args []string) int {
 
 	host := fs.String("host", strings.TrimSpace(os.Getenv("RACG_HOST")), "RACG server URL")
 	token := fs.String("token", strings.TrimSpace(os.Getenv("RACG_TOKEN")), "session bearer token")
+	name := fs.String("name", strings.TrimSpace(os.Getenv("RACG_CLIENT_NAME")), "client profile name")
 	cwd := fs.String("cwd", "", "command working directory")
 	timeoutSec := fs.Int("timeout", 0, "command timeout in seconds")
 	noWait := fs.Bool("no-wait", false, "create request and print request id without waiting")
@@ -62,7 +63,7 @@ func (c *RequestCmd) RunRun(args []string) int {
 		return 2
 	}
 
-	resolvedHost, resolvedToken, err := resolveClientAuth(*host, *token)
+	resolvedHost, resolvedToken, err := resolveClientAuthNamed(*host, *token, *name)
 	if err != nil {
 		fmt.Fprintf(c.stderr, "%v\n", err)
 		return 2
@@ -119,11 +120,12 @@ func (c *RequestCmd) runCancel(args []string) int {
 	fs.SetOutput(c.stderr)
 	host := fs.String("host", strings.TrimSpace(os.Getenv("RACG_HOST")), "RACG server URL")
 	token := fs.String("token", strings.TrimSpace(os.Getenv("RACG_TOKEN")), "session bearer token")
+	name := fs.String("name", strings.TrimSpace(os.Getenv("RACG_CLIENT_NAME")), "client profile name")
 	if err := fs.Parse(args[1:]); err != nil {
 		return 2
 	}
 
-	resolvedHost, resolvedToken, err := resolveClientAuth(*host, *token)
+	resolvedHost, resolvedToken, err := resolveClientAuthNamed(*host, *token, *name)
 	if err != nil {
 		fmt.Fprintf(c.stderr, "%v\n", err)
 		return 2
@@ -152,6 +154,7 @@ func (c *RequestCmd) runLogs(args []string) int {
 	fs.SetOutput(c.stderr)
 	host := fs.String("host", strings.TrimSpace(os.Getenv("RACG_HOST")), "RACG server URL")
 	token := fs.String("token", strings.TrimSpace(os.Getenv("RACG_TOKEN")), "session bearer token")
+	name := fs.String("name", strings.TrimSpace(os.Getenv("RACG_CLIENT_NAME")), "client profile name")
 	stdoutOnly := fs.Bool("stdout", false, "print stdout only")
 	stderrOnly := fs.Bool("stderr", false, "print stderr only")
 	live := fs.Bool("live", false, "print current live combined output")
@@ -159,7 +162,7 @@ func (c *RequestCmd) runLogs(args []string) int {
 		return 2
 	}
 
-	resolvedHost, resolvedToken, err := resolveClientAuth(*host, *token)
+	resolvedHost, resolvedToken, err := resolveClientAuthNamed(*host, *token, *name)
 	if err != nil {
 		fmt.Fprintf(c.stderr, "%v\n", err)
 		return 2
@@ -226,12 +229,13 @@ func (c *RequestCmd) runTail(args []string) int {
 	fs.SetOutput(c.stderr)
 	host := fs.String("host", strings.TrimSpace(os.Getenv("RACG_HOST")), "RACG server URL")
 	token := fs.String("token", strings.TrimSpace(os.Getenv("RACG_TOKEN")), "session bearer token")
+	name := fs.String("name", strings.TrimSpace(os.Getenv("RACG_CLIENT_NAME")), "client profile name")
 	pollInterval := fs.Duration("poll-interval", 500*time.Millisecond, "poll interval while tailing")
 	if err := fs.Parse(args[1:]); err != nil {
 		return 2
 	}
 
-	resolvedHost, resolvedToken, err := resolveClientAuth(*host, *token)
+	resolvedHost, resolvedToken, err := resolveClientAuthNamed(*host, *token, *name)
 	if err != nil {
 		fmt.Fprintf(c.stderr, "%v\n", err)
 		return 2

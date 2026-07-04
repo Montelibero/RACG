@@ -92,7 +92,7 @@ Install the built-in read-only preset when appropriate:
 
 ```bash
 racg rules presets list
-racg rules presets install readonly-diagnostics --db racg.db
+racg rules presets install readonly-diagnostics
 ```
 
 ## Human Approval UX

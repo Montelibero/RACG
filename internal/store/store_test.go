@@ -2,9 +2,22 @@ package store
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestOpenCreatesParentDirectory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nested", "racg", "racg.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+	if err := s.Migrate(context.Background()); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+}
 
 func TestMigrateAndSessionCRUD(t *testing.T) {
 	ctx := context.Background()

@@ -6,6 +6,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -44,6 +45,9 @@ type RuleRow struct {
 }
 
 func Open(dsn string) (*Store, error) {
+	if err := ensureDBParentDir(dsn); err != nil {
+		return nil, err
+	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
@@ -53,6 +57,17 @@ func Open(dsn string) (*Store, error) {
 	db.SetMaxIdleConns(1)
 
 	return &Store{db: db}, nil
+}
+
+func ensureDBParentDir(dsn string) error {
+	if dsn == "" || strings.HasPrefix(dsn, "file:") || strings.Contains(dsn, ":memory:") {
+		return nil
+	}
+	dir := filepath.Dir(dsn)
+	if dir == "." || dir == "" {
+		return nil
+	}
+	return os.MkdirAll(dir, 0o700)
 }
 
 func (s *Store) Close() error {
