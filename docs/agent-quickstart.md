@@ -32,22 +32,23 @@ Log in once:
 
 ```bash
 racg login --host server --pairing-code ABC123
-racg use server
+export RACG_CLIENT_NAME=server
 racg session status
 ```
 
-Client login state is saved as named profiles in `~/.config/racg/clients/`, with the active profile tracked in `~/.config/racg/active_client`. If `--name` is omitted, `racg login` derives a profile name from the hostname only: `--host server:8777` saves profile `server`. For isolated agent sessions, set `RACG_CLIENT_CONFIG`:
+Client login state is saved as named profiles in `~/.config/racg/clients/`. RACG does not keep a global active profile, because that lets one agent shell change another agent's target. If `--name` is omitted, `racg login` derives a profile name from the hostname only: `--host server:8777` saves profile `server`. Select the profile in the current shell with `RACG_CLIENT_NAME`, or pass `--name` on each command. For an explicit single config path, set `RACG_CLIENT_CONFIG`:
 
 ```bash
 export RACG_CLIENT_CONFIG=/tmp/racg-client.json
 racg login --host server --pairing-code ABC123
 ```
 
-Auth resolution order is explicit `--host/--token`, then explicit `--name` or `RACG_CLIENT_NAME`, then the active saved profile, then the legacy single config:
+Auth resolution order is explicit `--host/--token`, then `--name` or `RACG_CLIENT_NAME`, then explicit `RACG_CLIENT_CONFIG`. Without one of those, client commands fail:
 
 ```bash
 racg run --host "$HOST" --token "$TOKEN" -- date
 racg run --name prod -- date
+RACG_CLIENT_NAME=prod racg session status
 RACG_HOST="$HOST" RACG_TOKEN="$TOKEN" racg request logs <id> --live
 ```
 

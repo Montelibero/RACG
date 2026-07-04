@@ -6,7 +6,7 @@ Log in with a pairing code shown by `racg serve`:
 
 ```bash
 racg login --host server --pairing-code ABC123
-racg use server
+export RACG_CLIENT_NAME=server
 ```
 
 Check saved auth:
@@ -15,17 +15,24 @@ Check saved auth:
 racg session status
 ```
 
-Client auth defaults to named profiles in `~/.config/racg/clients/`; `racg login` makes the saved profile active. If `--name` is omitted, RACG derives a profile name from the hostname only: `--host server:8777` saves profile `server`. Override it for isolated sessions:
+Client auth defaults to named profiles in `~/.config/racg/clients/`. `racg login` does not change global client state. If `--name` is omitted, RACG derives a profile name from the hostname only: `--host server:8777` saves profile `server`. Select it for the current shell:
+
+```bash
+export RACG_CLIENT_NAME=server
+```
+
+Use one explicit config path when needed:
 
 ```bash
 RACG_CLIENT_CONFIG=/tmp/racg-client.json racg login --host server --pairing-code ABC123
 ```
 
-Auth precedence is explicit `--host/--token`, then `--name` or `RACG_CLIENT_NAME`, then the active saved profile, then the legacy single config:
+Auth precedence is explicit `--host/--token`, then `--name` or `RACG_CLIENT_NAME`, then explicit `RACG_CLIENT_CONFIG`. Without one of those, client commands fail instead of reading global mutable state:
 
 ```bash
 racg run --host http://127.0.0.1:8777 --token "$RACG_TOKEN" -- date
 racg run --name prod -- date
+RACG_CLIENT_NAME=prod racg session status
 RACG_HOST=http://127.0.0.1:8777 RACG_TOKEN=... racg request logs <id> --live
 ```
 

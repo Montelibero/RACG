@@ -79,15 +79,16 @@ Log in once with the pairing code shown by `racg serve`:
 
 ```bash
 racg login --host server --pairing-code ABC123
+export RACG_CLIENT_NAME=server
 racg session status
 ```
 
-`racg login` saves a named client profile under `~/.config/racg/clients/` and makes it active. Without `--name`, the profile name is derived from the hostname only: `--host server:8777` saves profile `server`. Use `--name` or `racg use` when working with multiple servers:
+`racg login` saves a named client profile under `~/.config/racg/clients/`. It does not change global client state. Without `--name`, the profile name is derived from the hostname only: `--host server:8777` saves profile `server`. Select a profile per shell with `RACG_CLIENT_NAME`, or per command with `--name`:
 
 ```bash
 racg login --name prod --host prod.example --pairing-code ABC123
 racg login --name staging --host staging.example --pairing-code DEF456
-racg use prod
+export RACG_CLIENT_NAME=prod
 racg run --name staging -- date
 ```
 
@@ -108,7 +109,7 @@ racg config set config.json server.debug true --format json --type bool
 racg logout
 ```
 
-You can still override saved config with `--host`, `--token`, `RACG_HOST`, and `RACG_TOKEN`. Set `RACG_CLIENT_CONFIG` to use one explicit legacy config file, or `RACG_CLIENT_NAME` to select a saved profile.
+You can still override saved config with `--host`, `--token`, `RACG_HOST`, and `RACG_TOKEN`. Set `RACG_CLIENT_CONFIG` to use one explicit config file, or `RACG_CLIENT_NAME` to select a saved profile for the current shell. Without `--name`, `RACG_CLIENT_NAME`, `RACG_CLIENT_CONFIG`, or `--host` plus `--token`, client commands fail instead of reading global mutable state.
 
 `racg run` creates a `cmd.run` request and waits until it reaches a terminal status, then prints compact sections: `request_id`, `status`, `exit_code`, `stdout`, `stderr`.
 `racg request logs` reads raw stream endpoints (`/v1/requests/<id>/logs/stdout` and `/v1/requests/<id>/logs/stderr`) so large output can be consumed without parsing the full request JSON.

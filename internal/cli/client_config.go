@@ -47,14 +47,6 @@ func clientProfilesDir() (string, error) {
 	return filepath.Join(dir, "clients"), nil
 }
 
-func activeClientProfilePath() (string, error) {
-	dir, err := clientConfigDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, "active_client"), nil
-}
-
 func clientProfilePath(name string) (string, error) {
 	name = sanitizeClientProfileName(name)
 	if name == "" {
@@ -169,9 +161,6 @@ func saveNamedClientConfig(name string, cfg clientConfig) (string, error) {
 	if err := os.WriteFile(p, b, 0o600); err != nil {
 		return "", err
 	}
-	if err := setActiveClientProfile(name); err != nil {
-		return "", err
-	}
 	return p, nil
 }
 
@@ -213,37 +202,6 @@ func loadNamedClientConfig(name string) (clientConfig, error) {
 	return cfg, nil
 }
 
-func setActiveClientProfile(name string) error {
-	name = sanitizeClientProfileName(name)
-	if name == "" {
-		return errors.New("profile name is required")
-	}
-	p, err := activeClientProfilePath()
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
-		return err
-	}
-	return os.WriteFile(p, []byte(name+"\n"), 0o600)
-}
-
-func activeClientProfile() (string, error) {
-	p, err := activeClientProfilePath()
-	if err != nil {
-		return "", err
-	}
-	b, err := os.ReadFile(p)
-	if err != nil {
-		return "", err
-	}
-	name := sanitizeClientProfileName(string(b))
-	if name == "" {
-		return "", errors.New("active profile is empty")
-	}
-	return name, nil
-}
-
 func removeClientConfig() error {
 	p, err := clientConfigPath()
 	if err != nil {
@@ -279,7 +237,7 @@ func resolveClientAuthNamed(hostFlag, tokenFlag, nameFlag string) (host string, 
 	}
 	if token == "" {
 		if cfgErr != nil {
-			return "", "", errors.New("token is required; run racg login, pass --token, or set RACG_TOKEN")
+			return "", "", cfgErr
 		}
 		return "", "", errors.New("token is required; pass --token or set RACG_TOKEN")
 	}
@@ -300,8 +258,5 @@ func loadClientConfigForName(nameFlag string) (clientConfig, error) {
 	if name != "" {
 		return loadNamedClientConfig(name)
 	}
-	if active, err := activeClientProfile(); err == nil {
-		return loadNamedClientConfig(active)
-	}
-	return loadClientConfig()
+	return clientConfig{}, errors.New("client profile is required; pass --name, set RACG_CLIENT_NAME, or pass --host and --token")
 }

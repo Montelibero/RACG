@@ -73,7 +73,8 @@ func (c *AuthCmd) RunLogin(args []string) int {
 		return 1
 	}
 	fmt.Fprintf(c.stdout, "logged_in=true\nprofile: %s\nhost: %s\nsession_id: %s\nexpires_at: %s\nconfig_path: %s\n", profile, h, resp.SessionID, resp.ExpiresAt, configPath)
-	fmt.Fprintf(c.stdout, "hint: use --name %s to target this server explicitly, or racg use %s to make it active\n", profile, profile)
+	fmt.Fprintf(c.stdout, "hint: export RACG_CLIENT_NAME=%s\n", profile)
+	fmt.Fprintf(c.stdout, "hint: or pass --name %s per command\n", profile)
 	return 0
 }
 
@@ -111,17 +112,10 @@ func (c *AuthCmd) RunUse(args []string) int {
 		return 2
 	}
 	name := sanitizeClientProfileName(args[0])
-	cfg, err := loadNamedClientConfig(name)
-	if err != nil {
-		fmt.Fprintf(c.stderr, "profile not found: %v\n", err)
-		return 1
-	}
-	if err := setActiveClientProfile(name); err != nil {
-		fmt.Fprintf(c.stderr, "use failed: %v\n", err)
-		return 1
-	}
-	fmt.Fprintf(c.stdout, "active_profile: %s\nhost: %s\n", name, cfg.Host)
-	return 0
+	fmt.Fprintln(c.stderr, "racg use is disabled because it changes global client state.")
+	fmt.Fprintf(c.stderr, "Use this shell instead: export RACG_CLIENT_NAME=%s\n", name)
+	fmt.Fprintf(c.stderr, "Or pass it per command: racg run --name %s -- <cmd>\n", name)
+	return 2
 }
 
 func (c *AuthCmd) runSessionStatus(args []string) int {

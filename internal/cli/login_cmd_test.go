@@ -66,7 +66,7 @@ func TestCLILoginStoresClientConfigAndRunUsesIt(t *testing.T) {
 	}
 }
 
-func TestCLILoginWithoutNameStoresAutoNamedProfileAndRunUsesActive(t *testing.T) {
+func TestCLILoginWithoutNameStoresAutoNamedProfileAndRequiresExplicitSelection(t *testing.T) {
 	configHome := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", configHome)
 	t.Setenv("RACG_CLIENT_CONFIG", "")
@@ -98,7 +98,7 @@ func TestCLILoginWithoutNameStoresAutoNamedProfileAndRunUsesActive(t *testing.T)
 	for _, want := range []string{
 		"profile: " + profile,
 		"config_path: " + filepath.Join(configHome, "racg", "clients", profile+".json"),
-		"hint: use --name " + profile,
+		"hint: export RACG_CLIENT_NAME=" + profile,
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("login stdout=%q want %q", out.String(), want)
@@ -107,10 +107,23 @@ func TestCLILoginWithoutNameStoresAutoNamedProfileAndRunUsesActive(t *testing.T)
 	if _, err := os.Stat(filepath.Join(configHome, "racg", "clients", profile+".json")); err != nil {
 		t.Fatalf("profile config not written: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(configHome, "racg", "active_client")); !os.IsNotExist(err) {
+		t.Fatalf("active profile file should not exist err=%v", err)
+	}
 
 	out.Reset()
 	errOut.Reset()
 	code = root.Run([]string{"run", "--no-wait", "--", "/bin/echo", "hi"})
+	if code == 0 {
+		t.Fatalf("run without profile unexpectedly succeeded stdout=%s", out.String())
+	}
+	if !strings.Contains(errOut.String(), "client profile is required") {
+		t.Fatalf("stderr=%q want explicit profile error", errOut.String())
+	}
+
+	out.Reset()
+	errOut.Reset()
+	code = root.Run([]string{"run", "--name", profile, "--no-wait", "--", "/bin/echo", "hi"})
 	if code != 0 {
 		t.Fatalf("run code=%d stderr=%s stdout=%s", code, errOut.String(), out.String())
 	}
@@ -186,32 +199,58 @@ func TestResolveClientAuthNormalizesBareHostFlag(t *testing.T) {
 	}
 }
 
-func TestCLIUseSwitchesActiveClientProfile(t *testing.T) {
+func TestCLIUseIsDisabled(t *testing.T) {
 	configHome := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", configHome)
 	t.Setenv("RACG_CLIENT_CONFIG", "")
-
-	if _, err := saveNamedClientConfig("server-a", clientConfig{Host: "http://a", Token: "tok-a"}); err != nil {
-		t.Fatalf("save server-a: %v", err)
-	}
-	if _, err := saveNamedClientConfig("server-b", clientConfig{Host: "http://b", Token: "tok-b"}); err != nil {
-		t.Fatalf("save server-b: %v", err)
-	}
 
 	var out bytes.Buffer
 	var errOut bytes.Buffer
 	root := NewRoot(&out, &errOut)
 	code := root.Run([]string{"use", "server-b"})
-	if code != 0 {
-		t.Fatalf("use code=%d stderr=%s", code, errOut.String())
+	if code == 0 {
+		t.Fatalf("use unexpectedly succeeded stdout=%s", out.String())
 	}
-	if !strings.Contains(out.String(), "active_profile: server-b") {
-		t.Fatalf("stdout=%q", out.String())
+	for _, want := range []string{
+		"racg use is disabled",
+		"export RACG_CLIENT_NAME=server-b",
+		"racg run --name server-b",
+	} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Fatalf("stderr=%q want %q", errOut.String(), want)
+		}
+	}
+}
+
+func TestResolveClientAuthRequiresExplicitProfile(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+	t.Setenv("RACG_CLIENT_CONFIG", "")
+
+	if _, err := saveNamedClientConfig("server-b", clientConfig{Host: "http://b", Token: "tok-b"}); err != nil {
+		t.Fatalf("save server-b: %v", err)
 	}
 
 	host, token, err := resolveClientAuth("", "")
+	if err == nil {
+		t.Fatalf("resolveClientAuth unexpectedly succeeded host=%q token=%q", host, token)
+	}
+	if !strings.Contains(err.Error(), "client profile is required") {
+		t.Fatalf("err=%v want explicit profile error", err)
+	}
+
+	host, token, err = resolveClientAuthNamed("", "", "server-b")
 	if err != nil {
-		t.Fatalf("resolveClientAuth: %v", err)
+		t.Fatalf("resolveClientAuthNamed: %v", err)
+	}
+	if host != "http://b:8777" || token != "tok-b" {
+		t.Fatalf("host=%q token=%q", host, token)
+	}
+
+	t.Setenv("RACG_CLIENT_NAME", "server-b")
+	host, token, err = resolveClientAuth("", "")
+	if err != nil {
+		t.Fatalf("resolveClientAuth with env: %v", err)
 	}
 	if host != "http://b:8777" || token != "tok-b" {
 		t.Fatalf("host=%q token=%q", host, token)

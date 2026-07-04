@@ -85,7 +85,6 @@ commands:
   serve      start RACG server and TUI
   login      save client auth from a pairing code
   logout     remove saved client auth
-  use        select active saved client profile
   session    inspect saved/current session
   run        submit cmd.run and wait by default
   request    cancel, tail, or read request logs
@@ -99,7 +98,7 @@ quick start:
   sudo racg serve -listen-addr 127.0.0.1 -port 8777
   sudo racg serve --profile docker -listen-addr 127.0.0.1 -port 8777
   racg login --host server --pairing-code ABC123
-  racg use server
+  export RACG_CLIENT_NAME=server
 
 common commands:
   racg run -- bash -lc 'date && uname -a'
@@ -122,9 +121,11 @@ config helpers:
 
 auth:
   most client commands accept --name, --host and --token, or use
-  RACG_CLIENT_NAME/RACG_HOST/RACG_TOKEN, or use the active saved auth profile.
+  RACG_CLIENT_NAME/RACG_HOST/RACG_TOKEN.
   client profiles are stored in ~/.config/racg/clients/.
   login --host server saves profile "server"; --name overrides the profile name.
+  without --name, RACG_CLIENT_NAME, or --host+--token, client commands fail
+  instead of reading global mutable state.
   server rules/history are stored in ~/.local/state/racg/racg.db by default;
   use serve --profile <name> for separate server rule/history sets.
 `
