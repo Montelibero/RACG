@@ -98,7 +98,7 @@ commands:
 quick start:
   sudo racg serve -listen-addr 127.0.0.1 -port 8777
   sudo racg serve --profile docker -listen-addr 127.0.0.1 -port 8777
-  racg login --host http://127.0.0.1:8777 --pairing-code ABC123
+  racg login --name prod --host http://127.0.0.1:8777 --pairing-code ABC123
   racg use prod
 
 common commands:
@@ -123,5 +123,8 @@ config helpers:
 auth:
   most client commands accept --name, --host and --token, or use
   RACG_CLIENT_NAME/RACG_HOST/RACG_TOKEN, or use the active saved auth profile.
+  client profiles are stored in ~/.config/racg/clients/.
+  server rules/history are stored in ~/.local/state/racg/racg.db by default;
+  use serve --profile <name> for separate server rule/history sets.
 `
 }
