@@ -60,48 +60,7 @@ func RunServeUI(ctx context.Context, cfg ServeUIConfig) error {
 	app.SetRoot(pages, true)
 
 	app.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
-		if ev.Key() == tcell.KeyEsc {
-			if state.closeOverlay(pages) {
-				return nil
-			}
-		}
-		switch ev.Key() {
-		case tcell.KeyTAB:
-			state.cycleFocus(app)
-			return nil
-		case tcell.KeyF1:
-			state.openHelp(app, pages)
-			return nil
-		case tcell.KeyEsc:
-			state.back(app, pages)
-			return nil
-		}
-		if state.page != "job" {
-			switch ev.Rune() {
-			case '1':
-				state.showDashboard(app, pages)
-				return nil
-			case '2':
-				state.showDashboard(app, pages)
-				if state.jobsList != nil {
-					app.SetFocus(state.jobsList)
-				}
-				return nil
-			case '3':
-				state.showRules(app, pages)
-				return nil
-			case '4':
-				state.showHistory(app, pages)
-				return nil
-			}
-		}
-		switch hotkeyRune(ev.Rune()) {
-		case 'q':
-			cfg.ExitFunc()
-			app.Stop()
-			return nil
-		}
-		return ev
+		return state.handleGlobalInput(app, pages, cfg, ev)
 	})
 
 	// Events -> UI state.
@@ -201,6 +160,58 @@ func newUIState(api *httpapi.API, st *store.Store) *uiState {
 }
 
 func (s *uiState) setCurrentPage(p string) { s.page = p }
+
+func (s *uiState) handleGlobalInput(app *tview.Application, pages *tview.Pages, cfg ServeUIConfig, ev *tcell.EventKey) *tcell.EventKey {
+	if ev.Key() == tcell.KeyEsc {
+		if s.closeOverlay(pages) {
+			return nil
+		}
+	}
+	if s.overlayClose != nil {
+		return ev
+	}
+	switch ev.Key() {
+	case tcell.KeyTAB:
+		s.cycleFocus(app)
+		return nil
+	case tcell.KeyF1:
+		s.openHelp(app, pages)
+		return nil
+	case tcell.KeyEsc:
+		s.back(app, pages)
+		return nil
+	}
+	if s.page != "job" {
+		switch ev.Rune() {
+		case '1':
+			s.showDashboard(app, pages)
+			return nil
+		case '2':
+			s.showDashboard(app, pages)
+			if s.jobsList != nil {
+				app.SetFocus(s.jobsList)
+			}
+			return nil
+		case '3':
+			s.showRules(app, pages)
+			return nil
+		case '4':
+			s.showHistory(app, pages)
+			return nil
+		}
+	}
+	switch hotkeyRune(ev.Rune()) {
+	case 'q':
+		if cfg.ExitFunc != nil {
+			cfg.ExitFunc()
+		}
+		if app != nil {
+			app.Stop()
+		}
+		return nil
+	}
+	return ev
+}
 
 func (s *uiState) refreshTerminalTitle(app *tview.Application, cfg ServeUIConfig) {
 	if app == nil || s.api == nil {

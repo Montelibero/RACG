@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
 	"github.com/itolstov/racg/internal/config"
@@ -287,6 +288,26 @@ func TestBackFromJobFocusesJobsList(t *testing.T) {
 
 	if got := app.GetFocus(); got != s.jobsList {
 		t.Fatalf("focus=%T, want jobsList", got)
+	}
+}
+
+func TestGlobalTabDoesNotLeaveOverlay(t *testing.T) {
+	app := tview.NewApplication()
+	pages := tview.NewPages()
+	s := newUIState(nil, nil)
+	mainA := tview.NewInputField()
+	mainB := tview.NewList()
+	overlayInput := tview.NewInputField()
+	s.focus = []tview.Primitive{mainA, mainB}
+	app.SetFocus(overlayInput)
+	s.overlayClose = func() {}
+
+	ev := tcell.NewEventKey(tcell.KeyTAB, 0, tcell.ModNone)
+	if got := s.handleGlobalInput(app, pages, ServeUIConfig{}, ev); got != ev {
+		t.Fatalf("Tab should be passed to overlay, got %#v", got)
+	}
+	if got := app.GetFocus(); got != overlayInput {
+		t.Fatalf("focus=%T, want overlay input", got)
 	}
 }
 
