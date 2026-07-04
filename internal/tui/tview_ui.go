@@ -1039,7 +1039,7 @@ func buildPairingPage(ctx context.Context, app *tview.Application, pages *tview.
 			listenURL = "http://" + listenURL
 		}
 		pc := cfg.API.PairingCode()
-		s.openCopyOverlay(app, pages, "Pairing Info", PairingCopyText(listenURL, pc))
+		s.openCopyOverlay(app, pages, "Pairing Info", PairingCopyText(listenURL, pc, cfg.Version))
 	}
 	btnCopy := tview.NewButton("Copy").SetSelectedFunc(copy)
 

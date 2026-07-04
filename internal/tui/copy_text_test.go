@@ -5,10 +5,12 @@ import "testing"
 func TestPairingCopyText(t *testing.T) {
 	listen := "http://127.0.0.1:8777"
 	code := "GQ6BN2"
-	got := PairingCopyText(listen, code)
+	version := "0.2.8"
+	got := PairingCopyText(listen, code, version)
 
 	wantSubs := []string{
 		"listening=" + listen,
+		"version=" + version,
 		"pairing_code=" + code,
 		"RACG_CODE=" + code,
 		"open_session --code " + code,
