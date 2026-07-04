@@ -78,15 +78,15 @@ Agent-oriented quickstart is in `docs/agent-quickstart.md`.
 Log in once with the pairing code shown by `racg serve`:
 
 ```bash
-racg login --host http://127.0.0.1:8777 --pairing-code ABC123
+racg login --host server --pairing-code ABC123
 racg session status
 ```
 
-`racg login` saves a named client profile under `~/.config/racg/clients/` and makes it active. Without `--name`, the profile name is derived from the host. Use `--name` or `racg use` when working with multiple servers:
+`racg login` saves a named client profile under `~/.config/racg/clients/` and makes it active. Without `--name`, the profile name is derived from the hostname only: `--host server:8777` saves profile `server`. Use `--name` or `racg use` when working with multiple servers:
 
 ```bash
-racg login --name prod --host http://prod.example:8777 --pairing-code ABC123
-racg login --name staging --host http://staging.example:8777 --pairing-code DEF456
+racg login --name prod --host prod.example --pairing-code ABC123
+racg login --name staging --host staging.example --pairing-code DEF456
 racg use prod
 racg run --name staging -- date
 ```

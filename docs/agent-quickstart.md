@@ -31,16 +31,16 @@ Inputs needed from the human:
 Log in once:
 
 ```bash
-racg login --name prod --host http://127.0.0.1:8777 --pairing-code ABC123
-racg use prod
+racg login --host server --pairing-code ABC123
+racg use server
 racg session status
 ```
 
-Client login state is saved as named profiles in `~/.config/racg/clients/`, with the active profile tracked in `~/.config/racg/active_client`. If `--name` is omitted, `racg login` derives a profile name from the host and prints a hint. For isolated agent sessions, set `RACG_CLIENT_CONFIG`:
+Client login state is saved as named profiles in `~/.config/racg/clients/`, with the active profile tracked in `~/.config/racg/active_client`. If `--name` is omitted, `racg login` derives a profile name from the hostname only: `--host server:8777` saves profile `server`. For isolated agent sessions, set `RACG_CLIENT_CONFIG`:
 
 ```bash
 export RACG_CLIENT_CONFIG=/tmp/racg-client.json
-racg login --host http://127.0.0.1:8777 --pairing-code ABC123
+racg login --host server --pairing-code ABC123
 ```
 
 Auth resolution order is explicit `--host/--token`, then explicit `--name` or `RACG_CLIENT_NAME`, then the active saved profile, then the legacy single config:

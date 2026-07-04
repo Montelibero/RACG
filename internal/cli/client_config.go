@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -67,16 +68,33 @@ func clientProfilePath(name string) (string, error) {
 }
 
 func autoClientProfileName(host string) string {
-	raw := strings.TrimSpace(host)
-	if raw == "" {
+	normalized := normalizeClientHost(host)
+	if normalized == "" {
 		return "default"
 	}
-	u, err := url.Parse(raw)
-	if err == nil && u.Host != "" {
-		raw = u.Host
+	u, err := url.Parse(normalized)
+	if err == nil && u.Hostname() != "" {
+		return sanitizeClientProfileName(u.Hostname())
 	}
-	raw = strings.TrimSuffix(raw, "/")
-	return sanitizeClientProfileName(raw)
+	return sanitizeClientProfileName(normalized)
+}
+
+func normalizeClientHost(host string) string {
+	host = strings.TrimRight(strings.TrimSpace(host), "/")
+	if host == "" {
+		return ""
+	}
+	if !strings.Contains(host, "://") {
+		host = "http://" + host
+	}
+	u, err := url.Parse(host)
+	if err != nil || u.Host == "" {
+		return host
+	}
+	if u.Port() == "" {
+		u.Host = net.JoinHostPort(u.Hostname(), "8777")
+	}
+	return strings.TrimRight(u.String(), "/")
 }
 
 func sanitizeClientProfileName(name string) string {
@@ -242,10 +260,10 @@ func resolveClientAuth(hostFlag, tokenFlag string) (host string, token string, e
 }
 
 func resolveClientAuthNamed(hostFlag, tokenFlag, nameFlag string) (host string, token string, err error) {
-	host = strings.TrimSpace(hostFlag)
+	host = normalizeClientHost(hostFlag)
 	token = strings.TrimSpace(tokenFlag)
 	if host != "" && token != "" {
-		return strings.TrimRight(host, "/"), token, nil
+		return host, token, nil
 	}
 	cfg, cfgErr := loadClientConfigForName(nameFlag)
 	if cfgErr == nil {
@@ -265,7 +283,7 @@ func resolveClientAuthNamed(hostFlag, tokenFlag, nameFlag string) (host string, 
 		}
 		return "", "", errors.New("token is required; pass --token or set RACG_TOKEN")
 	}
-	return strings.TrimRight(host, "/"), token, nil
+	return normalizeClientHost(host), token, nil
 }
 
 func loadClientConfigForName(nameFlag string) (clientConfig, error) {

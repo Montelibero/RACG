@@ -47,7 +47,7 @@ func (c *AuthCmd) RunLogin(args []string) int {
 		return 2
 	}
 
-	h := strings.TrimRight(strings.TrimSpace(*host), "/")
+	h := normalizeClientHost(*host)
 	if h == "" {
 		fmt.Fprintln(c.stderr, "host is required")
 		return 2
