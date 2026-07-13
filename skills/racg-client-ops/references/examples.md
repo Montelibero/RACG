@@ -115,6 +115,14 @@ racg config set /srv/app/values.yaml image.tag v1.2.3 --format yaml
 
 For non-string YAML/JSON values, pass `--type bool`, `--type int`, `--type float`, `--type null`, or `--type json`. Leave backups enabled unless the human explicitly requests `--no-backup`.
 
+Create a missing structured config without an intermediate empty file:
+
+```bash
+racg config set /etc/netplan/60-static.yaml network '{"version":2}' --format yaml --type json --create
+```
+
+The parent directory must already exist. RACG validates the complete config and atomically creates it with mode `0600`.
+
 ## Plain Text Config Edits
 
 HAProxy config is plain text, not YAML. Read it first:

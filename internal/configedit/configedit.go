@@ -22,16 +22,18 @@ type ConfigSet struct {
 	ValueType string
 	Backup    bool
 	BackupDir string
+	Create    bool
 }
 
 type Result struct {
-	Path       string
-	Format     string
-	Key        string
-	OldValue   string
-	NewValue   string
-	Created    bool
-	BackupPath string
+	Path        string
+	Format      string
+	Key         string
+	OldValue    string
+	NewValue    string
+	Created     bool
+	FileCreated bool
+	BackupPath  string
 }
 
 func Set(in ConfigSet) (Result, error) {
@@ -52,8 +54,18 @@ func Set(in ConfigSet) (Result, error) {
 	}
 
 	original, err := os.ReadFile(in.Path)
+	fileCreated := false
 	if err != nil {
-		return Result{}, err
+		if !in.Create || !os.IsNotExist(err) {
+			return Result{}, err
+		}
+		fileCreated = true
+		switch format {
+		case "json":
+			original = []byte("{}\n")
+		default:
+			original = nil
+		}
 	}
 
 	var updated []byte
@@ -74,23 +86,24 @@ func Set(in ConfigSet) (Result, error) {
 	}
 
 	var backupPath string
-	if in.Backup {
+	if in.Backup && !fileCreated {
 		backupPath, err = writeBackup(in.Path, in.BackupDir, original)
 		if err != nil {
 			return Result{}, err
 		}
 	}
-	if err := writeFileAtomic(in.Path, updated); err != nil {
+	if err := writeFileAtomic(in.Path, updated, fileCreated); err != nil {
 		return Result{}, err
 	}
 	return Result{
-		Path:       in.Path,
-		Format:     format,
-		Key:        key,
-		OldValue:   oldValue,
-		NewValue:   resultValue(in.Value, valueType),
-		Created:    created,
-		BackupPath: backupPath,
+		Path:        in.Path,
+		Format:      format,
+		Key:         key,
+		OldValue:    oldValue,
+		NewValue:    resultValue(in.Value, valueType),
+		Created:     created,
+		FileCreated: fileCreated,
+		BackupPath:  backupPath,
 	}, nil
 }
 
@@ -309,10 +322,14 @@ func writeBackup(path, backupDir string, original []byte) (string, error) {
 	return backupPath, nil
 }
 
-func writeFileAtomic(path string, data []byte) error {
-	info, err := os.Stat(path)
-	if err != nil {
-		return err
+func writeFileAtomic(path string, data []byte, create bool) error {
+	mode := os.FileMode(0o600)
+	if !create {
+		info, err := os.Stat(path)
+		if err != nil {
+			return err
+		}
+		mode = info.Mode().Perm()
 	}
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".racg-config-*")
@@ -325,12 +342,18 @@ func writeFileAtomic(path string, data []byte) error {
 		_ = tmp.Close()
 		return err
 	}
-	if err := tmp.Chmod(info.Mode().Perm()); err != nil {
+	if err := tmp.Chmod(mode); err != nil {
 		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Close(); err != nil {
 		return err
+	}
+	if create {
+		if err := os.Link(tmpPath, path); err != nil {
+			return err
+		}
+		return nil
 	}
 	return os.Rename(tmpPath, path)
 }

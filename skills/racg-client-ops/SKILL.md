@@ -20,6 +20,7 @@ Use RACG when command execution must go through a human-approved gateway instead
    - Use dotted keys for `json`/`yaml`, for example `server.port` or `image.tag`.
    - Set `--type` for non-string values such as booleans, integers, floats, null, or JSON fragments.
    - Keep backups enabled unless the human explicitly asks not to.
+   - For a missing config file, use `--create`; RACG validates the complete content and atomically creates the file with mode `0600`. The parent directory must already exist.
 4. For plain text files such as HAProxy, nginx, systemd units, or native `.cfg` files, use `racg file read` and `racg file patch` with a unified diff.
    - Do not treat native text configs as YAML just because a compose/stack file references them.
    - Read the current file before generating the unified diff.

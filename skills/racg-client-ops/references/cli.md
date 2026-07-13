@@ -80,6 +80,7 @@ Use `racg config set` for simple key updates in `env`, `json`, and `yaml` files.
 racg config set /app/.env PORT 8080 --format env
 racg config set /app/config.json server.debug true --format json --type bool
 racg config set /app/values.yaml image.tag v1.2.3 --format yaml
+racg config set /etc/netplan/60-static.yaml network '{"version":2}' --format yaml --type json --create
 ```
 
 Supported `--type` values for `json`/`yaml` are:
@@ -104,12 +105,15 @@ Useful flags:
 ```text
 --format <env|json|yaml>  required format
 --type <type>             value type, default string
+--create                  create a missing file with mode 0600; parent directory must exist
 --no-backup               disable backup only when explicitly requested
 --backup-dir <dir>        write backup somewhere else
 --no-wait                 print request id and return immediately
 ```
 
 Prefer `racg config set` over generating Python, sed, jq, yq, or shell scripts for a single structured config key update. For arbitrary text edits, use `racg file read` and `racg file patch`.
+
+Without `--create`, a missing config file is an error. With `--create`, RACG validates the complete content and atomically creates the file; no backup is written because there was no original. Do not create an intermediate empty file through `racg run`.
 
 ## Plain Text File Reads And Patches
 

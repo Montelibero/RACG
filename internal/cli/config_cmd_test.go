@@ -20,6 +20,7 @@ func TestCLIConfigSetCreatesConfSetRequestAndWaits(t *testing.T) {
 				Value     string `json:"value"`
 				ValueType string `json:"value_type"`
 				Backup    bool   `json:"backup"`
+				Create    bool   `json:"create"`
 			} `json:"payload"`
 		} `json:"op"`
 	}
@@ -47,7 +48,7 @@ func TestCLIConfigSetCreatesConfSetRequestAndWaits(t *testing.T) {
 	var out bytes.Buffer
 	var errOut bytes.Buffer
 	root := NewRoot(&out, &errOut)
-	code := root.Run([]string{"config", "set", "config.yaml", "image.tag", "v1.2.3", "--format", "yaml", "--type", "string", "--host", ts.URL, "--token", "tok"})
+	code := root.Run([]string{"config", "set", "config.yaml", "image.tag", "v1.2.3", "--format", "yaml", "--type", "string", "--create", "--host", ts.URL, "--token", "tok"})
 	if code != 0 {
 		t.Fatalf("code=%d stderr=%s stdout=%s", code, errOut.String(), out.String())
 	}
@@ -56,12 +57,21 @@ func TestCLIConfigSetCreatesConfSetRequestAndWaits(t *testing.T) {
 		t.Fatalf("op.type=%q", posted.Op.Type)
 	}
 	p := posted.Op.Payload
-	if p.Path != "config.yaml" || p.Format != "yaml" || p.Key != "image.tag" || p.Value != "v1.2.3" || p.ValueType != "string" || !p.Backup {
+	if p.Path != "config.yaml" || p.Format != "yaml" || p.Key != "image.tag" || p.Value != "v1.2.3" || p.ValueType != "string" || !p.Backup || !p.Create {
 		t.Fatalf("payload=%+v", p)
 	}
 	for _, want := range []string{"request_id: req1", "status: SUCCEEDED", "stdout:", "path: config.yaml"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestCLIConfigUsageDocumentsCreate(t *testing.T) {
+	got := configUsage()
+	for _, want := range []string{"--create", "mode 0600", "--type json"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("config usage missing %q:\n%s", want, got)
 		}
 	}
 }

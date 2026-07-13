@@ -311,6 +311,37 @@ func TestGlobalTabDoesNotLeaveOverlay(t *testing.T) {
 	}
 }
 
+func TestPendingActionHotkeysWorkAcrossDashboardFocus(t *testing.T) {
+	tests := []rune{'a', 'ф', 's', 'ы', 'A', 'Ф', 'd', 'в'}
+	for _, key := range tests {
+		t.Run(string(key), func(t *testing.T) {
+			app := tview.NewApplication()
+			s := newUIState(nil, nil)
+			s.page = "dashboard"
+			s.details = tview.NewTextView()
+			app.SetFocus(s.details)
+
+			ev := tcell.NewEventKey(tcell.KeyRune, key, tcell.ModNone)
+			if got := s.handleGlobalInput(app, tview.NewPages(), ServeUIConfig{}, ev); got != nil {
+				t.Fatalf("hotkey %q was not consumed outside pending list", string(key))
+			}
+		})
+	}
+}
+
+func TestPendingActionHotkeysRemainAvailableInFilter(t *testing.T) {
+	app := tview.NewApplication()
+	s := newUIState(nil, nil)
+	s.page = "dashboard"
+	s.filter = tview.NewInputField()
+	app.SetFocus(s.filter)
+
+	ev := tcell.NewEventKey(tcell.KeyRune, 'a', tcell.ModNone)
+	if got := s.handleGlobalInput(app, tview.NewPages(), ServeUIConfig{}, ev); got != ev {
+		t.Fatalf("filter input hotkey was consumed: %#v", got)
+	}
+}
+
 func TestOpenHelpSendsOverlayToFront(t *testing.T) {
 	s := newUIState(nil, nil)
 	pages := tview.NewPages()

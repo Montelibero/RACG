@@ -53,6 +53,8 @@ racg config set <path> <key> <value> --format <env|json|yaml>
 
 This is safer than ad-hoc scripts because RACG validates structured formats and writes a backup by default. Use `--type` for non-string JSON/YAML values. Treat config edits under `/etc/` or production service directories as mutations requiring clear human approval.
 
+For a missing config, use explicit `--create`. RACG creates the validated file with mode `0600` only when its parent directory already exists; do not create an intermediate empty file through a shell command.
+
 For non-structured text files, prefer:
 
 ```bash

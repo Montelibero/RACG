@@ -116,6 +116,7 @@ Prefer `racg config set` over generating ad-hoc scripts for simple config edits:
 racg config set /app/.env PORT 8080 --format env
 racg config set values.yaml image.tag v1.2.3 --format yaml
 racg config set config.json server.debug true --format json --type bool
+racg config set /etc/netplan/60-static.yaml network '{"version":2}' --format yaml --type json --create
 ```
 
 Supported formats are `env`, `json`, and `yaml`. For `json` and `yaml`, keys are dotted paths. Supported value types are `string` (default), `bool`, `int`, `float`, `null`, and `json`.
@@ -127,6 +128,8 @@ config.yaml.racg-backup-YYYYMMDDTHHMMSSZ
 ```
 
 Use `--no-backup` only when the human explicitly does not want one. YAML/JSON may be reformatted, but RACG parses and validates the result before replacing the file.
+
+If the config file does not exist, pass `--create`. RACG builds and validates the complete config before atomically creating it with mode `0600`; it does not create parent directories and does not write a backup for a newly created file. Without `--create`, a missing file remains an error. Do not create an intermediate empty file with a shell command.
 
 ## 4. Read And Patch Plain Text Files
 

@@ -114,6 +114,7 @@ func TestTUIDetailsForConfSetShowsOperationAndEffect(t *testing.T) {
 			"key":        "image.tag",
 			"value":      "v1.2.3",
 			"value_type": "string",
+			"create":     true,
 		},
 	}
 	b, err := json.Marshal(op)
@@ -125,11 +126,12 @@ func TestTUIDetailsForConfSetShowsOperationAndEffect(t *testing.T) {
 
 	for _, want := range []string{
 		"operation: SET CONFIG",
-		"effect: updates one structured config key",
+		"effect: updates one structured config key; creates the file with mode 0600 if missing",
 		"path: /apps/app/config.yaml",
 		"format: yaml",
 		"key: image.tag",
 		"new: v1.2.3",
+		"create_if_missing: true",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("details missing %q:\n%s", want, got)

@@ -110,6 +110,77 @@ func TestSetRejectsInvalidYAMLInput(t *testing.T) {
 	}
 }
 
+func TestSetCreatesMissingYAMLWithMode0600(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "netplan.yaml")
+	res, err := Set(ConfigSet{
+		Path:      path,
+		Format:    "yaml",
+		Key:       "network",
+		Value:     `{"version":2,"ethernets":{"eth0":{"addresses":["82.97.245.130/24"]}}}`,
+		ValueType: "json",
+		Backup:    true,
+		Create:    true,
+	})
+	if err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if !res.FileCreated || res.BackupPath != "" {
+		t.Fatalf("result=%+v", res)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("mode=%#o, want 0600", got)
+	}
+	got := readFile(t, path)
+	for _, want := range []string{"network:", "version: 2", "eth0:", "82.97.245.130/24"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("yaml missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestSetCreateRequiresExistingParentDirectory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing", "config.yaml")
+	_, err := Set(ConfigSet{Path: path, Format: "yaml", Key: "enabled", Value: "true", ValueType: "bool", Create: true})
+	if err == nil {
+		t.Fatal("expected missing parent directory error")
+	}
+	if _, statErr := os.Stat(filepath.Dir(path)); !os.IsNotExist(statErr) {
+		t.Fatalf("parent directory was created: %v", statErr)
+	}
+}
+
+func TestSetCreateSupportsEnvAndJSON(t *testing.T) {
+	tests := []struct {
+		format    string
+		key       string
+		value     string
+		valueType string
+		want      string
+	}{
+		{format: "env", key: "PORT", value: "8080", valueType: "string", want: "PORT=8080\n"},
+		{format: "json", key: "server.enabled", value: "true", valueType: "bool", want: `"enabled": true`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.format, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config."+tt.format)
+			res, err := Set(ConfigSet{Path: path, Format: tt.format, Key: tt.key, Value: tt.value, ValueType: tt.valueType, Create: true})
+			if err != nil {
+				t.Fatalf("Set: %v", err)
+			}
+			if !res.FileCreated {
+				t.Fatalf("result=%+v", res)
+			}
+			if got := readFile(t, path); !strings.Contains(got, tt.want) {
+				t.Fatalf("file missing %q:\n%s", tt.want, got)
+			}
+		})
+	}
+}
+
 func readFile(t *testing.T, path string) string {
 	t.Helper()
 	b, err := os.ReadFile(path)

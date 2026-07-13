@@ -209,7 +209,8 @@
           "value": { "type": "string" },
           "value_type": { "type": "string", "enum": ["string", "bool", "int", "float", "null", "json"], "default": "string" },
           "backup": { "type": "boolean", "default": true },
-          "backup_dir": { "type": "string" }
+          "backup_dir": { "type": "string" },
+          "create": { "type": "boolean", "default": false, "description": "Create a missing config file with mode 0600. The parent directory must already exist." }
         }
       },
       "RequestRecord": {

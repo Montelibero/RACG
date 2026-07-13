@@ -39,6 +39,7 @@ func (c *ConfigCmd) runSet(args []string) int {
 	valueType := fs.String("type", "string", "value type for json/yaml: string, bool, int, float, null, json")
 	backup := fs.Bool("backup", true, "write a backup before editing")
 	noBackup := fs.Bool("no-backup", false, "disable backup")
+	create := fs.Bool("create", false, "create the config file with mode 0600 if it does not exist")
 	backupDir := fs.String("backup-dir", "", "directory for backups; default is next to the edited file")
 	host := fs.String("host", strings.TrimSpace(os.Getenv("RACG_HOST")), "RACG server URL")
 	token := fs.String("token", strings.TrimSpace(os.Getenv("RACG_TOKEN")), "session bearer token")
@@ -81,6 +82,7 @@ func (c *ConfigCmd) runSet(args []string) int {
 		"value":      rest[2],
 		"value_type": strings.TrimSpace(*valueType),
 		"backup":     backupValue,
+		"create":     *create,
 	}
 	if strings.TrimSpace(*backupDir) != "" {
 		payload["backup_dir"] = strings.TrimSpace(*backupDir)
@@ -125,6 +127,7 @@ func interspersedConfigSetArgs(args []string) []string {
 	boolFlags := map[string]bool{
 		"--backup":    true,
 		"--no-backup": true,
+		"--create":    true,
 		"--no-wait":   true,
 	}
 	var flags []string
@@ -161,6 +164,7 @@ Set structured config values through RACG approval:
   racg config set /app/.env PORT 8080 --format env
   racg config set /app/config.json server.debug true --format json --type bool
   racg config set /app/values.yaml image.tag v1.2.3 --format yaml
+  racg config set /etc/netplan/60-static.yaml network '{"version":2}' --format yaml --type json --create
 
 Supported formats:
   env
@@ -181,6 +185,7 @@ Backups are enabled by default:
 Common flags:
   --format env|json|yaml
   --type string|bool|int|float|null|json
+  --create                         create a missing file with mode 0600; parent directory must exist
   --no-backup
   --backup-dir DIR
   --host URL

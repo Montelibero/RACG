@@ -200,6 +200,11 @@ func (s *uiState) handleGlobalInput(app *tview.Application, pages *tview.Pages, 
 			return nil
 		}
 	}
+	if s.page == "dashboard" && (app == nil || app.GetFocus() != s.filter) {
+		if s.handlePendingActionHotkey(app, pages, ev) {
+			return nil
+		}
+	}
 	switch hotkeyRune(ev.Rune()) {
 	case 'q':
 		if cfg.ExitFunc != nil {
@@ -211,6 +216,26 @@ func (s *uiState) handleGlobalInput(app *tview.Application, pages *tview.Pages, 
 		return nil
 	}
 	return ev
+}
+
+func (s *uiState) handlePendingActionHotkey(app *tview.Application, pages *tview.Pages, ev *tcell.EventKey) bool {
+	switch hotkeyRune(ev.Rune()) {
+	case 'a':
+		if unicode.IsUpper(ev.Rune()) {
+			s.openRuleScopeOverlay(app, pages, "ALLOW_ALWAYS")
+		} else {
+			s.doDecision("ALLOW_ONCE")
+		}
+		return true
+	case 's':
+		s.openRuleScopeOverlay(app, pages, "ALLOW_SESSION")
+		return true
+	case 'd':
+		s.doDecision("DENY")
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *uiState) refreshTerminalTitle(app *tview.Application, cfg ServeUIConfig) {
@@ -1178,20 +1203,7 @@ func buildDashboardPage(app *tview.Application, pages *tview.Pages, s *uiState, 
 			app.SetFocus(s.filter)
 			return nil
 		}
-		switch hotkeyRune(ev.Rune()) {
-		case 'a':
-			// Shift+A (including RU layout "Ф") keeps "allow always" shortcut.
-			if ev.Rune() == 'A' || ev.Rune() == 'Ф' {
-				s.openRuleScopeOverlay(app, pages, "ALLOW_ALWAYS")
-				return nil
-			}
-			s.doDecision("ALLOW_ONCE")
-			return nil
-		case 's':
-			s.openRuleScopeOverlay(app, pages, "ALLOW_SESSION")
-			return nil
-		case 'd':
-			s.doDecision("DENY")
+		if s.handlePendingActionHotkey(app, pages, ev) {
 			return nil
 		}
 		return ev

@@ -1084,6 +1084,43 @@ func TestConfSetExecutionUpdatesConfigWithBackup(t *testing.T) {
 	}
 }
 
+func TestConfSetExecutionCreatesMissingConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "new.yaml")
+	payload, err := json.Marshal(map[string]any{
+		"path":       path,
+		"format":     "yaml",
+		"key":        "network.version",
+		"value":      "2",
+		"value_type": "int",
+		"create":     true,
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	op := rules.Op{Type: "conf.set", Payload: payload}
+	api := New(config.Defaults())
+	api.reqs["req-create"] = requestRecord{ID: "req-create", Status: "APPROVED"}
+
+	api.executeApprovedRequest("req-create", auth.Claims{}, op)
+
+	rec := api.reqs["req-create"]
+	if rec.Status != "SUCCEEDED" || rec.Result == nil {
+		t.Fatalf("request=%+v", rec)
+	}
+	for _, want := range []string{"file_created: true", "created: true"} {
+		if !strings.Contains(rec.Result.Stdout, want) {
+			t.Fatalf("stdout missing %q:\n%s", want, rec.Result.Stdout)
+		}
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("mode=%#o, want 0600", got)
+	}
+}
+
 func TestAllowAlwaysCreatesPatchRuleAndAutoApprovesNext(t *testing.T) {
 	ctx := context.Background()
 

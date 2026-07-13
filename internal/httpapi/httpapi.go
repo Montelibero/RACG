@@ -1283,6 +1283,7 @@ func (a *API) executeApprovedRequest(requestID string, c auth.Claims, op rules.O
 			ValueType string `json:"value_type"`
 			Backup    *bool  `json:"backup"`
 			BackupDir string `json:"backup_dir"`
+			Create    bool   `json:"create"`
 		}
 		_ = json.Unmarshal(op.Payload, &payload)
 		backup := true
@@ -1297,6 +1298,7 @@ func (a *API) executeApprovedRequest(requestID string, c auth.Claims, op rules.O
 			ValueType: payload.ValueType,
 			Backup:    backup,
 			BackupDir: payload.BackupDir,
+			Create:    payload.Create,
 		})
 		finishedAt = time.Now().UTC()
 		if cerr != nil {
@@ -1822,6 +1824,7 @@ func tuiDetailsWithRules(rec requestRecord, engine *rules.Engine) string {
 			ValueType string `json:"value_type"`
 			Backup    *bool  `json:"backup"`
 			BackupDir string `json:"backup_dir"`
+			Create    bool   `json:"create"`
 		}
 		_ = json.Unmarshal(op.Payload, &p)
 		if p.Path == "" && p.Key == "" {
@@ -1833,12 +1836,17 @@ func tuiDetailsWithRules(rec requestRecord, engine *rules.Engine) string {
 		}
 		var b strings.Builder
 		b.WriteString("operation: SET CONFIG\n")
-		b.WriteString("effect: updates one structured config key\n")
+		if p.Create {
+			b.WriteString("effect: updates one structured config key; creates the file with mode 0600 if missing\n")
+		} else {
+			b.WriteString("effect: updates one structured config key\n")
+		}
 		fmt.Fprintf(&b, "path: %s\n", escapeTUIViewText(p.Path))
 		fmt.Fprintf(&b, "format: %s\n", escapeTUIViewText(p.Format))
 		fmt.Fprintf(&b, "key: %s\n", escapeTUIViewText(p.Key))
 		fmt.Fprintf(&b, "value_type: %s\n", escapeTUIViewText(p.ValueType))
 		fmt.Fprintf(&b, "new: %s\n", escapeTUIViewText(p.Value))
+		fmt.Fprintf(&b, "create_if_missing: %t\n", p.Create)
 		fmt.Fprintf(&b, "backup: %t", backup)
 		if p.BackupDir != "" {
 			fmt.Fprintf(&b, "\nbackup_dir: %s", escapeTUIViewText(p.BackupDir))
@@ -1859,6 +1867,7 @@ func formatConfigSetResult(res configedit.Result) string {
 	} else {
 		fmt.Fprintln(&b, "created: false")
 	}
+	fmt.Fprintf(&b, "file_created: %t\n", res.FileCreated)
 	fmt.Fprintf(&b, "old: %s\n", res.OldValue)
 	fmt.Fprintf(&b, "new: %s\n", res.NewValue)
 	if res.BackupPath != "" {

@@ -118,6 +118,7 @@ config helpers:
   racg config set /app/.env PORT 8080 --format env
   racg config set values.yaml image.tag v1.2.3 --format yaml
   racg config set config.json server.debug true --format json --type bool
+  racg config set /etc/netplan/60-static.yaml network '{"version":2}' --format yaml --type json --create
 
 auth:
   most client commands accept --name, --host and --token, or use
