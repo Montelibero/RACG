@@ -2241,6 +2241,9 @@ func applyUnifiedPatchText(original string, diff string) (string, error) {
 	out := make([]string, 0, len(origLines)+16)
 	cur := 0
 	i := 0
+	resultEndsWithNewline := false
+	hasOutput := false
+	var lastHunkLine byte
 	for i < len(patchLines) {
 		line := patchLines[i]
 		if strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "diff ") || strings.HasPrefix(line, "index ") {
@@ -2253,10 +2256,18 @@ func applyUnifiedPatchText(original string, diff string) (string, error) {
 				return "", err
 			}
 			target := oldStart - 1
+			if oldStart == 0 {
+				target = 0
+			}
 			if target < cur || target > len(origLines) {
 				return "", fmt.Errorf("hunk out of range")
 			}
 			out = append(out, origLines[cur:target]...)
+			if target > cur {
+				hasOutput = true
+				resultEndsWithNewline = target < len(origLines) || endsWithNewline
+				lastHunkLine = 0
+			}
 			cur = target
 			i++
 
@@ -2275,16 +2286,25 @@ func applyUnifiedPatchText(original string, diff string) (string, error) {
 					}
 					out = append(out, want)
 					cur++
+					hasOutput = true
+					resultEndsWithNewline = true
+					lastHunkLine = ' '
 				case '-':
 					want := hl[1:]
 					if cur >= len(origLines) || origLines[cur] != want {
 						return "", fmt.Errorf("hunk delete mismatch")
 					}
 					cur++
+					lastHunkLine = '-'
 				case '+':
 					out = append(out, hl[1:])
+					hasOutput = true
+					resultEndsWithNewline = true
+					lastHunkLine = '+'
 				case '\\':
-					// "\ No newline at end of file" - ignore for MVP.
+					if lastHunkLine == '+' || lastHunkLine == ' ' {
+						resultEndsWithNewline = false
+					}
 				default:
 					return "", fmt.Errorf("invalid patch line")
 				}
@@ -2295,9 +2315,14 @@ func applyUnifiedPatchText(original string, diff string) (string, error) {
 		i++
 	}
 
-	out = append(out, origLines[cur:]...)
+	remaining := origLines[cur:]
+	out = append(out, remaining...)
+	if len(remaining) > 0 {
+		hasOutput = true
+		resultEndsWithNewline = endsWithNewline
+	}
 	res := strings.Join(out, "\n")
-	if endsWithNewline {
+	if hasOutput && resultEndsWithNewline {
 		res += "\n"
 	}
 	return res, nil
