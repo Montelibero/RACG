@@ -39,7 +39,10 @@ func RunServeUI(ctx context.Context, cfg ServeUIConfig) error {
 	pages := tview.NewPages()
 
 	state := newUIState(cfg.API, cfg.Store)
-	state.refreshTerminalTitle(app, cfg)
+	state.titleUpdater = newTerminalTitleUpdater(ctx, time.Second, func(title string) {
+		app.SetTitle(title)
+	})
+	state.refreshTerminalTitle(cfg)
 
 	pairingPage := buildPairingPage(ctx, app, pages, state, cfg)
 	dashboardPage := buildDashboardPage(app, pages, state, cfg)
@@ -78,7 +81,7 @@ func RunServeUI(ctx context.Context, cfg ServeUIConfig) error {
 				}
 				app.QueueUpdateDraw(func() {
 					state.onEvent(e)
-					state.refreshTerminalTitle(app, cfg)
+					state.refreshTerminalTitle(cfg)
 					state.maybeAutoSwitchToDashboard(app, pages, len(cfg.API.ListPendingForTUI()))
 				})
 			}
@@ -96,7 +99,7 @@ func RunServeUI(ctx context.Context, cfg ServeUIConfig) error {
 			case <-tick.C:
 				app.QueueUpdateDraw(func() {
 					state.refresh()
-					state.refreshTerminalTitle(app, cfg)
+					state.refreshTerminalTitle(cfg)
 					state.maybeAutoSwitchToDashboard(app, pages, len(cfg.API.ListPendingForTUI()))
 				})
 			}
@@ -115,14 +118,15 @@ type uiState struct {
 	page string
 
 	// Dashboard widgets.
-	mainTabs    []*tview.TextView
-	pendingList *tview.List
-	filter      *tview.InputField
-	details     *tview.TextView
-	jobsList    *tview.List
-	statusBars  []*tview.TextView
-	jobsModeBtn *tview.Button
-	titleFrame  int
+	mainTabs     []*tview.TextView
+	pendingList  *tview.List
+	filter       *tview.InputField
+	details      *tview.TextView
+	jobsList     *tview.List
+	statusBars   []*tview.TextView
+	jobsModeBtn  *tview.Button
+	titleFrame   int
+	titleUpdater *terminalTitleUpdater
 
 	// Job view widgets.
 	jobHeader *tview.TextView
@@ -238,8 +242,8 @@ func (s *uiState) handlePendingActionHotkey(app *tview.Application, pages *tview
 	}
 }
 
-func (s *uiState) refreshTerminalTitle(app *tview.Application, cfg ServeUIConfig) {
-	if app == nil || s.api == nil {
+func (s *uiState) refreshTerminalTitle(cfg ServeUIConfig) {
+	if s.titleUpdater == nil || s.api == nil {
 		return
 	}
 	pending := len(s.api.ListPendingForTUI())
@@ -249,7 +253,58 @@ func (s *uiState) refreshTerminalTitle(app *tview.Application, cfg ServeUIConfig
 	} else {
 		s.titleFrame = 0
 	}
-	app.SetTitle(terminalTitle(cfg.Version, pending, running, s.titleFrame))
+	s.titleUpdater.Update(terminalTitle(cfg.Version, pending, running, s.titleFrame))
+}
+
+type terminalTitleUpdater struct {
+	updates chan string
+}
+
+func newTerminalTitleUpdater(ctx context.Context, cooldown time.Duration, setTitle func(string)) *terminalTitleUpdater {
+	u := &terminalTitleUpdater{updates: make(chan string, 1)}
+	go func() {
+		last := ""
+		for {
+			var title string
+			select {
+			case <-ctx.Done():
+				return
+			case title = <-u.updates:
+			}
+			if title == last {
+				continue
+			}
+			setTitle(title)
+			last = title
+
+			timer := time.NewTimer(cooldown)
+			select {
+			case <-ctx.Done():
+				if !timer.Stop() {
+					<-timer.C
+				}
+				return
+			case <-timer.C:
+			}
+		}
+	}()
+	return u
+}
+
+func (u *terminalTitleUpdater) Update(title string) {
+	select {
+	case u.updates <- title:
+		return
+	default:
+	}
+	select {
+	case <-u.updates:
+	default:
+	}
+	select {
+	case u.updates <- title:
+	default:
+	}
 }
 
 func terminalTitle(version string, pending, running, frame int) string {
