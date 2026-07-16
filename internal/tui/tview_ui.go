@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +23,8 @@ type ServeUIConfig struct {
 	Version  string
 	Listen   string
 	DBPath   string
+	Profile  string
+	Hostname string
 	API      *httpapi.API
 	Store    *store.Store
 	ExitFunc func()
@@ -59,6 +62,7 @@ func RunServeUI(ctx context.Context, cfg ServeUIConfig) error {
 	// Initial visible page is pairing; dashboard builder sets focus/defaults but
 	// should not affect current page state used by auto-switch logic.
 	state.setCurrentPage("pairing")
+	state.setActiveMainTab("server")
 
 	app.SetRoot(pages, true)
 
@@ -139,17 +143,20 @@ type uiState struct {
 	focus []tview.Primitive
 
 	// Selected IDs.
-	selectedPending string
-	selectedJob     string
-	pendingIDs      []string
-	jobIDs          []string
-	jobListSig      string
-	showAllJobs     bool
-	activeMainTab   string
+	selectedPending   string
+	selectedJob       string
+	pendingIDs        []string
+	jobIDs            []string
+	jobListSig        string
+	showAllJobs       bool
+	activeMainTab     string
+	pairingAutoSwitch bool
+	serverFocus       tview.Primitive
 
 	// Optional page refresh hooks (for non-dashboard pages).
 	rulesRefresh   func()
 	historyRefresh func()
+	pairingRefresh func()
 
 	// Last toast.
 	toastUntil time.Time
@@ -160,7 +167,7 @@ type uiState struct {
 }
 
 func newUIState(api *httpapi.API, st *store.Store) *uiState {
-	return &uiState{api: api, store: st, follow: true, page: "pairing", showAllJobs: true, activeMainTab: "pending", jobMode: "combined"}
+	return &uiState{api: api, store: st, follow: true, page: "pairing", showAllJobs: true, activeMainTab: "server", pairingAutoSwitch: true, jobMode: "combined"}
 }
 
 func (s *uiState) setCurrentPage(p string) { s.page = p }
@@ -187,6 +194,9 @@ func (s *uiState) handleGlobalInput(app *tview.Application, pages *tview.Pages, 
 	}
 	if s.page != "job" {
 		switch ev.Rune() {
+		case '0':
+			s.showServer(app, pages)
+			return nil
 		case '1':
 			s.showDashboard(app, pages)
 			return nil
@@ -253,7 +263,7 @@ func (s *uiState) refreshTerminalTitle(cfg ServeUIConfig) {
 	} else {
 		s.titleFrame = 0
 	}
-	s.titleUpdater.Update(terminalTitle(cfg.Version, pending, running, s.titleFrame))
+	s.titleUpdater.Update(terminalTitle(cfg.Version, serverIdentity(cfg.Profile, cfg.Hostname, cfg.Listen), pending, running, s.titleFrame))
 }
 
 type terminalTitleUpdater struct {
@@ -307,13 +317,53 @@ func (u *terminalTitleUpdater) Update(title string) {
 	}
 }
 
-func terminalTitle(version string, pending, running, frame int) string {
+func terminalTitle(version, identity string, pending, running, frame int) string {
 	base := fmt.Sprintf("RACG v%s", version)
+	if identity != "" {
+		base += " · " + identity
+	}
 	if pending == 0 && running == 0 {
 		return base
 	}
 	spinner := []string{"|", "/", "-", "\\"}
 	return fmt.Sprintf("%s %s pending=%d running=%d", spinner[frame%len(spinner)], base, pending, running)
+}
+
+func serverIdentity(profile, hostname, listen string) string {
+	endpoint := strings.TrimSpace(listen)
+	if host := strings.TrimSpace(hostname); host != "" {
+		if _, port, err := net.SplitHostPort(endpoint); err == nil && port != "" {
+			endpoint = net.JoinHostPort(host, port)
+		} else {
+			endpoint = host
+		}
+	}
+	if profile = strings.TrimSpace(profile); profile != "" {
+		if endpoint == "" {
+			return profile
+		}
+		return profile + " @ " + endpoint
+	}
+	return endpoint
+}
+
+func serverInfoText(cfg ServeUIConfig) string {
+	listen := strings.TrimSpace(cfg.Listen)
+	if listen != "" && !strings.Contains(listen, "://") {
+		listen = "http://" + listen
+	}
+	profile := strings.TrimSpace(cfg.Profile)
+	if profile == "" {
+		profile = "(default)"
+	}
+	return fmt.Sprintf("RACG serve v%s\nidentity: %s\nhostname: %s\nprofile: %s\nlistening: %s\ndb: %s\n",
+		cfg.Version,
+		serverIdentity(cfg.Profile, cfg.Hostname, cfg.Listen),
+		cfg.Hostname,
+		profile,
+		listen,
+		cfg.DBPath,
+	)
 }
 
 func hotkeyRune(r rune) rune {
@@ -396,6 +446,7 @@ func (s *uiState) renderMainTabs() string {
 		label string
 	}
 	tabs := []tab{
+		{page: "pairing", key: "0", name: "server", label: "Server"},
 		{page: "dashboard", key: "1", name: "pending", label: "Pending"},
 		{page: "dashboard", key: "2", name: "jobs", label: "Jobs"},
 		{page: "rules", key: "3", name: "rules", label: "Rules"},
@@ -442,6 +493,8 @@ func (s *uiState) buildMainTabs(app *tview.Application, pages *tview.Pages) *tvi
 		}
 		rectX, _, _, _ := tabs.GetRect()
 		switch mainTabAt(x-rectX, tabs.GetText(false)) {
+		case "server":
+			s.showServer(app, pages)
 		case "pending":
 			s.showDashboard(app, pages)
 		case "jobs":
@@ -473,6 +526,7 @@ func mainTabAt(x int, text string) string {
 		name  string
 		label string
 	}{
+		{name: "server", label: "0 Server"},
 		{name: "pending", label: "1 Pending"},
 		{name: "jobs", label: "2 Jobs"},
 		{name: "rules", label: "3 Rules"},
@@ -555,8 +609,22 @@ func (s *uiState) showDashboard(app *tview.Application, pages *tview.Pages) {
 	}
 }
 
+func (s *uiState) showServer(app *tview.Application, pages *tview.Pages) {
+	s.closeOverlay(pages)
+	s.switchMainPage(pages, "pairing")
+	s.page = "pairing"
+	s.setActiveMainTab("server")
+	s.pairingAutoSwitch = false
+	if s.pairingRefresh != nil {
+		s.pairingRefresh()
+	}
+	if app != nil && s.serverFocus != nil {
+		app.SetFocus(s.serverFocus)
+	}
+}
+
 func (s *uiState) maybeAutoSwitchToDashboard(app *tview.Application, pages *tview.Pages, pendingCount int) bool {
-	if s.page != "pairing" || pendingCount <= 0 {
+	if s.page != "pairing" || !s.pairingAutoSwitch || pendingCount <= 0 {
 		return false
 	}
 	s.showDashboard(app, pages)
@@ -911,7 +979,7 @@ func (s *uiState) refreshStatusBar(statusBar *tview.TextView) {
 	}
 	pn := len(s.api.ListPendingForTUI())
 	rn := len(s.api.ListRunningForTUI())
-	line := fmt.Sprintf("F1 help | 1 pending | 2 jobs | 3 rules | 4 history | Esc back | q quit   pending=%d running=%d", pn, rn)
+	line := fmt.Sprintf("F1 help | 0 server | 1 pending | 2 jobs | 3 rules | 4 history | Esc back | q quit   pending=%d running=%d", pn, rn)
 	if time.Now().Before(s.toastUntil) && s.toastText != "" {
 		line = s.toastText + "   |   " + line
 	}
@@ -1130,13 +1198,14 @@ func buildPairingPage(ctx context.Context, app *tview.Application, pages *tview.
 		AddItem(btnQuit, 0, 1, false)
 
 	root := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(title, 3, 0, false).
+		AddItem(s.buildMainTabs(app, pages), 1, 0, false).
+		AddItem(title, 6, 0, false).
 		AddItem(code, 4, 0, false).
 		AddItem(meta, 0, 1, false).
 		AddItem(btns, 1, 0, true)
 
 	refresh := func() {
-		title.SetText(fmt.Sprintf("RACG serve  v%s\nlisten=%s\n", cfg.Version, cfg.Listen))
+		title.SetText(serverInfoText(cfg))
 		pc := cfg.API.PairingCode()
 		code.SetText("PAIRING CODE:\n" + pc + "\n\nRACG_CODE=" + pc + "\nopen_session --code " + pc + "\n")
 		meta.SetText(fmt.Sprintf("expires in %s\npending=%d  running=%d\n",
@@ -1145,6 +1214,7 @@ func buildPairingPage(ctx context.Context, app *tview.Application, pages *tview.
 			len(cfg.API.ListRunningForTUI()),
 		))
 	}
+	s.pairingRefresh = refresh
 	refresh()
 
 	// Pairing page-specific keys.
@@ -1180,6 +1250,7 @@ func buildPairingPage(ctx context.Context, app *tview.Application, pages *tview.
 	}()
 
 	s.page = "pairing"
+	s.serverFocus = btnDash
 	s.focus = []tview.Primitive{btnDash, btnCopy, btnRegen, btnQuit}
 	return root
 }
@@ -1722,7 +1793,7 @@ func buildHelpModal(pages *tview.Pages, s *uiState) tview.Primitive {
 func helpText() string {
 	return "Keys:\n" +
 		"  Tab focus\n" +
-		"  1 pending / 2 jobs / 3 rules / 4 history\n" +
+		"  0 server / 1 pending / 2 jobs / 3 rules / 4 history\n" +
 		"  pending: a once / s session / A always / d deny\n" +
 		"  job view: 1 combined / 2 stdout / 3 stderr / 4 meta\n" +
 		"  job view: b or Esc back / k kill / f follow\n" +

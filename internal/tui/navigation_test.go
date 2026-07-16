@@ -51,6 +51,39 @@ func TestMaybeAutoSwitchToDashboardFromPairing(t *testing.T) {
 	}
 }
 
+func TestManualServerPageDoesNotAutoSwitchToDashboard(t *testing.T) {
+	s := newUIState(nil, nil)
+	pages := tview.NewPages()
+	pages.AddPage("pairing", tview.NewBox(), true, false)
+	pages.AddPage("dashboard", tview.NewBox(), true, true)
+
+	s.showServer(nil, pages)
+	if switched := s.maybeAutoSwitchToDashboard(nil, pages, 1); switched {
+		t.Fatal("manual server page auto-switched to dashboard")
+	}
+	if s.page != "pairing" || s.activeMainTab != "server" {
+		t.Fatalf("page=%q active=%q, want pairing/server", s.page, s.activeMainTab)
+	}
+}
+
+func TestGlobalZeroOpensServerPage(t *testing.T) {
+	app := tview.NewApplication()
+	pages := tview.NewPages()
+	pages.AddPage("pairing", tview.NewBox(), true, false)
+	pages.AddPage("dashboard", tview.NewBox(), true, true)
+	s := newUIState(nil, nil)
+	s.page = "dashboard"
+
+	ev := tcell.NewEventKey(tcell.KeyRune, '0', tcell.ModNone)
+	if got := s.handleGlobalInput(app, pages, ServeUIConfig{}, ev); got != nil {
+		t.Fatalf("0 key was not consumed: %#v", got)
+	}
+	name, _ := pages.GetFrontPage()
+	if name != "pairing" || s.activeMainTab != "server" {
+		t.Fatalf("front=%q active=%q, want pairing/server", name, s.activeMainTab)
+	}
+}
+
 func TestSwitchMainPageHidesPrevious(t *testing.T) {
 	s := newUIState(nil, nil)
 	pages := tview.NewPages()
@@ -93,9 +126,10 @@ func TestBackDoesNotLeaveDashboard(t *testing.T) {
 func TestRenderMainTabsMarksActivePage(t *testing.T) {
 	s := newUIState(nil, nil)
 	s.page = "dashboard"
+	s.setActiveMainTab("pending")
 	got := s.renderMainTabs()
 
-	for _, want := range []string{"[1 Pending]", "2 Jobs", "3 Rules", "4 History"} {
+	for _, want := range []string{"0 Server", "[1 Pending]", "2 Jobs", "3 Rules", "4 History"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("tabs=%q want %q", got, want)
 		}
@@ -103,7 +137,7 @@ func TestRenderMainTabsMarksActivePage(t *testing.T) {
 
 	s.setActiveMainTab("jobs")
 	got = s.renderMainTabs()
-	for _, want := range []string{"1 Pending", "[2 Jobs]", "3 Rules", "4 History"} {
+	for _, want := range []string{"0 Server", "1 Pending", "[2 Jobs]", "3 Rules", "4 History"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("tabs=%q want %q", got, want)
 		}
@@ -118,6 +152,13 @@ func TestRenderMainTabsMarksActivePage(t *testing.T) {
 	if !strings.Contains(got, "[3 Rules]") {
 		t.Fatalf("tabs=%q", got)
 	}
+
+	s.page = "pairing"
+	s.setActiveMainTab("server")
+	got = s.renderMainTabs()
+	if !strings.Contains(got, "[0 Server]") {
+		t.Fatalf("tabs=%q", got)
+	}
 }
 
 func TestMainTabAtUsesRenderedTabPositions(t *testing.T) {
@@ -128,9 +169,15 @@ func TestMainTabAtUsesRenderedTabPositions(t *testing.T) {
 		want string
 	}{
 		{
-			name: "active first tab bracket",
-			text: "[1 Pending]   2 Jobs   3 Rules   4 History",
+			name: "server",
+			text: "[0 Server]   1 Pending   2 Jobs   3 Rules   4 History",
 			x:    0,
+			want: "server",
+		},
+		{
+			name: "active first tab bracket",
+			text: "0 Server   [1 Pending]   2 Jobs   3 Rules   4 History",
+			x:    strings.Index("0 Server   [1 Pending]   2 Jobs   3 Rules   4 History", "[1 Pending]"),
 			want: "pending",
 		},
 		{
@@ -188,19 +235,59 @@ func TestStatusBarDoesNotShowRootMode(t *testing.T) {
 }
 
 func TestTerminalTitleShowsSpinnerWhenWorkIsActive(t *testing.T) {
-	static := terminalTitle("0.2.5", 0, 0, 0)
-	if static != "RACG v0.2.5" {
+	static := terminalTitle("0.2.5", "docker @ server1:8777", 0, 0, 0)
+	if static != "RACG v0.2.5 · docker @ server1:8777" {
 		t.Fatalf("static title=%q", static)
 	}
 
-	active1 := terminalTitle("0.2.5", 1, 0, 0)
-	active2 := terminalTitle("0.2.5", 1, 0, 1)
+	active1 := terminalTitle("0.2.5", "docker @ server1:8777", 1, 0, 0)
+	active2 := terminalTitle("0.2.5", "docker @ server1:8777", 1, 0, 1)
 	if active1 == active2 {
 		t.Fatalf("active title did not spin: %q", active1)
 	}
-	for _, want := range []string{"RACG v0.2.5", "pending=1", "running=0"} {
+	for _, want := range []string{"RACG v0.2.5", "docker @ server1:8777", "pending=1", "running=0"} {
 		if !strings.Contains(active1, want) {
 			t.Fatalf("active title=%q want %q", active1, want)
+		}
+	}
+}
+
+func TestServerIdentityUsesProfileHostnameAndListenPort(t *testing.T) {
+	tests := []struct {
+		profile  string
+		hostname string
+		listen   string
+		want     string
+	}{
+		{profile: "docker", hostname: "server1", listen: "100.82.1.2:8777", want: "docker @ server1:8777"},
+		{hostname: "server1", listen: "100.82.1.2:8777", want: "server1:8777"},
+		{listen: "100.82.1.2:8777", want: "100.82.1.2:8777"},
+	}
+	for _, tt := range tests {
+		if got := serverIdentity(tt.profile, tt.hostname, tt.listen); got != tt.want {
+			t.Fatalf("serverIdentity(%q, %q, %q)=%q, want %q", tt.profile, tt.hostname, tt.listen, got, tt.want)
+		}
+	}
+}
+
+func TestServerInfoTextShowsIdentityAndPaths(t *testing.T) {
+	got := serverInfoText(ServeUIConfig{
+		Version:  "0.3.4",
+		Profile:  "docker",
+		Hostname: "server1",
+		Listen:   "100.82.1.2:8777",
+		DBPath:   "/root/.config/racg/docker.db",
+	})
+	for _, want := range []string{
+		"RACG serve v0.3.4",
+		"identity: docker @ server1:8777",
+		"hostname: server1",
+		"profile: docker",
+		"listening: http://100.82.1.2:8777",
+		"db: /root/.config/racg/docker.db",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("server info missing %q:\n%s", want, got)
 		}
 	}
 }
@@ -367,6 +454,9 @@ func TestHelpTextUsesF1Only(t *testing.T) {
 	got := helpText()
 	if !strings.Contains(got, "F1 help") {
 		t.Fatalf("helpText=%q, want F1 help hint", got)
+	}
+	if !strings.Contains(got, "0 server") {
+		t.Fatalf("helpText=%q, want 0 server hint", got)
 	}
 	for _, removed := range []string{"? help", "r rules", "h history"} {
 		if strings.Contains(got, removed) {

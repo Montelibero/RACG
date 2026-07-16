@@ -78,12 +78,15 @@ func (c *ServeCmd) Run(args []string) int {
 	}
 	fmt.Fprintf(c.stdout, "db_path=%s\n", cfg.DBPath)
 	fmt.Fprintf(c.stdout, "pairing_code=%s\n", s.PairingCode())
+	hostname, _ := os.Hostname()
 
 	// Built-in TUI (tview): pairing page + dashboard + jobs.
 	_ = tui.RunServeUI(ctx, tui.ServeUIConfig{
 		Version:  version.Version,
 		Listen:   s.Addr(),
 		DBPath:   cfg.DBPath,
+		Profile:  *profile,
+		Hostname: hostname,
 		API:      s.API(),
 		Store:    s.Store(),
 		ExitFunc: stop,
