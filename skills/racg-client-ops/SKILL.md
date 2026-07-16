@@ -1,6 +1,6 @@
 ---
 name: racg-client-ops
-description: Use when an agent needs to run shell commands through RACG approval gateway, log in with a pairing code, wait for approved execution, inspect live or final stdout/stderr, cancel pending/running requests, or propose safe auto-approve rules for repeated read-only diagnostics.
+description: Use when an agent needs to run commands or transfer files through RACG approval gateway, log in with a pairing code, wait for approved execution, inspect output, cancel requests, or propose narrow auto-approve rules.
 ---
 
 # RACG Client Operations
@@ -31,6 +31,10 @@ Use RACG when command execution must go through a human-approved gateway instead
    - `racg request logs <id> --stdout`
    - `racg request logs <id> --stderr`
 7. Stop requests with `racg request cancel <id>` when the user asks to interrupt, cancel, kill, or stop a pending/running request.
+8. For binary, archive, or large file transfer, use:
+   - `racg file upload <local> <remote> [--mode 0600]`
+   - `racg file download <remote> <local> [--force]`
+   - Do not encode file content into shell commands, JSON, or base64. RACG streams bytes and verifies SHA-256.
 
 ## When To Read References
 
@@ -43,6 +47,7 @@ Use RACG when command execution must go through a human-approved gateway instead
 - Use narrow commands and explicit argv. Avoid large opaque shell strings unless the user specifically needs shell composition.
 - For simple `env`/`json`/`yaml` config key updates, use `racg config set` instead of generating scripts or raw patches.
 - For arbitrary text edits, use `racg file read` plus `racg file patch`; avoid ad-hoc scripts when a unified diff is enough.
+- For whole-file transfer, use `racg file upload` or `racg file download`; use `--force` only when replacing the named local destination is intended.
 - Prefer read-only diagnostics before mutating operations.
 - If a request is pending approval, do not repeatedly resubmit the same command; wait, tail live output after approval, or cancel if requested.
 - When reporting results, summarize `status`, `exit_code`, and relevant stdout/stderr sections. Do not paste huge logs unless asked; use live/final log commands to retrieve focused snippets.

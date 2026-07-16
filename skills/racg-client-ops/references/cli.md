@@ -144,6 +144,31 @@ racg file read   -> fs.read
 racg file patch  -> fs.patch_unified
 ```
 
+## Binary And Large File Transfers
+
+Upload a local file to the server through approval:
+
+```bash
+racg file upload ./bundle.tar.gz /srv/releases/bundle.tar.gz
+racg file upload ./private.key /etc/app/private.key --mode 0600
+```
+
+Download a server file through approval:
+
+```bash
+racg file download /var/log/app/archive.gz ./archive.gz
+racg file download /var/log/app/archive.gz ./archive.gz --force
+```
+
+`upload` stages the bytes, then submits `fs.upload` with the destination path, size, SHA-256, and optional mode. It preserves an existing target's permissions or uses `0644` for a new file. `download` submits `fs.download`, waits for approval, streams the snapshot, verifies SHA-256, and atomically writes the local file. It refuses an existing local destination unless `--force` is passed. Transfer contents do not enter request JSON. The default server limit is 100 MiB; `racg serve --max-transfer-bytes N` changes it. Resume is not supported.
+
+Underlying operations:
+
+```text
+racg file upload   -> fs.upload
+racg file download -> fs.download
+```
+
 Do not use `racg config set --format yaml` for native configs like `haproxy.cfg`; they are plain text, not YAML. Always read the current file before generating a patch.
 
 ## Logs

@@ -137,6 +137,13 @@ Then submit a unified diff:
 racg file patch /apps/haproxy/haproxy.cfg --diff-file /tmp/haproxy.patch
 ```
 
+Transfer complete files without base64 or shell wrappers:
+
+```bash
+racg file upload ./bundle.tar.gz /srv/releases/bundle.tar.gz
+racg file download /srv/releases/bundle.tar.gz ./bundle.tar.gz
+```
+
 Example diff body:
 
 ```diff

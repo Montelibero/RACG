@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "RACG",
-    "version": "0.1.0"
+    "version": "0.3.5"
   },
   "components": {
     "securitySchemes": {
@@ -37,11 +37,12 @@
           "privilege_mode": { "type": "string", "enum": ["root"] },
           "limits": {
             "type": "object",
-            "required": ["default_timeout_sec", "max_output_bytes", "max_concurrency"],
+            "required": ["default_timeout_sec", "max_output_bytes", "max_concurrency", "max_transfer_bytes"],
             "properties": {
               "default_timeout_sec": { "type": "integer" },
               "max_output_bytes": { "type": "integer" },
-              "max_concurrency": { "type": "integer" }
+              "max_concurrency": { "type": "integer" },
+              "max_transfer_bytes": { "type": "integer", "format": "int64" }
             }
           },
           "features": {
@@ -121,13 +122,15 @@
       },
       "OpType": {
         "type": "string",
-        "enum": ["cmd.run", "fs.read", "fs.patch_unified", "conf.set", "svc.status", "svc.restart", "svc.logs"]
+        "enum": ["cmd.run", "fs.read", "fs.patch_unified", "fs.upload", "fs.download", "conf.set", "svc.status", "svc.restart", "svc.logs"]
       },
       "Op": {
         "oneOf": [
           { "$ref": "#/components/schemas/CmdRunOp" },
           { "$ref": "#/components/schemas/FsReadOp" },
           { "$ref": "#/components/schemas/FsPatchUnifiedOp" },
+          { "$ref": "#/components/schemas/FsUploadOp" },
+          { "$ref": "#/components/schemas/FsDownloadOp" },
           { "$ref": "#/components/schemas/ConfSetOp" },
           { "$ref": "#/components/schemas/GenericOp" }
         ],
@@ -189,6 +192,48 @@
         "properties": {
           "path": { "type": "string" },
           "diff": { "type": "string", "description": "Unified diff." }
+        }
+      },
+      "FsUploadOp": {
+        "type": "object",
+        "required": ["type", "payload"],
+        "properties": {
+          "type": { "type": "string", "enum": ["fs.upload"] },
+          "payload": { "$ref": "#/components/schemas/FsUploadPayload" }
+        }
+      },
+      "FsUploadPayload": {
+        "type": "object",
+        "required": ["path", "upload_id"],
+        "properties": {
+          "path": { "type": "string" },
+          "upload_id": { "type": "string", "format": "uuid" },
+          "size": { "type": "integer", "format": "int64", "description": "Canonical value supplied by the server." },
+          "sha256": { "type": "string", "description": "Canonical value supplied by the server." },
+          "mode": { "type": "string", "pattern": "^0[0-7]{3}$" }
+        }
+      },
+      "FsDownloadOp": {
+        "type": "object",
+        "required": ["type", "payload"],
+        "properties": {
+          "type": { "type": "string", "enum": ["fs.download"] },
+          "payload": { "$ref": "#/components/schemas/FsDownloadPayload" }
+        }
+      },
+      "FsDownloadPayload": {
+        "type": "object",
+        "required": ["path"],
+        "properties": { "path": { "type": "string" } }
+      },
+      "StagedUploadResponse": {
+        "type": "object",
+        "required": ["upload_id", "size", "sha256", "created_at"],
+        "properties": {
+          "upload_id": { "type": "string", "format": "uuid" },
+          "size": { "type": "integer", "format": "int64" },
+          "sha256": { "type": "string" },
+          "created_at": { "type": "string", "format": "date-time" }
         }
       },
       "ConfSetOp": {
@@ -320,6 +365,21 @@
         }
       }
     },
+    "/v1/uploads": {
+      "post": {
+        "summary": "Stage binary content for an fs.upload approval request",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/octet-stream": { "schema": { "type": "string", "format": "binary" } } }
+        },
+        "responses": {
+          "200": { "description": "staged upload metadata", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StagedUploadResponse" } } } },
+          "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "413": { "description": "transfer too large", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+        }
+      }
+    },
     "/v1/requests": {
       "post": {
         "summary": "Create approval request",
@@ -393,6 +453,21 @@
           "403": { "description": "forbidden", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
           "404": { "description": "not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
           "409": { "description": "conflict", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+        }
+      }
+    },
+    "/v1/requests/{request_id}/file": {
+      "get": {
+        "summary": "Stream an approved fs.download snapshot",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "request_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "binary file with X-RACG-SHA256 and X-RACG-Mode headers", "content": { "application/octet-stream": { "schema": { "type": "string", "format": "binary" } } } },
+          "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "404": { "description": "not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "409": { "description": "download not ready", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
         }
       }
     },

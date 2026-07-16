@@ -105,6 +105,53 @@ func TestTUIDetailsForFSPatchShowsOperationAndEffect(t *testing.T) {
 	}
 }
 
+func TestTUIDetailsForFileTransfersShowsDirectionAndMetadata(t *testing.T) {
+	tests := []struct {
+		op   map[string]any
+		want []string
+	}{
+		{
+			op: map[string]any{"type": "fs.upload", "payload": map[string]any{
+				"path": "/srv/archive.bin", "upload_id": "hidden", "size": 42,
+				"sha256": strings.Repeat("a", 64), "mode": "0640",
+			}},
+			want: []string{"operation: UPLOAD FILE", "effect: atomically writes uploaded content to the server", "path: /srv/archive.bin", "size: 42 bytes", "sha256: " + strings.Repeat("a", 64), "mode: 0640"},
+		},
+		{
+			op:   map[string]any{"type": "fs.download", "payload": map[string]any{"path": "/srv/archive.bin"}},
+			want: []string{"operation: DOWNLOAD FILE", "effect: reads a server file into an approved download snapshot", "path: /srv/archive.bin"},
+		},
+	}
+	for _, tt := range tests {
+		b, _ := json.Marshal(tt.op)
+		got := tuiDetails(requestRecord{Op: b})
+		for _, want := range tt.want {
+			if !strings.Contains(got, want) {
+				t.Fatalf("details missing %q:\n%s", want, got)
+			}
+		}
+		if strings.Contains(got, "upload_id") {
+			t.Fatalf("details expose staging id:\n%s", got)
+		}
+	}
+}
+
+func TestFileTransferRuleCandidatesAndRisk(t *testing.T) {
+	api := New(config.Defaults())
+	for _, opType := range []string{"fs.upload", "fs.download"} {
+		b, _ := json.Marshal(map[string]any{"type": opType, "payload": map[string]any{"path": "/etc/app.bin"}})
+		api.reqs[opType] = requestRecord{ID: opType, Op: b}
+		got := api.RuleScopeCandidatesForTUI(opType)
+		if len(got) != 1 || got[0].OpType != opType || got[0].Pattern != "/etc/app.bin" {
+			t.Fatalf("%s candidates=%+v", opType, got)
+		}
+	}
+	upload := rules.Op{Type: "fs.upload", Payload: json.RawMessage(`{"path":"/etc/app.bin"}`)}
+	if got := riskFlags(upload); len(got) != 1 || got[0] != "WRITE_ETC" {
+		t.Fatalf("upload risk=%v", got)
+	}
+}
+
 func TestTUIDetailsForConfSetShowsOperationAndEffect(t *testing.T) {
 	op := map[string]any{
 		"type": "conf.set",

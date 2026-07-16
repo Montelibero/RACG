@@ -152,7 +152,24 @@ racg file patch /apps/haproxy/haproxy.cfg --diff-file /tmp/haproxy.patch
 
 Do not use `racg config set --format yaml` for native configs like `haproxy.cfg`; they are plain text, not YAML.
 
-## 5. Approval And Status
+## 5. Upload And Download Files
+
+Use the transfer helpers for binary files, archives, or files too large for `fs.read` output:
+
+```bash
+racg file upload ./bundle.tar.gz /srv/releases/bundle.tar.gz
+racg file upload ./private.key /etc/app/private.key --mode 0600
+racg file download /var/log/app/archive.gz ./archive.gz
+racg file download /var/log/app/archive.gz ./archive.gz --force
+```
+
+Upload stages bytes without changing the target, then creates an `fs.upload` approval request containing the remote path, size, SHA-256, and requested mode. Approval atomically replaces the target. If `--mode` is omitted, RACG preserves an existing file's permissions or uses `0644` for a new file.
+
+Download creates an `fs.download` approval request first. After approval, RACG snapshots and streams the server file; the client verifies SHA-256 before atomically replacing the local destination. Existing local files require `--force`. File contents are not stored in request JSON or displayed in the TUI.
+
+The default server transfer limit is 100 MiB. Start the server with `--max-transfer-bytes N` to change it. Transfers do not support resume in this version.
+
+## 6. Approval And Status
 
 After request creation, status is usually `PENDING_APPROVAL`. The human decides in the TUI:
 
@@ -172,7 +189,7 @@ Terminal statuses:
 - `DENIED`
 - `CANCELED`
 
-## 6. Live And Final Output
+## 7. Live And Final Output
 
 Current live combined output while a request is running:
 
@@ -195,7 +212,7 @@ racg request logs <request_id> --stderr
 
 `--stdout` and `--stderr` require a finished request. If the server returns `REQUEST_NOT_FINISHED`, use `--live` or `tail`.
 
-## 5. Cancel Or Stop
+## 8. Cancel Or Stop
 
 Cancel a pending request or stop a running command:
 
@@ -205,7 +222,7 @@ racg request cancel <request_id>
 
 For running commands this maps to the server kill path. Verify with live output or final request status.
 
-## 6. Reduce Repeated Approvals
+## 9. Reduce Repeated Approvals
 
 Install narrow read-only presets when the human wants repeated diagnostics to avoid approval friction:
 
@@ -233,7 +250,7 @@ When the human chooses `Allow session` or `Allow always` for a command request, 
 
 For shell commands, RACG analyzes each command segment independently. A request like `bash -lc 'docker stop nginx && echo ok'` can auto-approve only if both `docker stop nginx` and `echo ok` match rules. If any segment is not allowed, the whole request stays pending.
 
-## 7. Safety Checklist
+## 10. Safety Checklist
 
 Before submitting a command, identify:
 
@@ -268,7 +285,7 @@ iptables
 systemctl restart
 ```
 
-## 8. Raw HTTP Fallback
+## 11. Raw HTTP Fallback
 
 Use raw HTTP only when the CLI is unavailable.
 
@@ -302,6 +319,7 @@ Useful endpoints:
 - `GET /openapi.json`
 - `POST /v1/session/open`
 - `GET /v1/session/me`
+- `POST /v1/uploads`
 - `POST /v1/requests`
 - `GET /v1/requests`
 - `GET /v1/requests/{id}`
@@ -310,9 +328,10 @@ Useful endpoints:
 - `GET /v1/requests/{id}/logs/live`
 - `GET /v1/requests/{id}/logs/stdout`
 - `GET /v1/requests/{id}/logs/stderr`
+- `GET /v1/requests/{id}/file`
 - `GET /v1/events` (WebSocket)
 
-## 9. Troubleshooting
+## 12. Troubleshooting
 
 - `PAIRING_CODE_USED`: reuse the existing saved client config if available, otherwise ask for a new pairing code.
 - `REQUEST_NOT_PENDING`: request was already decided or finished.

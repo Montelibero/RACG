@@ -33,6 +33,9 @@ func New(cfg config.Config) (*Server, error) {
 	if cfg.MaxConcurrency <= 0 {
 		return nil, fmt.Errorf("max_concurrency must be > 0")
 	}
+	if cfg.MaxTransferBytes <= 0 {
+		return nil, fmt.Errorf("max_transfer_bytes must be > 0")
+	}
 
 	// MVP: always use SQLite for audit/rules persistence.
 	st, err := store.Open(cfg.DBPath)

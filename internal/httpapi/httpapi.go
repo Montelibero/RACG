@@ -418,7 +418,7 @@ func (a *API) RuleScopeCandidatesForTUI(requestID string) []RuleScopeCandidate {
 		return nil
 	}
 	switch op.Type {
-	case "fs.read", "fs.patch_unified", "conf.set":
+	case "fs.read", "fs.patch_unified", "fs.upload", "fs.download", "conf.set":
 		var p struct {
 			Path string `json:"path"`
 		}
@@ -441,7 +441,7 @@ func (a *API) RuleScopeCandidatesForTUI(requestID string) []RuleScopeCandidate {
 
 func ruleFromScopePatternForOp(op rules.Op, pattern string) (rules.Rule, error) {
 	switch op.Type {
-	case "fs.read", "fs.patch_unified", "conf.set":
+	case "fs.read", "fs.patch_unified", "fs.upload", "fs.download", "conf.set":
 		path := strings.TrimSpace(pattern)
 		if path == "" {
 			return rules.Rule{}, errors.New("empty path pattern")
@@ -597,6 +597,9 @@ func (a *API) killInternal(ctx context.Context, requestID string, c auth.Claims)
 		}
 		a.reqs[requestID] = rec2
 		a.reqsMu.Unlock()
+		var transferOp rules.Op
+		_ = json.Unmarshal(rec.Op, &transferOp)
+		a.cleanupUploadForOp(transferOp)
 
 		if a.st != nil {
 			_ = a.st.UpdateRequestStatus(ctx, requestID, status)
@@ -777,6 +780,7 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("/v1/info", a.handleInfo)
 	mux.HandleFunc("/v1/session/open", a.handleSessionOpen)
 	mux.HandleFunc("/v1/session/me", a.withAuth(a.handleSessionMe))
+	mux.HandleFunc("/v1/uploads", a.withAuth(a.handleUploadStage))
 	mux.HandleFunc("/v1/requests", a.withAuth(a.handleRequests))
 	mux.HandleFunc("/v1/requests/", a.withAuth(a.handleRequestByID))
 	mux.HandleFunc("/v1/events", a.handleEventsWS)
@@ -819,6 +823,7 @@ func (a *API) handleInfo(w http.ResponseWriter, r *http.Request) {
 			"default_timeout_sec": a.cfg.DefaultTimeoutSec,
 			"max_output_bytes":    a.cfg.MaxOutputBytes,
 			"max_concurrency":     a.cfg.MaxConcurrency,
+			"max_transfer_bytes":  a.maxTransferBytes(),
 		},
 		"features": map[string]any{
 			"lock_first_client_addr": a.cfg.LockFirstClientAddr,
@@ -827,6 +832,8 @@ func (a *API) handleInfo(w http.ResponseWriter, r *http.Request) {
 			"cmd.run",
 			"fs.read",
 			"fs.patch_unified",
+			"fs.upload",
+			"fs.download",
 			"conf.set",
 			"svc.status",
 			"svc.restart",
@@ -933,6 +940,10 @@ func (a *API) handleRequests(w http.ResponseWriter, r *http.Request, c auth.Clai
 	}
 	if len(req.Op.Payload) == 0 {
 		req.Op.Payload = []byte(`{}`)
+	}
+	if err := a.prepareTransferOp(c, &req.Op); err != nil {
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", err.Error(), "")
+		return
 	}
 
 	id := uuid.NewString()
@@ -1237,6 +1248,12 @@ func (a *API) executeApprovedRequest(requestID string, c auth.Claims, op rules.O
 			StdoutSHA256:    outHash,
 			StderrSHA256:    sha256Hex(nil),
 		}
+	case "fs.upload":
+		rr = a.executeFileUpload(startedAt, c, op)
+		finishedAt = time.Now().UTC()
+	case "fs.download":
+		rr = a.executeFileDownload(startedAt, requestID, op)
+		finishedAt = time.Now().UTC()
 	case "fs.patch_unified":
 		var payload struct {
 			Path string `json:"path"`
@@ -1472,6 +1489,7 @@ func (a *API) decideInternalWithRules(ctx context.Context, requestID string, dec
 		rec.Decision = dec
 		a.reqs[requestID] = rec
 		a.reqsMu.Unlock()
+		a.cleanupUploadForOp(op)
 
 		a.hub.Publish(events.Event{
 			Type:      "request.decision",
@@ -1588,22 +1606,22 @@ func ruleFromOpExact(ruleID string, op rules.Op) (rules.Rule, bool) {
 			return rules.Rule{}, false
 		}
 		return rules.Rule{ID: ruleID, OpType: "cmd.run", Cmd: &rules.CmdRule{ArgvPrefix: p.Argv}}, true
-	case "fs.read":
+	case "fs.read", "fs.download":
 		var p struct {
 			Path string `json:"path"`
 		}
 		if err := json.Unmarshal(op.Payload, &p); err != nil || p.Path == "" {
 			return rules.Rule{}, false
 		}
-		return rules.Rule{ID: ruleID, OpType: "fs.read", Path: &rules.PathRule{Exact: p.Path}}, true
-	case "fs.patch_unified":
+		return rules.Rule{ID: ruleID, OpType: op.Type, Path: &rules.PathRule{Exact: p.Path}}, true
+	case "fs.patch_unified", "fs.upload":
 		var p struct {
 			Path string `json:"path"`
 		}
 		if err := json.Unmarshal(op.Payload, &p); err != nil || p.Path == "" {
 			return rules.Rule{}, false
 		}
-		return rules.Rule{ID: ruleID, OpType: "fs.patch_unified", Path: &rules.PathRule{Exact: p.Path}}, true
+		return rules.Rule{ID: ruleID, OpType: op.Type, Path: &rules.PathRule{Exact: p.Path}}, true
 	case "conf.set":
 		var p struct {
 			Path string `json:"path"`
@@ -1656,7 +1674,7 @@ func riskFlags(op rules.Op) []string {
 				}
 			}
 		}
-	case "fs.patch_unified", "conf.set", "conf.set_kv":
+	case "fs.patch_unified", "fs.upload", "conf.set", "conf.set_kv":
 		var p struct {
 			Path string `json:"path"`
 		}
@@ -1711,6 +1729,15 @@ func summarizeOp(rec requestRecord) string {
 			return "fs.patch_unified " + p.Path
 		}
 		return "fs.patch_unified"
+	case "fs.upload", "fs.download":
+		var p struct {
+			Path string `json:"path"`
+		}
+		_ = json.Unmarshal(op.Payload, &p)
+		if p.Path != "" {
+			return op.Type + " " + p.Path
+		}
+		return op.Type
 	case "conf.set":
 		var p struct {
 			Path string `json:"path"`
@@ -1815,6 +1842,40 @@ func tuiDetailsWithRules(rec requestRecord, engine *rules.Engine) string {
 			b.WriteString(escapeTUIViewText(p.Diff))
 		}
 		return strings.TrimRight(b.String(), "\n")
+	case "fs.upload":
+		var p struct {
+			Path   string `json:"path"`
+			Size   int64  `json:"size"`
+			SHA256 string `json:"sha256"`
+			Mode   string `json:"mode"`
+		}
+		_ = json.Unmarshal(op.Payload, &p)
+		if p.Path == "" {
+			return ""
+		}
+		var b strings.Builder
+		b.WriteString("operation: UPLOAD FILE\n")
+		b.WriteString("effect: atomically writes uploaded content to the server\n")
+		fmt.Fprintf(&b, "path: %s\n", escapeTUIViewText(p.Path))
+		fmt.Fprintf(&b, "size: %d bytes\n", p.Size)
+		fmt.Fprintf(&b, "sha256: %s\n", escapeTUIViewText(p.SHA256))
+		if p.Mode != "" {
+			fmt.Fprintf(&b, "mode: %s\n", escapeTUIViewText(p.Mode))
+		} else {
+			b.WriteString("mode: preserve existing; 0644 for new file\n")
+		}
+		return strings.TrimRight(b.String(), "\n")
+	case "fs.download":
+		var p struct {
+			Path string `json:"path"`
+		}
+		_ = json.Unmarshal(op.Payload, &p)
+		if p.Path == "" {
+			return ""
+		}
+		return "operation: DOWNLOAD FILE\n" +
+			"effect: reads a server file into an approved download snapshot\n" +
+			"path: " + escapeTUIViewText(p.Path)
 	case "conf.set":
 		var p struct {
 			Path      string `json:"path"`
@@ -2025,6 +2086,15 @@ func (a *API) handleRequestByID(w http.ResponseWriter, r *http.Request, c auth.C
 			return
 		}
 		a.handleKill(w, r, c, id)
+		return
+	}
+
+	if len(parts) == 2 && parts[1] == "file" {
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "", "")
+			return
+		}
+		a.handleRequestFile(w, r, c, id)
 		return
 	}
 

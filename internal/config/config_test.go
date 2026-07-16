@@ -33,6 +33,9 @@ func TestDefaults(t *testing.T) {
 	if cfg.MaxOutputBytes < 1024*1024 {
 		t.Fatalf("MaxOutputBytes=%d", cfg.MaxOutputBytes)
 	}
+	if cfg.MaxTransferBytes != 100*1024*1024 {
+		t.Fatalf("MaxTransferBytes=%d", cfg.MaxTransferBytes)
+	}
 	if cfg.PairingCodeTTLSeconds == 0 {
 		t.Fatalf("PairingCodeTTLSeconds=%d", cfg.PairingCodeTTLSeconds)
 	}
@@ -55,6 +58,7 @@ listen_addr = "0.0.0.0"
 port = 55555
 db_path = "racg-test.db"
 max_concurrency = 7
+max_transfer_bytes = 123456
 lock_first_client_addr = true
 `)
 
@@ -74,6 +78,9 @@ lock_first_client_addr = true
 	}
 	if cfg.MaxConcurrency != 7 {
 		t.Fatalf("MaxConcurrency=%d", cfg.MaxConcurrency)
+	}
+	if cfg.MaxTransferBytes != 123456 {
+		t.Fatalf("MaxTransferBytes=%d", cfg.MaxTransferBytes)
 	}
 	if !cfg.LockFirstClientAddr {
 		t.Fatalf("LockFirstClientAddr=false")

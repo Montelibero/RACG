@@ -34,6 +34,8 @@ func TestRootHelpIncludesFileAndConfigExamples(t *testing.T) {
 	for _, want := range []string{
 		"racg file read /path/file.txt",
 		"racg file patch /path/file.txt --diff-file /tmp/change.patch",
+		"racg file upload ./local.bin /srv/remote.bin",
+		"racg file download /srv/remote.bin ./local.bin",
 		"racg config set values.yaml image.tag v1.2.3 --format yaml",
 		"racg run -- bash -lc",
 	} {

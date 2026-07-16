@@ -64,6 +64,15 @@ racg file patch <path> --diff-file <patch>
 
 `racg file patch` applies a unified diff through `fs.patch_unified`. Read the current file first, keep the diff narrow, and explain the changed lines. Native configs such as `haproxy.cfg` are not YAML.
 
+For complete binary or large files, prefer approved transfers over base64 or shell wrappers:
+
+```bash
+racg file upload <local> <remote> [--mode 0600]
+racg file download <remote> <local> [--force]
+```
+
+Treat `fs.upload` as a write operation scoped to the exact remote path. `fs.download` is read-only but may expose sensitive file contents, so keep its path rule narrow. Use `--force` only when replacing the exact local destination is intended.
+
 ## Auto-Approve Rules
 
 Auto-approve only narrow read-only prefixes. Good candidates:

@@ -3,6 +3,8 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +20,140 @@ import (
 	"github.com/itolstov/racg/internal/rules"
 	"github.com/itolstov/racg/internal/store"
 )
+
+func TestFileUploadAndDownloadTransferBinaryContent(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.DBPath = filepath.Join(t.TempDir(), "racg.db")
+	tm := auth.NewTokenManager(auth.RealClock{})
+	token, _ := tm.Issue("sess-transfer", "client-transfer", time.Hour)
+	api := New(cfg, WithTokenManager(tm))
+	handler := api.Handler()
+
+	uploaded := []byte{0x00, 0x01, 0xfe, 0xff, '\n', 'R', 'A', 'C', 'G'}
+	sum := sha256.Sum256(uploaded)
+	uploadReq := httptest.NewRequest(http.MethodPost, "http://example/v1/uploads", bytes.NewReader(uploaded))
+	uploadReq.Header.Set("Authorization", "Bearer "+token)
+	uploadReq.Header.Set("Content-Type", "application/octet-stream")
+	uploadRW := httptest.NewRecorder()
+	handler.ServeHTTP(uploadRW, uploadReq)
+	if uploadRW.Code != http.StatusOK {
+		t.Fatalf("stage upload status=%d body=%s", uploadRW.Code, uploadRW.Body.String())
+	}
+	var staged struct {
+		UploadID string `json:"upload_id"`
+		Size     int64  `json:"size"`
+		SHA256   string `json:"sha256"`
+	}
+	if err := json.Unmarshal(uploadRW.Body.Bytes(), &staged); err != nil {
+		t.Fatalf("decode staged upload: %v", err)
+	}
+	if staged.UploadID == "" || staged.Size != int64(len(uploaded)) || staged.SHA256 != hex.EncodeToString(sum[:]) {
+		t.Fatalf("staged=%+v", staged)
+	}
+
+	remotePath := filepath.Join(t.TempDir(), "uploaded.bin")
+	uploadOp, _ := json.Marshal(map[string]any{
+		"op": map[string]any{
+			"type": "fs.upload",
+			"payload": map[string]any{
+				"path": remotePath, "upload_id": staged.UploadID,
+				"size": staged.Size, "sha256": staged.SHA256, "mode": "0600",
+			},
+		},
+	})
+	uploadCreate := httptest.NewRequest(http.MethodPost, "http://example/v1/requests", bytes.NewReader(uploadOp))
+	uploadCreate.Header.Set("Authorization", "Bearer "+token)
+	uploadCreateRW := httptest.NewRecorder()
+	handler.ServeHTTP(uploadCreateRW, uploadCreate)
+	if uploadCreateRW.Code != http.StatusOK {
+		t.Fatalf("create upload request status=%d body=%s", uploadCreateRW.Code, uploadCreateRW.Body.String())
+	}
+	var uploadCreated struct {
+		RequestID string `json:"request_id"`
+	}
+	_ = json.Unmarshal(uploadCreateRW.Body.Bytes(), &uploadCreated)
+	if err := api.DecideForTUI(uploadCreated.RequestID, "ALLOW_ONCE"); err != nil {
+		t.Fatalf("approve upload: %v", err)
+	}
+	waitRequestTerminalForTest(t, api, token, uploadCreated.RequestID)
+	got, err := os.ReadFile(remotePath)
+	if err != nil {
+		t.Fatalf("read uploaded file: %v", err)
+	}
+	if !bytes.Equal(got, uploaded) {
+		t.Fatalf("uploaded bytes=%x want=%x", got, uploaded)
+	}
+	info, _ := os.Stat(remotePath)
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("uploaded mode=%o", info.Mode().Perm())
+	}
+
+	downloadOp, _ := json.Marshal(map[string]any{
+		"op": map[string]any{"type": "fs.download", "payload": map[string]any{"path": remotePath}},
+	})
+	downloadCreate := httptest.NewRequest(http.MethodPost, "http://example/v1/requests", bytes.NewReader(downloadOp))
+	downloadCreate.Header.Set("Authorization", "Bearer "+token)
+	downloadCreateRW := httptest.NewRecorder()
+	handler.ServeHTTP(downloadCreateRW, downloadCreate)
+	var downloadCreated struct {
+		RequestID string `json:"request_id"`
+	}
+	_ = json.Unmarshal(downloadCreateRW.Body.Bytes(), &downloadCreated)
+	if err := api.DecideForTUI(downloadCreated.RequestID, "ALLOW_ONCE"); err != nil {
+		t.Fatalf("approve download: %v", err)
+	}
+	waitRequestTerminalForTest(t, api, token, downloadCreated.RequestID)
+
+	downloadReq := httptest.NewRequest(http.MethodGet, "http://example/v1/requests/"+downloadCreated.RequestID+"/file", nil)
+	downloadReq.Header.Set("Authorization", "Bearer "+token)
+	downloadRW := httptest.NewRecorder()
+	handler.ServeHTTP(downloadRW, downloadReq)
+	if downloadRW.Code != http.StatusOK {
+		t.Fatalf("download status=%d body=%s", downloadRW.Code, downloadRW.Body.String())
+	}
+	if !bytes.Equal(downloadRW.Body.Bytes(), uploaded) {
+		t.Fatalf("downloaded bytes=%x want=%x", downloadRW.Body.Bytes(), uploaded)
+	}
+	if downloadRW.Header().Get("X-RACG-SHA256") != staged.SHA256 || downloadRW.Header().Get("X-RACG-Mode") != "0600" {
+		t.Fatalf("download headers=%v", downloadRW.Header())
+	}
+}
+
+func TestRejectedUploadRemovesStagedContent(t *testing.T) {
+	for _, action := range []string{"DENY", "CANCEL"} {
+		t.Run(action, func(t *testing.T) {
+			cfg := config.Defaults()
+			cfg.DBPath = filepath.Join(t.TempDir(), "racg.db")
+			api := New(cfg)
+			if err := os.MkdirAll(api.transferDir(), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			uploadID := "11111111-1111-4111-8111-111111111111"
+			if err := os.WriteFile(api.uploadDataPath(uploadID), []byte("staged"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(api.uploadMetaPath(uploadID), []byte(`{}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			op, _ := json.Marshal(map[string]any{"type": "fs.upload", "payload": map[string]any{"path": "/tmp/file", "upload_id": uploadID}})
+			api.reqs["req"] = requestRecord{ID: "req", Status: "PENDING_APPROVAL", Op: op, SessionID: "sess", ClientID: "client"}
+			var err error
+			if action == "DENY" {
+				err = api.DecideForTUI("req", "DENY")
+			} else {
+				err = api.KillForTUI("req")
+			}
+			if err != nil {
+				t.Fatalf("reject upload: %v", err)
+			}
+			for _, path := range []string{api.uploadDataPath(uploadID), api.uploadMetaPath(uploadID)} {
+				if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+					t.Fatalf("staged path still exists: %s err=%v", path, statErr)
+				}
+			}
+		})
+	}
+}
 
 func TestInfo(t *testing.T) {
 	api := New(config.Defaults())

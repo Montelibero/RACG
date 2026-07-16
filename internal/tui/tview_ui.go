@@ -1634,6 +1634,10 @@ func ruleScopeHelpText(candidates []httpapi.RuleScopeCandidate) string {
 			return "Allow reading this exact file path for the selected scope."
 		case "fs.patch_unified":
 			return "Allow patching this exact file path for the selected scope. The diff itself is not scoped."
+		case "fs.upload":
+			return "Allow uploading to this exact server file path for the selected scope."
+		case "fs.download":
+			return "Allow downloading this exact server file path for the selected scope."
 		case "conf.set":
 			return "Allow structured config edits for this exact file path for the selected scope."
 		}
@@ -2139,6 +2143,15 @@ func historyOpSummary(opJSON string) string {
 			return "fs.patch_unified"
 		}
 		return "fs.patch_unified " + p.Path
+	case "fs.upload", "fs.download":
+		var p struct {
+			Path string `json:"path"`
+		}
+		_ = json.Unmarshal(op.Payload, &p)
+		if p.Path == "" {
+			return op.Type
+		}
+		return op.Type + " " + p.Path
 	case "conf.set", "conf.set_kv":
 		var p struct {
 			Path string `json:"path"`

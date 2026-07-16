@@ -88,7 +88,7 @@ commands:
   session    inspect saved/current session
   run        submit cmd.run and wait by default
   request    cancel, tail, or read request logs
-  file       read or patch plain text files through approval
+  file       read, patch, upload, or download files through approval
   config     set env/json/yaml config keys through approval
   rules      list, enable/disable/delete, and install presets
   sessions   inspect persisted audit sessions
@@ -113,6 +113,10 @@ file helpers:
   racg file read /path/file.txt --max-bytes 65536
   racg file patch /path/file.txt --diff-file /tmp/change.patch
   racg file patch /path/file.txt --diff '@@ -1 +1 @@...'
+  racg file upload ./local.bin /srv/remote.bin
+  racg file upload ./secret.bin /srv/secret.bin --mode 0600
+  racg file download /srv/remote.bin ./local.bin
+  racg file download /srv/remote.bin ./local.bin --force
 
 config helpers:
   racg config set /app/.env PORT 8080 --format env

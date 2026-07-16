@@ -17,6 +17,7 @@ type Config struct {
 	DBPath                string
 	DefaultTimeoutSec     int
 	MaxOutputBytes        int
+	MaxTransferBytes      int64
 	MaxConcurrency        int
 	PairingCodeTTLSeconds int
 
@@ -32,6 +33,7 @@ func Defaults() Config {
 		DBPath:                  defaultDBPath(),
 		DefaultTimeoutSec:       120,
 		MaxOutputBytes:          1 * 1024 * 1024,
+		MaxTransferBytes:        100 * 1024 * 1024,
 		MaxConcurrency:          3,
 		PairingCodeTTLSeconds:   180,
 		LockFirstClientAddr:     false,
@@ -137,6 +139,12 @@ func ApplyTOMLSimple(cfg *Config, r io.Reader) error {
 				return fmt.Errorf("line %d: max_concurrency: %w", lineNo, err)
 			}
 			cfg.MaxConcurrency = n
+		case "max_transfer_bytes":
+			n, err := strconv.ParseInt(val, 10, 64)
+			if err != nil || n <= 0 {
+				return fmt.Errorf("line %d: max_transfer_bytes: expected positive integer", lineNo)
+			}
+			cfg.MaxTransferBytes = n
 		case "lock_first_client_addr":
 			b, err := strconv.ParseBool(val)
 			if err != nil {

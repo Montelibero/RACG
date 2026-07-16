@@ -1,6 +1,6 @@
 # RACG
 
-RACG is a local Approval Gateway for privileged operations. A client sends requests (`cmd.run`, `fs.read`, `fs.patch_unified`), human approves/denies in terminal UI, and execution is audited in SQLite.
+RACG is a local Approval Gateway for privileged operations. A client sends requests such as `cmd.run`, `fs.read`, `fs.patch_unified`, `fs.upload`, or `fs.download`; a human approves or denies them in the terminal UI, and execution is audited in SQLite.
 
 ## Features
 
@@ -8,6 +8,7 @@ RACG is a local Approval Gateway for privileged operations. A client sends reque
 - Built-in TUI approvals dashboard (mouse + hotkeys)
 - Session pairing with bearer tokens
 - Client helpers for login, approve-and-wait command runs, live logs, tail, and cancel
+- Approved binary file upload/download with SHA-256 verification and atomic writes
 - Rule engine (`ALLOW_SESSION` / `ALLOW_ALWAYS`)
 - Read-only diagnostics rule presets
 - SQLite audit trail: sessions, requests, decisions, executions, rules
@@ -103,6 +104,8 @@ racg request logs <request_id> --stdout
 racg request logs <request_id> --stderr
 racg file read /apps/haproxy/haproxy.cfg
 racg file patch /apps/haproxy/haproxy.cfg --diff-file /tmp/haproxy.patch
+racg file upload ./bundle.tar.gz /srv/releases/bundle.tar.gz
+racg file download /var/log/app/archive.gz ./archive.gz
 racg config set /app/.env PORT 8080 --format env
 racg config set values.yaml image.tag v1.2.3 --format yaml
 racg config set config.json server.debug true --format json --type bool
@@ -118,6 +121,7 @@ Use `racg request logs <id> --live` for the current in-memory live output snapsh
 Use `racg request cancel <id>` to cancel a pending approval or stop a running command.
 Use `racg config set` to request a format-aware config edit without shell scripts. It supports `env`, `json`, and `yaml`; writes a backup next to an existing file by default; validates the result before replacing the file; and uses dotted keys for `json`/`yaml`. Pass `--create` to atomically create a missing file with mode `0600`; its parent directory must already exist.
 Use `racg file read` and `racg file patch` for plain text files such as HAProxy, nginx, systemd unit files, or other non-JSON/YAML configs. `file patch` submits an `fs.patch_unified` request and expects a unified diff.
+Use `racg file upload <local> <remote>` and `racg file download <remote> <local>` for binary or large files. Both create approval requests. File bytes are streamed outside JSON, checked with SHA-256, and written atomically. Upload preserves an existing target's permissions or uses `0644` for a new file; pass `--mode 0600` when needed. Download refuses to replace a local file unless `--force` is passed. The server default transfer limit is 100 MiB and can be changed with `racg serve --max-transfer-bytes N`.
 
 ## Agent skill
 
@@ -180,10 +184,11 @@ RACG analyzes each shell segment independently. Auto-approve only happens when e
 
 Обычно safe (можно сохранять как always):
 - `fs.read` (например чтение `~/.bashrc`, лучше указывать абсолютный путь)
+- `fs.download` для явно разрешённого пути
 - `cmd.run` с безопасными командами чтения/диагностики (`cat`, `ls`, `uname`, `date` и т.п.)
 
 Dangerous (по умолчанию `ALLOW_ALWAYS` запрещен):
-- `WRITE_ETC` (`fs.patch_unified`/`conf.set` по `/etc/...`)
+- `WRITE_ETC` (`fs.patch_unified`/`fs.upload`/`conf.set` по `/etc/...`)
 - `APT_REMOVE` (`apt/apt-get remove|purge`)
 - `FIREWALL` (`iptables`, `nft`, `ufw`)
 - `DESTRUCTIVE_FS` (`rm`, `/bin/rm`)

@@ -159,6 +159,26 @@ func TestSessionRulesSnapshotCopiesRules(t *testing.T) {
 	}
 }
 
+func TestFileTransferPathRules(t *testing.T) {
+	e := NewEngine()
+	e.AddSession("sess", Rule{ID: "upload", OpType: "fs.upload", Path: &PathRule{Exact: "/srv/upload.bin"}})
+	e.AddAlways(Rule{ID: "download", OpType: "fs.download", Path: &PathRule{Prefix: "/srv/exports/"}})
+	tests := []struct {
+		op      Op
+		allowed bool
+	}{
+		{Op{Type: "fs.upload", Payload: mustJSON(t, map[string]any{"path": "/srv/upload.bin"})}, true},
+		{Op{Type: "fs.upload", Payload: mustJSON(t, map[string]any{"path": "/srv/other.bin"})}, false},
+		{Op{Type: "fs.download", Payload: mustJSON(t, map[string]any{"path": "/srv/exports/data.bin"})}, true},
+		{Op{Type: "fs.download", Payload: mustJSON(t, map[string]any{"path": "/etc/shadow"})}, false},
+	}
+	for _, tt := range tests {
+		if _, got := e.Match("sess", tt.op); got != tt.allowed {
+			t.Fatalf("op=%s payload=%s allowed=%t want=%t", tt.op.Type, tt.op.Payload, got, tt.allowed)
+		}
+	}
+}
+
 func mustJSON(t *testing.T, v any) json.RawMessage {
 	t.Helper()
 	b, err := json.Marshal(v)
