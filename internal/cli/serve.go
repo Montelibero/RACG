@@ -69,10 +69,22 @@ func (c *ServeCmd) Run(args []string) int {
 	ready := make(chan struct{})
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- s.Run(ctx, ready)
+		err := s.Run(ctx, ready)
+		errCh <- err
+		if err != nil {
+			stop()
+		}
 	}()
 
-	<-ready
+	select {
+	case <-ready:
+	case err := <-errCh:
+		if err != nil {
+			fmt.Fprintf(c.stderr, "server error: %v\n", err)
+			return 1
+		}
+		return 0
+	}
 	fmt.Fprintf(c.stdout, "listening=http://%s\n", s.Addr())
 	if *profile != "" {
 		fmt.Fprintf(c.stdout, "profile=%s\n", *profile)

@@ -13,7 +13,6 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
-	"github.com/itolstov/racg/internal/events"
 	"github.com/itolstov/racg/internal/httpapi"
 	"github.com/itolstov/racg/internal/rules"
 	"github.com/itolstov/racg/internal/store"
@@ -42,6 +41,7 @@ func RunServeUI(ctx context.Context, cfg ServeUIConfig) error {
 	pages := tview.NewPages()
 
 	state := newUIState(cfg.API, cfg.Store)
+	state.app = app
 	state.titleUpdater = newTerminalTitleUpdater(ctx, time.Second, func(title string) {
 		app.SetTitle(title)
 	})
@@ -69,39 +69,46 @@ func RunServeUI(ctx context.Context, cfg ServeUIConfig) error {
 	app.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
 		return state.handleGlobalInput(app, pages, cfg, ev)
 	})
+	app.SetMouseCapture(func(ev *tcell.EventMouse, action tview.MouseAction) (*tcell.EventMouse, tview.MouseAction) {
+		if ev != nil && inputEventIsStale(ev.When(), time.Now(), maxInputEventAge) {
+			return nil, action
+		}
+		return ev, action
+	})
 
-	// Events -> UI state.
+	// Drain API events immediately, then render their latest state at a bounded rate.
 	evCh, cancel := cfg.API.SubscribeEvents(256)
 	defer cancel()
+	coalescer := newUIEventCoalescer()
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
-				app.QueueUpdateDraw(func() { app.Stop() })
 				return
 			case e, ok := <-evCh:
 				if !ok {
 					return
 				}
-				app.QueueUpdateDraw(func() {
-					state.onEvent(e)
-					state.refreshTerminalTitle(cfg)
-					state.maybeAutoSwitchToDashboard(app, pages, len(cfg.API.ListPendingForTUI()))
-				})
+				coalescer.Add(e)
 			}
 		}
 	}()
 
-	// Safety net: periodic refresh to avoid missing dropped events.
-	tick := time.NewTicker(500 * time.Millisecond)
-	defer tick.Stop()
 	go func() {
+		tick := time.NewTicker(uiRefreshInterval)
+		defer tick.Stop()
 		for {
 			select {
 			case <-ctx.Done():
+				app.QueueUpdateDraw(func() { app.Stop() })
 				return
 			case <-tick.C:
+				batch, dirty := coalescer.Take()
+				if !dirty {
+					continue
+				}
 				app.QueueUpdateDraw(func() {
+					state.applyEventBatch(batch)
 					state.refresh()
 					state.refreshTerminalTitle(cfg)
 					state.maybeAutoSwitchToDashboard(app, pages, len(cfg.API.ListPendingForTUI()))
@@ -116,6 +123,7 @@ func RunServeUI(ctx context.Context, cfg ServeUIConfig) error {
 type uiState struct {
 	api   *httpapi.API
 	store *store.Store
+	app   *tview.Application
 
 	mu sync.Mutex
 
@@ -129,7 +137,6 @@ type uiState struct {
 	jobsList     *tview.List
 	statusBars   []*tview.TextView
 	jobsModeBtn  *tview.Button
-	titleFrame   int
 	titleUpdater *terminalTitleUpdater
 
 	// Job view widgets.
@@ -162,17 +169,38 @@ type uiState struct {
 	toastUntil time.Time
 	toastText  string
 
+	decisionRunner   func(string, string) error
+	decisionInFlight bool
+	decisionGuardTil time.Time
+
 	// Overlay (e.g. copy mode) close handler.
 	overlayClose func()
 }
 
 func newUIState(api *httpapi.API, st *store.Store) *uiState {
-	return &uiState{api: api, store: st, follow: true, page: "pairing", showAllJobs: true, activeMainTab: "server", pairingAutoSwitch: true, jobMode: "combined"}
+	s := &uiState{api: api, store: st, follow: true, page: "pairing", showAllJobs: true, activeMainTab: "server", pairingAutoSwitch: true, jobMode: "combined"}
+	if api != nil {
+		s.decisionRunner = api.DecideForTUI
+	}
+	return s
 }
 
-func (s *uiState) setCurrentPage(p string) { s.page = p }
+func (s *uiState) setCurrentPage(p string) {
+	s.mu.Lock()
+	s.page = p
+	s.mu.Unlock()
+}
+
+func (s *uiState) currentPage() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.page
+}
 
 func (s *uiState) handleGlobalInput(app *tview.Application, pages *tview.Pages, cfg ServeUIConfig, ev *tcell.EventKey) *tcell.EventKey {
+	if ev == nil || inputEventIsStale(ev.When(), time.Now(), maxInputEventAge) {
+		return nil
+	}
 	if ev.Key() == tcell.KeyEsc {
 		if s.closeOverlay(pages) {
 			return nil
@@ -192,7 +220,7 @@ func (s *uiState) handleGlobalInput(app *tview.Application, pages *tview.Pages, 
 		s.back(app, pages)
 		return nil
 	}
-	if s.page != "job" {
+	if s.currentPage() != "job" {
 		switch ev.Rune() {
 		case '0':
 			s.showServer(app, pages)
@@ -214,7 +242,7 @@ func (s *uiState) handleGlobalInput(app *tview.Application, pages *tview.Pages, 
 			return nil
 		}
 	}
-	if s.page == "dashboard" && (app == nil || app.GetFocus() != s.filter) {
+	if s.currentPage() == "dashboard" && (app == nil || app.GetFocus() != s.filter) {
 		if s.handlePendingActionHotkey(app, pages, ev) {
 			return nil
 		}
@@ -258,12 +286,7 @@ func (s *uiState) refreshTerminalTitle(cfg ServeUIConfig) {
 	}
 	pending := len(s.api.ListPendingForTUI())
 	running := len(s.api.ListRunningForTUI())
-	if pending > 0 || running > 0 {
-		s.titleFrame++
-	} else {
-		s.titleFrame = 0
-	}
-	s.titleUpdater.Update(terminalTitle(cfg.Version, serverIdentity(cfg.Profile, cfg.Hostname, cfg.Listen), pending, running, s.titleFrame))
+	s.titleUpdater.Update(terminalTitle(cfg.Version, serverIdentity(cfg.Profile, cfg.Hostname, cfg.Listen), pending, running, 0))
 }
 
 type terminalTitleUpdater struct {
@@ -318,6 +341,7 @@ func (u *terminalTitleUpdater) Update(title string) {
 }
 
 func terminalTitle(version, identity string, pending, running, frame int) string {
+	_ = frame
 	base := fmt.Sprintf("RACG v%s", version)
 	if identity != "" {
 		base += " · " + identity
@@ -325,8 +349,7 @@ func terminalTitle(version, identity string, pending, running, frame int) string
 	if pending == 0 && running == 0 {
 		return base
 	}
-	spinner := []string{"|", "/", "-", "\\"}
-	return fmt.Sprintf("%s %s pending=%d running=%d", spinner[frame%len(spinner)], base, pending, running)
+	return fmt.Sprintf("* %s pending=%d running=%d", base, pending, running)
 }
 
 func serverIdentity(profile, hostname, listen string) string {
@@ -458,7 +481,7 @@ func (s *uiState) renderMainTabs() string {
 			b.WriteString("   ")
 		}
 		text := t.key + " " + t.label
-		if s.activeMainTab == t.name || (s.activeMainTab == "" && s.page == t.page && t.name != "jobs") {
+		if s.activeMainTab == t.name || (s.activeMainTab == "" && s.currentPage() == t.page && t.name != "jobs") {
 			b.WriteString("[" + text + "]")
 			continue
 		}
@@ -499,7 +522,7 @@ func (s *uiState) buildMainTabs(app *tview.Application, pages *tview.Pages) *tvi
 			s.showDashboard(app, pages)
 		case "jobs":
 			s.switchMainPage(pages, "dashboard")
-			s.page = "dashboard"
+			s.setCurrentPage("dashboard")
 			s.setActiveMainTab("jobs")
 			s.refresh()
 			if app != nil && s.jobsList != nil {
@@ -601,7 +624,7 @@ func boolLabel(v bool) string {
 func (s *uiState) showDashboard(app *tview.Application, pages *tview.Pages) {
 	s.closeOverlay(pages)
 	s.switchMainPage(pages, "dashboard")
-	s.page = "dashboard"
+	s.setCurrentPage("dashboard")
 	s.setActiveMainTab("pending")
 	s.refresh()
 	if app != nil {
@@ -612,7 +635,7 @@ func (s *uiState) showDashboard(app *tview.Application, pages *tview.Pages) {
 func (s *uiState) showServer(app *tview.Application, pages *tview.Pages) {
 	s.closeOverlay(pages)
 	s.switchMainPage(pages, "pairing")
-	s.page = "pairing"
+	s.setCurrentPage("pairing")
 	s.setActiveMainTab("server")
 	s.pairingAutoSwitch = false
 	if s.pairingRefresh != nil {
@@ -624,7 +647,7 @@ func (s *uiState) showServer(app *tview.Application, pages *tview.Pages) {
 }
 
 func (s *uiState) maybeAutoSwitchToDashboard(app *tview.Application, pages *tview.Pages, pendingCount int) bool {
-	if s.page != "pairing" || !s.pairingAutoSwitch || pendingCount <= 0 {
+	if s.currentPage() != "pairing" || !s.pairingAutoSwitch || pendingCount <= 0 {
 		return false
 	}
 	s.showDashboard(app, pages)
@@ -634,7 +657,7 @@ func (s *uiState) maybeAutoSwitchToDashboard(app *tview.Application, pages *tvie
 func (s *uiState) showRules(app *tview.Application, pages *tview.Pages) {
 	s.closeOverlay(pages)
 	s.switchMainPage(pages, "rules")
-	s.page = "rules"
+	s.setCurrentPage("rules")
 	s.setActiveMainTab("rules")
 	if s.rulesRefresh != nil {
 		s.rulesRefresh()
@@ -644,7 +667,7 @@ func (s *uiState) showRules(app *tview.Application, pages *tview.Pages) {
 func (s *uiState) showHistory(app *tview.Application, pages *tview.Pages) {
 	s.closeOverlay(pages)
 	s.switchMainPage(pages, "history")
-	s.page = "history"
+	s.setCurrentPage("history")
 	s.setActiveMainTab("history")
 	if s.historyRefresh != nil {
 		s.historyRefresh()
@@ -652,10 +675,11 @@ func (s *uiState) showHistory(app *tview.Application, pages *tview.Pages) {
 }
 
 func (s *uiState) back(app *tview.Application, pages *tview.Pages) {
-	if s.page == "dashboard" || s.page == "pairing" {
+	page := s.currentPage()
+	if page == "dashboard" || page == "pairing" {
 		return
 	}
-	if s.page == "job" {
+	if page == "job" {
 		s.leaveJobPage(app, pages, s.jobsList)
 		return
 	}
@@ -923,28 +947,12 @@ func shortStatus(st string) string {
 	}
 }
 
-func (s *uiState) onEvent(e events.Event) {
-	switch e.Type {
-	case "request.created":
-		s.toastText = fmt.Sprintf("New request from %s", e.ClientID)
-		s.toastUntil = time.Now().Add(3 * time.Second)
-	case "request.output":
-		if s.selectedJob == e.RequestID && s.jobLog != nil {
-			chunk, _ := e.Data["chunk"].(string)
-			stream, _ := e.Data["stream"].(string)
-			if chunk != "" && s.jobMode == "combined" {
-				pfx := "O: "
-				if stream == "stderr" {
-					pfx = "E: "
-				}
-				fmt.Fprint(s.jobLog, pfx+chunk)
-				if s.follow {
-					s.jobLog.ScrollToEnd()
-				}
-			}
-		}
+func (s *uiState) applyEventBatch(batch uiEventBatch) {
+	if batch.LatestCreated == nil {
+		return
 	}
-	s.refresh()
+	s.toastText = fmt.Sprintf("New request from %s", batch.LatestCreated.ClientID)
+	s.toastUntil = time.Now().Add(3 * time.Second)
 }
 
 func (s *uiState) refresh() {
@@ -1235,21 +1243,24 @@ func buildPairingPage(ctx context.Context, app *tview.Application, pages *tview.
 		return ev
 	})
 
-	// Refresh timer on this page.
+	// Pairing metadata changes with time, but only needs redraws while visible.
 	go func() {
-		t := time.NewTicker(250 * time.Millisecond)
+		t := time.NewTicker(time.Second)
 		defer t.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-t.C:
+				if s.currentPage() != "pairing" {
+					continue
+				}
 				app.QueueUpdateDraw(refresh)
 			}
 		}
 	}()
 
-	s.page = "pairing"
+	s.setCurrentPage("pairing")
 	s.serverFocus = btnDash
 	s.focus = []tview.Primitive{btnDash, btnCopy, btnRegen, btnQuit}
 	return root
@@ -1386,12 +1397,45 @@ func buildDashboardPage(app *tview.Application, pages *tview.Pages, s *uiState, 
 }
 
 func (s *uiState) doDecision(dec string) {
-	if s.selectedPending == "" {
-		return
+	queue := func(update func()) {
+		if s.app == nil {
+			update()
+			return
+		}
+		s.app.QueueUpdateDraw(update)
 	}
-	_ = s.api.DecideForTUI(s.selectedPending, dec)
-	s.selectedPending = ""
-	s.refresh()
+	s.tryStartDecision(dec, queue)
+}
+
+func (s *uiState) tryStartDecision(decision string, queue func(func())) bool {
+	if s.selectedPending == "" || s.decisionInFlight || time.Now().Before(s.decisionGuardTil) || s.decisionRunner == nil || queue == nil {
+		return false
+	}
+
+	requestID := s.selectedPending
+	s.decisionInFlight = true
+	s.decisionGuardTil = time.Now().Add(maxInputEventAge)
+	s.toastText = fmt.Sprintf("Applying %s to %s...", strings.ToLower(decision), requestID)
+	s.toastUntil = time.Now().Add(10 * time.Second)
+	s.refreshStatus()
+
+	go func() {
+		err := s.decisionRunner(requestID, decision)
+		queue(func() {
+			s.decisionInFlight = false
+			if err != nil {
+				s.toastText = fmt.Sprintf("Decision failed for %s: %v", requestID, err)
+			} else {
+				s.toastText = fmt.Sprintf("Decision applied to %s", requestID)
+				if s.selectedPending == requestID {
+					s.selectedPending = ""
+				}
+			}
+			s.toastUntil = time.Now().Add(5 * time.Second)
+			s.refresh()
+		})
+	}()
+	return true
 }
 
 func (s *uiState) openRuleScopeOverlay(app *tview.Application, pages *tview.Pages, decision string) {

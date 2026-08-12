@@ -234,7 +234,7 @@ func TestStatusBarDoesNotShowRootMode(t *testing.T) {
 	}
 }
 
-func TestTerminalTitleShowsSpinnerWhenWorkIsActive(t *testing.T) {
+func TestTerminalTitleShowsStableActivityMarkerWhenWorkIsActive(t *testing.T) {
 	static := terminalTitle("0.2.5", "docker @ server1:8777", 0, 0, 0)
 	if static != "RACG v0.2.5 · docker @ server1:8777" {
 		t.Fatalf("static title=%q", static)
@@ -242,8 +242,8 @@ func TestTerminalTitleShowsSpinnerWhenWorkIsActive(t *testing.T) {
 
 	active1 := terminalTitle("0.2.5", "docker @ server1:8777", 1, 0, 0)
 	active2 := terminalTitle("0.2.5", "docker @ server1:8777", 1, 0, 1)
-	if active1 == active2 {
-		t.Fatalf("active title did not spin: %q", active1)
+	if active1 != active2 {
+		t.Fatalf("active title must not animate through terminal writes: %q != %q", active1, active2)
 	}
 	for _, want := range []string{"RACG v0.2.5", "docker @ server1:8777", "pending=1", "running=0"} {
 		if !strings.Contains(active1, want) {
