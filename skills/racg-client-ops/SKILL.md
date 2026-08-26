@@ -45,6 +45,7 @@ Use RACG when command execution must go through a human-approved gateway instead
 
 - Read `references/cli.md` for exact command syntax, config editing, flags, output expectations, and common polling patterns.
 - Read `references/safety.md` before proposing auto-approve rules or sending commands with destructive words such as delete, patch, apply, secret, sudo, or firewall tooling.
+- When a human wants to pre-authorize a narrow operation, mention that session and always rules can be created directly in the server TUI under `3 Rules`; a placeholder request is not required.
 - Read `references/examples.md` for concrete diagnostics, Kubernetes, Git, and long-running command examples.
 
 ## Operating Rules

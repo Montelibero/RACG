@@ -80,6 +80,8 @@ Treat `fs.upload` as a write operation scoped to the exact remote path. `fs.down
 
 ## Auto-Approve Rules
 
+The server operator can create rules manually in the TUI under `3 Rules` with `Add Session` or `Add Always`. A session rule must target one selected session and remains in memory; an always rule is persisted and obeys `allow_always_for_dangerous`. Command scopes use argv-prefix matching with per-argument `*` globs and reject shell separators. File/config operations support exact, prefix, and glob path scopes.
+
 Auto-approve only narrow read-only prefixes. Good candidates:
 
 ```text

@@ -121,6 +121,20 @@ type TUIRequest struct {
 	CreatedAt string
 }
 
+type ManualRuleInput struct {
+	Source    string
+	SessionID string
+	OpType    string
+	Match     string
+	Pattern   string
+}
+
+type TUIRuleSession struct {
+	ID        string
+	ClientID  string
+	StartedAt time.Time
+}
+
 type TUIRequestInfo struct {
 	ID        string
 	Status    string
@@ -737,6 +751,234 @@ func (a *API) ListSessionRulesForTUI() []store.RuleRow {
 		return out[i].RuleID < out[j].RuleID
 	})
 	return out
+}
+
+func (a *API) AddManualRuleForTUI(input ManualRuleInput) (string, error) {
+	rule, err := manualRuleFromInput(input)
+	if err != nil {
+		return "", err
+	}
+	rule.ID = uuid.NewString()
+
+	switch strings.ToLower(strings.TrimSpace(input.Source)) {
+	case "session":
+		sessionID := strings.TrimSpace(input.SessionID)
+		if sessionID == "" {
+			return "", errors.New("session is required")
+		}
+		if a.st == nil {
+			return "", errors.New("store is not configured")
+		}
+		sess, err := a.st.GetSession(context.Background(), sessionID)
+		if err != nil {
+			return "", fmt.Errorf("session not found: %w", err)
+		}
+		if sess.EndedAt != nil {
+			return "", errors.New("session has ended")
+		}
+		if a.rules == nil {
+			return "", errors.New("rule engine is not configured")
+		}
+		a.rules.AddSession(sessionID, rule)
+	case "always":
+		if a.st == nil {
+			return "", errors.New("store is not configured")
+		}
+		if a.rules == nil {
+			return "", errors.New("rule engine is not configured")
+		}
+		if manualRuleMayMatchDangerousOperation(rule) && !a.cfg.AllowAlwaysForDangerous {
+			return "", errors.New("ALLOW_ALWAYS_NOT_PERMITTED")
+		}
+		if err := a.st.InsertAlwaysRule(context.Background(), rule, time.Now().UTC()); err != nil {
+			return "", err
+		}
+		a.rules.AddAlways(rule)
+	default:
+		return "", errors.New("source must be session or always")
+	}
+	return rule.ID, nil
+}
+
+func (a *API) ListManualRuleSessionsForTUI() ([]TUIRuleSession, error) {
+	if a.st == nil {
+		return nil, errors.New("store is not configured")
+	}
+	sessions, err := a.st.ListOpenSessions(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	a.reqsMu.Lock()
+	clients := make(map[string]string)
+	for _, rec := range a.reqs {
+		if rec.SessionID != "" && rec.ClientID != "" {
+			clients[rec.SessionID] = rec.ClientID
+		}
+	}
+	a.reqsMu.Unlock()
+	out := make([]TUIRuleSession, 0, len(sessions))
+	for _, sess := range sessions {
+		out = append(out, TUIRuleSession{ID: sess.ID, ClientID: clients[sess.ID], StartedAt: sess.StartedAt})
+	}
+	return out, nil
+}
+
+func (a *API) SetAlwaysRuleEnabledForTUI(ruleID string, enabled bool) error {
+	if a.st == nil || a.rules == nil {
+		return errors.New("rule storage is not configured")
+	}
+	var err error
+	if enabled {
+		err = a.st.EnableRule(context.Background(), ruleID)
+	} else {
+		err = a.st.DisableRule(context.Background(), ruleID, time.Now().UTC())
+	}
+	if err != nil {
+		return err
+	}
+	return a.reloadAlwaysRulesForTUI()
+}
+
+func (a *API) DeleteRuleForTUI(source, ruleID string) error {
+	if a.rules == nil {
+		return errors.New("rule engine is not configured")
+	}
+	if strings.HasPrefix(source, "session:") {
+		sessionID := strings.TrimPrefix(source, "session:")
+		if sessionID == "" || !a.rules.RemoveSessionRule(sessionID, ruleID) {
+			return errors.New("session rule not found")
+		}
+		return nil
+	}
+	if source != "always" {
+		return errors.New("unsupported rule source")
+	}
+	if a.st == nil {
+		return errors.New("rule storage is not configured")
+	}
+	if err := a.st.DeleteRule(context.Background(), ruleID); err != nil {
+		return err
+	}
+	return a.reloadAlwaysRulesForTUI()
+}
+
+func (a *API) reloadAlwaysRulesForTUI() error {
+	always, err := a.st.LoadEnabledAlwaysRules(context.Background())
+	if err != nil {
+		return err
+	}
+	a.rules.ReplaceAlways(always)
+	return nil
+}
+
+func manualRuleFromInput(input ManualRuleInput) (rules.Rule, error) {
+	opType := strings.TrimSpace(input.OpType)
+	match := strings.ToLower(strings.TrimSpace(input.Match))
+	pattern := strings.TrimSpace(input.Pattern)
+	if pattern == "" {
+		return rules.Rule{}, errors.New("scope is required")
+	}
+	if opType == "cmd.run" {
+		if match != "command" {
+			return rules.Rule{}, errors.New("cmd.run requires command match")
+		}
+		return ruleFromScopePattern(pattern)
+	}
+	if !manualPathRuleOp(opType) {
+		return rules.Rule{}, errors.New("unsupported rule operation")
+	}
+	pathRule := &rules.PathRule{}
+	switch match {
+	case "exact":
+		pathRule.Exact = pattern
+	case "prefix":
+		pathRule.Prefix = pattern
+	case "glob":
+		pathRule.Glob = pattern
+	default:
+		return rules.Rule{}, errors.New("path operation requires exact, prefix, or glob match")
+	}
+	return rules.Rule{OpType: opType, Path: pathRule}, nil
+}
+
+func manualRuleMayMatchDangerousOperation(rule rules.Rule) bool {
+	if rule.OpType == "cmd.run" && rule.Cmd != nil {
+		argv := rule.Cmd.ArgvPrefix
+		if len(argv) == 0 || strings.Contains(argv[0], "*") {
+			return true
+		}
+		executable := manualRuleExecutableBase(argv[0])
+		if manualRuleUsesDangerousWrapper(executable) {
+			return true
+		}
+		normalizedArgv := append([]string(nil), argv...)
+		normalizedArgv[0] = executable
+		payload, _ := json.Marshal(map[string]any{"argv": normalizedArgv})
+		if isDangerous(riskFlags(rules.Op{Type: "cmd.run", Payload: payload})) {
+			return true
+		}
+		switch executable {
+		case "apt", "apt-get":
+			return len(argv) < 2 || strings.Contains(argv[1], "*")
+		case "systemctl":
+			if len(argv) < 2 || strings.Contains(argv[1], "*") {
+				return true
+			}
+			if argv[1] == "stop" || argv[1] == "disable" {
+				return len(argv) < 3 || strings.Contains(argv[2], "*") || strings.Contains(argv[2], "ssh")
+			}
+		}
+		return false
+	}
+
+	switch rule.OpType {
+	case "fs.patch_unified", "fs.upload", "fs.append_block", "fs.replace_literal", "conf.set", "conf.set_kv":
+		return rule.Path != nil && pathRuleMayMatchEtc(*rule.Path)
+	default:
+		return false
+	}
+}
+
+func manualRuleExecutableBase(executable string) string {
+	if i := strings.LastIndexByte(executable, '/'); i >= 0 {
+		return executable[i+1:]
+	}
+	return executable
+}
+
+func manualRuleUsesDangerousWrapper(executable string) bool {
+	switch executable {
+	case "sudo", "doas", "su", "sh", "bash", "dash", "zsh", "ksh", "fish", "env", "command", "nohup", "nice", "timeout", "chroot", "xargs":
+		return true
+	default:
+		return false
+	}
+}
+
+func pathRuleMayMatchEtc(rule rules.PathRule) bool {
+	if rule.Exact != "" {
+		return rule.Exact == "/etc" || strings.HasPrefix(rule.Exact, "/etc/")
+	}
+	if rule.Prefix != "" {
+		return strings.HasPrefix("/etc/", rule.Prefix) || rule.Prefix == "/etc" || strings.HasPrefix(rule.Prefix, "/etc/")
+	}
+	if rule.Glob != "" {
+		literalPrefix := rule.Glob
+		if i := strings.IndexAny(literalPrefix, "*?["); i >= 0 {
+			literalPrefix = literalPrefix[:i]
+		}
+		return literalPrefix == "" || strings.HasPrefix("/etc/", literalPrefix) || literalPrefix == "/etc" || strings.HasPrefix(literalPrefix, "/etc/")
+	}
+	return false
+}
+
+func manualPathRuleOp(opType string) bool {
+	switch opType {
+	case "fs.read", "fs.patch_unified", "fs.upload", "fs.download", "fs.append_block", "fs.replace_literal", "conf.set", "conf.set_kv":
+		return true
+	default:
+		return false
+	}
 }
 
 func (a *API) GetRequestInfoForTUI(requestID string) (TUIRequestInfo, bool) {

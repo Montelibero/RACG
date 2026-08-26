@@ -74,6 +74,29 @@ func (e *Engine) AddSession(sessionID string, r Rule) {
 	e.mu.Unlock()
 }
 
+func (e *Engine) ReplaceAlways(rs []Rule) {
+	e.mu.Lock()
+	e.always = append([]Rule(nil), rs...)
+	e.mu.Unlock()
+}
+
+func (e *Engine) RemoveSessionRule(sessionID, ruleID string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	rs := e.sessionRules[sessionID]
+	for i, rule := range rs {
+		if rule.ID != ruleID {
+			continue
+		}
+		e.sessionRules[sessionID] = append(rs[:i], rs[i+1:]...)
+		if len(e.sessionRules[sessionID]) == 0 {
+			delete(e.sessionRules, sessionID)
+		}
+		return true
+	}
+	return false
+}
+
 func (e *Engine) SessionRulesSnapshot() map[string][]Rule {
 	e.mu.Lock()
 	defer e.mu.Unlock()

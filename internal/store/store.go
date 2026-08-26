@@ -195,7 +195,19 @@ func (s *Store) ListSessions(ctx context.Context, limit int) ([]Session, error) 
 		return nil, err
 	}
 	defer rows.Close()
+	return scanSessions(rows)
+}
 
+func (s *Store) ListOpenSessions(ctx context.Context) ([]Session, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT session_id, started_at, ended_at FROM sessions WHERE ended_at IS NULL ORDER BY started_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanSessions(rows)
+}
+
+func scanSessions(rows *sql.Rows) ([]Session, error) {
 	var out []Session
 	for rows.Next() {
 		var sess Session

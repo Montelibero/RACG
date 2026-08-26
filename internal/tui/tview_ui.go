@@ -1864,9 +1864,173 @@ func helpText() string {
 		"  Tab focus\n" +
 		"  0 server / 1 pending / 2 jobs / 3 rules / 4 history\n" +
 		"  pending: a once / s session / A always / d deny\n" +
+		"  rules: a add always / s add session\n" +
 		"  job view: 1 combined / 2 stdout / 3 stderr / 4 meta\n" +
 		"  job view: b or Esc back / k kill / f follow\n" +
 		"  q quit / F1 help\n"
+}
+
+var manualRuleOperations = []string{
+	"cmd.run",
+	"fs.read",
+	"fs.patch_unified",
+	"fs.upload",
+	"fs.download",
+	"fs.append_block",
+	"fs.replace_literal",
+	"conf.set",
+	"conf.set_kv",
+}
+
+func manualRuleMatchOptions(opType string) []string {
+	if opType == "cmd.run" {
+		return []string{"command"}
+	}
+	return []string{"exact", "prefix", "glob"}
+}
+
+func manualRuleSessionLabel(sess httpapi.TUIRuleSession) string {
+	clientID := strings.TrimSpace(sess.ClientID)
+	if clientID == "" {
+		clientID = "unknown-client"
+	}
+	shortID := sess.ID
+	if len(shortID) > 8 {
+		shortID = shortID[:8]
+	}
+	return fmt.Sprintf("%s · %s · %s", clientID, shortID, sess.StartedAt.Local().Format("2006-01-02 15:04:05"))
+}
+
+func (s *uiState) openManualRuleOverlay(app *tview.Application, pages *tview.Pages, cfg ServeUIConfig, source string, onSaved func()) {
+	if app == nil || pages == nil || cfg.API == nil {
+		return
+	}
+	prevFocus := app.GetFocus()
+	selectedSessionID := ""
+	selectedOp := manualRuleOperations[0]
+	selectedMatch := manualRuleMatchOptions(selectedOp)[0]
+
+	formRows := tview.NewFlex().SetDirection(tview.FlexRow)
+	focusables := make([]tview.Primitive, 0, 6)
+	if source == "session" {
+		sessions, err := cfg.API.ListManualRuleSessionsForTUI()
+		sessionDrop := tview.NewDropDown().SetLabel("session: ")
+		labels := make([]string, 0, len(sessions))
+		for _, sess := range sessions {
+			labels = append(labels, manualRuleSessionLabel(sess))
+		}
+		sessionDrop.SetOptions(labels, func(_ string, index int) {
+			if index >= 0 && index < len(sessions) {
+				selectedSessionID = sessions[index].ID
+			}
+		})
+		if len(sessions) > 0 {
+			selectedSessionID = sessions[0].ID
+			sessionDrop.SetCurrentOption(0)
+		}
+		formRows.AddItem(sessionDrop, 1, 0, true)
+		focusables = append(focusables, sessionDrop)
+		if err != nil {
+			selectedSessionID = ""
+		}
+	}
+
+	matchDrop := tview.NewDropDown().SetLabel("match: ")
+	setMatchOptions := func(opType string) {
+		options := manualRuleMatchOptions(opType)
+		selectedMatch = options[0]
+		matchDrop.SetOptions(options, func(text string, _ int) {
+			selectedMatch = text
+		})
+		matchDrop.SetCurrentOption(0)
+	}
+	setMatchOptions(selectedOp)
+
+	opDrop := tview.NewDropDown().SetLabel("operation: ")
+	opDrop.SetOptions(manualRuleOperations, func(text string, _ int) {
+		selectedOp = text
+		setMatchOptions(text)
+	})
+	opDrop.SetCurrentOption(0)
+	scopeInput := tview.NewInputField().SetLabel("scope: ")
+	formRows.AddItem(opDrop, 1, 0, len(focusables) == 0)
+	formRows.AddItem(matchDrop, 1, 0, false)
+	formRows.AddItem(scopeInput, 1, 0, false)
+	focusables = append(focusables, opDrop, matchDrop, scopeInput)
+
+	errText := tview.NewTextView().SetDynamicColors(false).SetTextColor(tcell.ColorRed)
+	close := func() {
+		pages.RemovePage("manual_rule")
+		s.overlayClose = nil
+		if prevFocus != nil {
+			app.SetFocus(prevFocus)
+		}
+	}
+	save := func() {
+		input := httpapi.ManualRuleInput{
+			Source: source, SessionID: selectedSessionID, OpType: selectedOp,
+			Match: selectedMatch, Pattern: scopeInput.GetText(),
+		}
+		ruleID, err := cfg.API.AddManualRuleForTUI(input)
+		if err != nil {
+			errText.SetText(err.Error())
+			return
+		}
+		close()
+		s.toastText = "Rule added: " + ruleID
+		s.toastUntil = time.Now().Add(5 * time.Second)
+		if onSaved != nil {
+			onSaved()
+		}
+	}
+	btnSave := tview.NewButton("Save").SetSelectedFunc(save)
+	btnCancel := tview.NewButton("Cancel").SetSelectedFunc(close)
+	buttons := tview.NewFlex().SetDirection(tview.FlexColumn).
+		AddItem(btnSave, 0, 1, false).
+		AddItem(btnCancel, 0, 1, false)
+	focusables = append(focusables, btnSave, btnCancel)
+
+	moveFocus := func(delta int) {
+		current := app.GetFocus()
+		for i, primitive := range focusables {
+			if primitive == current {
+				next := (i + delta + len(focusables)) % len(focusables)
+				app.SetFocus(focusables[next])
+				return
+			}
+		}
+		app.SetFocus(focusables[0])
+	}
+	title := "Add always rule"
+	if source == "session" {
+		title = "Add session rule"
+	}
+	root := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(formRows, formRows.GetItemCount(), 0, true).
+		AddItem(errText, 1, 0, false).
+		AddItem(buttons, 1, 0, false)
+	root.SetBorder(true).SetTitle(title)
+	root.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
+		switch ev.Key() {
+		case tcell.KeyTAB:
+			moveFocus(1)
+			return nil
+		case tcell.KeyBacktab:
+			moveFocus(-1)
+			return nil
+		case tcell.KeyEsc:
+			close()
+			return nil
+		}
+		return ev
+	})
+	s.overlayClose = close
+	height := 7
+	if source == "session" {
+		height++
+	}
+	pages.AddPage("manual_rule", centered(root, 92, height), true, true)
+	app.SetFocus(focusables[0])
 }
 
 func buildRulesPage(app *tview.Application, pages *tview.Pages, s *uiState, cfg ServeUIConfig) tview.Primitive {
@@ -1959,40 +2123,46 @@ func buildRulesPage(app *tview.Application, pages *tview.Pages, s *uiState, cfg 
 	})
 
 	btnToggle := tview.NewButton("Enable/Disable").SetSelectedFunc(func() {
-		if cfg.Store == nil || selectedIndex < 0 || selectedIndex >= len(rows) {
+		if cfg.API == nil || selectedIndex < 0 || selectedIndex >= len(rows) {
 			return
 		}
 		r := rows[selectedIndex]
 		if strings.HasPrefix(r.Source, "session") {
 			return
 		}
-		if r.Enabled {
-			_ = cfg.Store.DisableRule(context.Background(), r.RuleID, time.Now().UTC())
-		} else {
-			_ = cfg.Store.EnableRule(context.Background(), r.RuleID)
+		if err := cfg.API.SetAlwaysRuleEnabledForTUI(r.RuleID, !r.Enabled); err != nil {
+			details.SetText("error: " + err.Error())
+			return
 		}
 		refresh()
 	})
 
 	btnDelete := tview.NewButton("Delete").SetSelectedFunc(func() {
-		if cfg.Store == nil || selectedIndex < 0 || selectedIndex >= len(rows) {
+		if cfg.API == nil || selectedIndex < 0 || selectedIndex >= len(rows) {
 			return
 		}
-		if strings.HasPrefix(rows[selectedIndex].Source, "session") {
-			return
-		}
-		ruleID := rows[selectedIndex].RuleID
+		rule := rows[selectedIndex]
+		ruleID := rule.RuleID
 		m := tview.NewModal().
 			SetText("Delete rule " + ruleID + "?").
 			AddButtons([]string{"Cancel", "Delete"}).
 			SetDoneFunc(func(ix int, _ string) {
 				pages.RemovePage("confirm_delete_rule")
 				if ix == 1 {
-					_ = cfg.Store.DeleteRule(context.Background(), ruleID)
+					if err := cfg.API.DeleteRuleForTUI(rule.Source, ruleID); err != nil {
+						details.SetText("error: " + err.Error())
+						return
+					}
 					refresh()
 				}
 			})
 		pages.AddPage("confirm_delete_rule", m, true, true)
+	})
+	btnAddSession := tview.NewButton("Add Session").SetSelectedFunc(func() {
+		s.openManualRuleOverlay(app, pages, cfg, "session", refresh)
+	})
+	btnAddAlways := tview.NewButton("Add Always").SetSelectedFunc(func() {
+		s.openManualRuleOverlay(app, pages, cfg, "always", refresh)
 	})
 
 	back := func() {
@@ -2008,6 +2178,8 @@ func buildRulesPage(app *tview.Application, pages *tview.Pages, s *uiState, cfg 
 		AddItem(tview.NewFlex().SetDirection(tview.FlexColumn).
 			AddItem(body, 0, 1, true).
 			AddItem(tview.NewFlex().SetDirection(tview.FlexColumn).
+				AddItem(btnAddSession, 0, 1, false).
+				AddItem(btnAddAlways, 0, 1, false).
 				AddItem(btnToggle, 0, 1, false).
 				AddItem(btnDelete, 0, 1, false).
 				AddItem(btnBack, 0, 1, true), 1, 0, true), 0, 1, true).
@@ -2016,6 +2188,14 @@ func buildRulesPage(app *tview.Application, pages *tview.Pages, s *uiState, cfg 
 	root.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
 		if ev.Key() == tcell.KeyEsc {
 			back()
+			return nil
+		}
+		switch hotkeyRune(ev.Rune()) {
+		case 's':
+			s.openManualRuleOverlay(app, pages, cfg, "session", refresh)
+			return nil
+		case 'a':
+			s.openManualRuleOverlay(app, pages, cfg, "always", refresh)
 			return nil
 		}
 		return ev

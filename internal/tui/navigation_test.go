@@ -11,6 +11,17 @@ import (
 	"github.com/itolstov/racg/internal/httpapi"
 )
 
+func collectButtonLabels(p tview.Primitive, out *[]string) {
+	switch v := p.(type) {
+	case *tview.Button:
+		*out = append(*out, v.GetLabel())
+	case *tview.Flex:
+		for i := 0; i < v.GetItemCount(); i++ {
+			collectButtonLabels(v.GetItem(i), out)
+		}
+	}
+}
+
 func TestShowHistoryCallsRefresh(t *testing.T) {
 	s := newUIState(nil, nil)
 	called := 0
@@ -36,6 +47,44 @@ func TestShowRulesCallsRefresh(t *testing.T) {
 	}
 	if called != 1 {
 		t.Fatalf("refresh called %d times, want 1", called)
+	}
+}
+
+func TestRulesPageOffersManualSessionAndAlwaysButtons(t *testing.T) {
+	app := tview.NewApplication()
+	pages := tview.NewPages()
+	s := newUIState(httpapi.New(config.Defaults()), nil)
+	root := buildRulesPage(app, pages, s, ServeUIConfig{API: s.api})
+	var labels []string
+	collectButtonLabels(root, &labels)
+	joined := strings.Join(labels, "|")
+	for _, want := range []string{"Add Session", "Add Always"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("buttons=%q missing %q", joined, want)
+		}
+	}
+}
+
+func TestRulesPageManualRuleHotkeysWorkOnEnglishAndRussianLayouts(t *testing.T) {
+	for _, key := range []rune{'a', 'ф', 's', 'ы'} {
+		t.Run(string(key), func(t *testing.T) {
+			app := tview.NewApplication()
+			pages := tview.NewPages()
+			s := newUIState(httpapi.New(config.Defaults()), nil)
+			root := buildRulesPage(app, pages, s, ServeUIConfig{API: s.api})
+			pages.AddPage("rules", root, true, true)
+			handler := root.InputHandler()
+			if handler == nil {
+				t.Fatal("rules page has no input handler")
+			}
+			handler(tcell.NewEventKey(tcell.KeyRune, key, tcell.ModNone), func(p tview.Primitive) {
+				app.SetFocus(p)
+			})
+			front, _ := pages.GetFrontPage()
+			if front != "manual_rule" {
+				t.Fatalf("key=%q front=%q, want manual_rule", key, front)
+			}
+		})
 	}
 }
 
@@ -462,5 +511,8 @@ func TestHelpTextUsesF1Only(t *testing.T) {
 		if strings.Contains(got, removed) {
 			t.Fatalf("helpText=%q still contains removed shortcut %q", got, removed)
 		}
+	}
+	if !strings.Contains(got, "rules: a add always / s add session") {
+		t.Fatalf("help missing manual rule hotkeys: %q", got)
 	}
 }

@@ -207,4 +207,6 @@ Dangerous (по умолчанию `ALLOW_ALWAYS` запрещен):
 
 Press `3 Rules` in the built-in TUI to view rules without leaving `racg serve`.
 The page shows persisted `ALLOW_ALWAYS` rules and in-memory `ALLOW_SESSION` rules.
-Session rules expire when the server/session ends and cannot be disabled or deleted from the persisted rules store.
+Use `Add Session` (`s`, also works on a Russian keyboard layout) to create an in-memory rule for a selected session. Use `Add Always` (`a`) to create a persisted rule. The form supports command scopes and exact, prefix, or glob path scopes for existing file/config operations. Command scopes use the same parser as approval scopes, so shell separators must be represented by separate rules.
+Manual persisted rules obey `allow_always_for_dangerous`; dangerous `Add Always` rules are rejected unless that server option is explicitly enabled. Session rules remain available for temporary authorization.
+Session rules expire when the server/session ends and can be deleted from the Rules page. Persisted rules can be enabled, disabled, or deleted; changes take effect in the live rule engine immediately.

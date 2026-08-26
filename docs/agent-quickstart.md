@@ -301,7 +301,7 @@ The preset auto-approves:
 
 Do not auto-approve destructive or mutating operations such as `kubectl apply/delete/patch`, `git push`, `sudo`, firewall commands, or filesystem deletion.
 
-The human can view both persisted `ALLOW_ALWAYS` rules and in-memory `ALLOW_SESSION` rules in the TUI via `3 Rules`. Session rules expire when the server/session ends.
+The human can view and manually create both persisted `ALLOW_ALWAYS` rules and in-memory `ALLOW_SESSION` rules in the TUI via `3 Rules`. `Add Session` (`s`) requires selecting a session; `Add Always` (`a`) persists the rule. The form supports command scopes and exact, prefix, or glob path scopes. Manual persisted rules obey `allow_always_for_dangerous`. Session rules expire when the server/session ends. Rule enable, disable, and delete actions affect the live engine immediately.
 
 By default `racg serve` stores persisted history and `ALLOW_ALWAYS` rules in `~/.local/state/racg/racg.db`. Humans can start separate server rule/history sets with `racg serve --profile docker` or `racg serve --profile network`; the profile selects a separate DB under the RACG state directory.
 
