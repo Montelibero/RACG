@@ -38,6 +38,10 @@ func TestRootHelpIncludesFileAndConfigExamples(t *testing.T) {
 		"racg file download /srv/remote.bin ./local.bin",
 		"racg config set values.yaml image.tag v1.2.3 --format yaml",
 		"racg run -- bash -lc",
+		"racg request wait <id>",
+		"--execution-timeout 2m",
+		"--status-interval 30s",
+		"--reconnect-timeout 5m",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("help missing %q:\n%s", want, got)

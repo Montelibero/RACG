@@ -20,8 +20,15 @@ racg run --no-wait -- /bin/sh -c 'while true; do date +"tick %H:%M:%S"; sleep 3;
 After approval:
 
 ```bash
+racg request wait <id>
 racg request logs <id> --live
 racg request tail <id>
+```
+
+If the local terminal closes or waiting times out, resume the same request:
+
+```bash
+racg request wait <id> --wait-timeout 30m
 ```
 
 Stop it:

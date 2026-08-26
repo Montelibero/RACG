@@ -1,2 +1,4 @@
 .worktrees/
 racg.db
+.belief_map.sexp
+.belief_map_cache.json

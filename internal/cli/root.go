@@ -87,7 +87,7 @@ commands:
   logout     remove saved client auth
   session    inspect saved/current session
   run        submit cmd.run and wait by default
-  request    cancel, tail, or read request logs
+  request    wait, cancel, tail, or read request logs
   file       read, patch, upload, or download files through approval
   config     set env/json/yaml config keys through approval
   rules      list, enable/disable/delete, and install presets
@@ -103,7 +103,9 @@ quick start:
 common commands:
   racg run -- bash -lc 'date && uname -a'
   racg run --name prod -- bash -lc 'date && uname -a'
+  racg run --execution-timeout 2m -- bash -lc 'date && uname -a'
   racg run --no-wait -- /bin/sh -c 'while true; do date; sleep 3; done'
+  racg request wait <id> --status-interval 30s --reconnect-timeout 5m
   racg request logs <id> --live
   racg request tail <id>
   racg request cancel <id>

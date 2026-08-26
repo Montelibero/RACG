@@ -24,14 +24,17 @@ Use RACG when command execution must go through a human-approved gateway instead
 4. For plain text files such as HAProxy, nginx, systemd units, or native `.cfg` files, use `racg file read` and `racg file patch` with a unified diff.
    - Do not treat native text configs as YAML just because a compose/stack file references them.
    - Read the current file before generating the unified diff.
-5. For running requests, inspect partial output with:
+5. Resume or continue waiting for an existing request without resubmitting it:
+   - `racg request wait <id> [--wait-timeout 30m]`
+   - A local wait timeout or connection failure does not cancel or repeat the remote request.
+6. For running requests, inspect partial output with:
    - `racg request logs <id> --live`
    - `racg request tail <id>`
-6. For finished requests, inspect final streams with:
+7. For finished requests, inspect final streams with:
    - `racg request logs <id> --stdout`
    - `racg request logs <id> --stderr`
-7. Stop requests with `racg request cancel <id>` when the user asks to interrupt, cancel, kill, or stop a pending/running request.
-8. For binary, archive, or large file transfer, use:
+8. Stop requests with `racg request cancel <id>` when the user asks to interrupt, cancel, kill, or stop a pending/running request.
+9. For binary, archive, or large file transfer, use:
    - `racg file upload <local> <remote> [--mode 0600]`
    - `racg file download <remote> <local> [--force]`
    - Do not encode file content into shell commands, JSON, or base64. RACG streams bytes and verifies SHA-256.
@@ -49,6 +52,6 @@ Use RACG when command execution must go through a human-approved gateway instead
 - For arbitrary text edits, use `racg file read` plus `racg file patch`; avoid ad-hoc scripts when a unified diff is enough.
 - For whole-file transfer, use `racg file upload` or `racg file download`; use `--force` only when replacing the named local destination is intended.
 - Prefer read-only diagnostics before mutating operations.
-- If a request is pending approval, do not repeatedly resubmit the same command; wait, tail live output after approval, or cancel if requested.
+- If a request is pending approval, do not repeatedly resubmit the same command; use `racg request wait <id>`, tail live output, or cancel if requested.
 - When reporting results, summarize `status`, `exit_code`, and relevant stdout/stderr sections. Do not paste huge logs unless asked; use live/final log commands to retrieve focused snippets.
 - If RACG returns `PAIRING_CODE_USED`, reuse the existing saved client config if available, or ask for a fresh pairing code.

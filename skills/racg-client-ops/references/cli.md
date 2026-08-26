@@ -54,23 +54,36 @@ Useful flags:
 
 ```text
 --cwd <dir>              command working directory
---timeout <seconds>      command timeout
+--execution-timeout <d>  maximum remote process execution time
+--timeout <seconds>      legacy execution-timeout alias
 --no-wait                print request id and return immediately
 --poll-interval <dur>    wait/tail polling interval
---wait-timeout <dur>     maximum wait duration for racg run
+--wait-timeout <dur>     maximum local wait; does not cancel remote work
+--status-interval <dur>  status heartbeat; 0 disables
+--reconnect-timeout <d>  maximum time to restore observation
 ```
 
-Expected compact output includes:
+Status transitions are written to stderr. Live output and the final report are written to stdout:
 
 ```text
-request_id: <uuid>
-status: <PENDING_APPROVAL|RUNNING|SUCCEEDED|FAILED|KILLED|...>
-exit_code: <n>
-stdout:
-...
-stderr:
-...
+status: <PENDING_APPROVAL|APPROVED|QUEUED|RUNNING|...>
+waiting_for: <server approval|execution slot|remote process>
+
+Request: <uuid>
+Status: <terminal status>
+Exit code: <n>
+Output truncated: <yes|no>
 ```
+
+## Wait And Resume
+
+Attach to an existing request without creating a new request or repeating the operation:
+
+```bash
+racg request wait <id> --wait-timeout 30m
+```
+
+The command follows status changes and live output, retries temporary observation failures for `--reconnect-timeout`, and returns the remote process exit code. `--wait-timeout` is local only. If it expires, run the same command again; the remote request is not cancelled.
 
 ## Config Edits
 

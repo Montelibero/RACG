@@ -118,7 +118,7 @@
       },
       "RequestStatus": {
         "type": "string",
-        "enum": ["PENDING_APPROVAL", "APPROVED", "RUNNING", "SUCCEEDED", "FAILED", "TIMED_OUT", "KILLED", "DENIED", "CANCELED"]
+        "enum": ["PENDING_APPROVAL", "APPROVED", "QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "TIMED_OUT", "KILLED", "DENIED", "CANCELED"]
       },
       "OpType": {
         "type": "string",

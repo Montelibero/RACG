@@ -22,6 +22,8 @@ Before submitting a command, identify:
 - whether it reads, writes, restarts, deletes, patches, applies, or exposes secrets
 - expected stdout/stderr size
 
+Use `--execution-timeout` to constrain remote execution. Do not confuse it with `--wait-timeout`, which only stops local observation and deliberately leaves the approved remote request running. Resume observation with `racg request wait <id>` instead of submitting the command again.
+
 ## Risk Words
 
 Treat these as requiring extra care and usually manual approval:

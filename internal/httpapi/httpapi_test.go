@@ -637,7 +637,7 @@ func TestDecisionPersistsDecisionInSQLite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRequest: %v", err)
 	}
-	if gotReq.Status != "APPROVED" && gotReq.Status != "RUNNING" && gotReq.Status != "SUCCEEDED" && gotReq.Status != "FAILED" && gotReq.Status != "TIMED_OUT" && gotReq.Status != "KILLED" {
+	if gotReq.Status != "APPROVED" && gotReq.Status != "QUEUED" && gotReq.Status != "RUNNING" && gotReq.Status != "SUCCEEDED" && gotReq.Status != "FAILED" && gotReq.Status != "TIMED_OUT" && gotReq.Status != "KILLED" {
 		t.Fatalf("request status=%q", gotReq.Status)
 	}
 }
@@ -653,6 +653,46 @@ func (im immediateRunner) Run(ctx context.Context, s executor.Spec) executor.Res
 		Stderr:       "",
 		StdoutSHA256: "x",
 		StderrSHA256: "y",
+	}
+}
+
+func TestApprovedRequestReportsQueuedWhileWaitingForExecutionSlot(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.MaxConcurrency = 1
+	api := New(cfg, WithExecutor(immediateRunner{}))
+	api.sem <- struct{}{}
+
+	payload, err := json.Marshal(map[string]any{"argv": []string{"/bin/echo", "hi"}})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	api.reqs["req-queued"] = requestRecord{ID: "req-queued", Status: "APPROVED"}
+	done := make(chan struct{})
+	go func() {
+		api.executeApprovedRequest("req-queued", auth.Claims{}, rules.Op{Type: "cmd.run", Payload: payload})
+		close(done)
+	}()
+	defer func() {
+		<-api.sem
+		<-done
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		api.reqsMu.Lock()
+		status := api.reqs["req-queued"].Status
+		api.reqsMu.Unlock()
+		if status == "QUEUED" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("status=%q, want QUEUED", status)
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	if err := api.killInternal(context.Background(), "req-queued", auth.Claims{}); err != nil {
+		t.Fatalf("kill queued request: %v", err)
 	}
 }
 

@@ -83,13 +83,17 @@ racg run -- bash -lc 'date && uname -a'
 Expected output is compact, not a full JSON document:
 
 ```text
-request_id: <uuid>
-status: SUCCEEDED
-exit_code: 0
-stdout:
-...
-stderr:
-...
+status: PENDING_APPROVAL
+waiting_for: server approval
+elapsed: 1m42s
+
+Request: <uuid>
+Status: SUCCEEDED
+Approval wait: 2m13s
+Queue wait: 1s
+Execution: 14s
+Exit code: 0
+Output truncated: no
 ```
 
 Submit a long-running command without waiting:
@@ -102,11 +106,22 @@ Useful flags:
 
 ```text
 --cwd <dir>              command working directory
---timeout <seconds>      command timeout
+--execution-timeout <d>  maximum remote process execution time
+--timeout <seconds>      legacy execution-timeout alias
 --no-wait                print request id and return immediately
 --poll-interval <dur>    wait/tail polling interval
---wait-timeout <dur>     maximum wait duration for racg run
+--wait-timeout <dur>     maximum local wait; does not cancel the request
+--status-interval <dur>  unchanged-status heartbeat; 0 disables
+--reconnect-timeout <d>  maximum time to restore observation
 ```
+
+Resume an existing request after `--no-wait`, a local timeout, terminal closure, or a temporary connection loss:
+
+```bash
+racg request wait <request_id> --wait-timeout 30m
+```
+
+`request wait` never creates or repeats the remote operation. If local waiting ends, the remote request remains active until it reaches a terminal state or is explicitly cancelled.
 
 ## 3. Edit Config Values
 
@@ -180,6 +195,15 @@ After request creation, status is usually `PENDING_APPROVAL`. The human decides 
 
 For long-running or pending work, do not submit duplicate requests. Wait for approval, inspect live output after it starts, or cancel if the user asks.
 
+Non-terminal server statuses:
+
+- `PENDING_APPROVAL` — waiting for a human decision
+- `APPROVED` — approval has been recorded
+- `QUEUED` — waiting for an execution slot
+- `RUNNING` — the remote process is running
+
+`SUBMITTED`, `CONNECTION_LOST`, and `CONNECTION_RESTORED` are local client notifications, not persisted server states.
+
 Terminal statuses:
 
 - `SUCCEEDED`
@@ -190,6 +214,14 @@ Terminal statuses:
 - `CANCELED`
 
 ## 7. Live And Final Output
+
+Wait for an existing request, follow its live output, and receive its final exit code:
+
+```bash
+racg request wait <request_id>
+```
+
+This is the preferred command when the caller must survive a local interruption and later continue waiting for the same request.
 
 Current live combined output while a request is running:
 

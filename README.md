@@ -97,6 +97,8 @@ Then run client helper commands without passing a token each time:
 
 ```bash
 racg run -- bash -lc 'date && uname -a'
+racg run --execution-timeout 2m -- long-running-command
+racg request wait <request_id> --wait-timeout 30m
 racg request cancel <request_id>
 racg request logs <request_id> --live
 racg request tail <request_id>
@@ -115,7 +117,9 @@ racg logout
 
 You can still override saved config with `--host`, `--token`, `RACG_HOST`, and `RACG_TOKEN`. Set `RACG_CLIENT_CONFIG` to use one explicit config file, or `RACG_CLIENT_NAME` to select a saved profile for the current shell. Without `--name`, `RACG_CLIENT_NAME`, `RACG_CLIENT_CONFIG`, or `--host` plus `--token`, client commands fail instead of reading global mutable state.
 
-`racg run` creates a `cmd.run` request and waits until it reaches a terminal status, then prints compact sections: `request_id`, `status`, `exit_code`, `stdout`, `stderr`.
+`racg run` creates a `cmd.run` request and waits until it reaches a terminal status. While waiting, status transitions and periodic heartbeats are written to stderr; live combined output and the final timing/exit-code report are written to stdout. Use `--status-interval 0` to disable heartbeats.
+`racg request wait <id>` resumes observation of an existing request without creating or repeating it. It follows live output, survives temporary connection failures for `--reconnect-timeout` (default `5m`), and returns the remote process exit code. A local `--wait-timeout` only stops the client: it never cancels the remote request. Run the same `request wait` command again to resume.
+Use `--execution-timeout 2m` to limit the remote process. The legacy `--timeout <seconds>` form remains supported. This execution timeout is independent from local `--wait-timeout`.
 `racg request logs` reads raw stream endpoints (`/v1/requests/<id>/logs/stdout` and `/v1/requests/<id>/logs/stderr`) so large output can be consumed without parsing the full request JSON.
 Use `racg request logs <id> --live` for the current in-memory live output snapshot while a request is still running, or `racg request tail <id>` to follow live output until the request reaches a terminal status.
 Use `racg request cancel <id>` to cancel a pending approval or stop a running command.

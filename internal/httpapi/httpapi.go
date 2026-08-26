@@ -217,7 +217,7 @@ func (a *API) RehydrateFromStore(ctx context.Context) error {
 		return nil
 	}
 
-	reqs, err := a.st.ListRequestsByStatus(ctx, []string{"PENDING_APPROVAL", "APPROVED", "RUNNING"}, 5000)
+	reqs, err := a.st.ListRequestsByStatus(ctx, []string{"PENDING_APPROVAL", "APPROVED", "QUEUED", "RUNNING"}, 5000)
 	if err != nil {
 		return err
 	}
@@ -574,7 +574,7 @@ func (a *API) killInternal(ctx context.Context, requestID string, c auth.Claims)
 	}
 
 	// If not running yet, mark terminal and do not execute.
-	if rec.Status == "PENDING_APPROVAL" || rec.Status == "APPROVED" {
+	if rec.Status == "PENDING_APPROVAL" || rec.Status == "APPROVED" || rec.Status == "QUEUED" {
 		status := "KILLED"
 		message := "killed before start"
 		if rec.Status == "PENDING_APPROVAL" {
@@ -653,7 +653,7 @@ func (a *API) ListJobsForTUI(includeFinished bool) []TUIRequest {
 	a.reqsMu.Lock()
 	defer a.reqsMu.Unlock()
 	out := listForTUI(a.reqs, func(st string) bool {
-		if st == "RUNNING" || st == "APPROVED" {
+		if st == "RUNNING" || st == "APPROVED" || st == "QUEUED" {
 			return true
 		}
 		if !includeFinished {
@@ -673,7 +673,7 @@ func (a *API) ListJobsForTUI(includeFinished bool) []TUIRequest {
 func (a *API) ListApprovedForTUI() []TUIRequest {
 	a.reqsMu.Lock()
 	defer a.reqsMu.Unlock()
-	return listForTUI(a.reqs, func(st string) bool { return st == "APPROVED" })
+	return listForTUI(a.reqs, func(st string) bool { return st == "APPROVED" || st == "QUEUED" })
 }
 
 func (a *API) ListSessionRulesForTUI() []store.RuleRow {
@@ -1072,6 +1072,29 @@ func (a *API) executeApprovedRequest(requestID string, c auth.Claims, op rules.O
 	a.reqsMu.Unlock()
 	if ok0 && rec0.Status == "KILLED" {
 		return
+	}
+
+	// The request is approved but has not acquired an execution slot yet.
+	a.reqsMu.Lock()
+	rec0, ok0 = a.reqs[requestID]
+	if ok0 && rec0.Status == "APPROVED" {
+		rec0.Status = "QUEUED"
+		a.reqs[requestID] = rec0
+	}
+	a.reqsMu.Unlock()
+	if ok0 && rec0.Status == "QUEUED" {
+		if a.st != nil {
+			_ = a.st.UpdateRequestStatus(context.Background(), requestID, "QUEUED")
+		}
+		a.hub.Publish(events.Event{
+			Type:      "request.queued",
+			RequestID: requestID,
+			SessionID: c.SessionID,
+			ClientID:  c.ClientID,
+			Data: map[string]any{
+				"status": "QUEUED",
+			},
+		})
 	}
 
 	// Bounded concurrency.

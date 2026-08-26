@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestCLIRunCreatesRequestWaitsAndPrintsSections(t *testing.T) {
@@ -35,6 +37,8 @@ func TestCLIRunCreatesRequestWaitsAndPrintsSections(t *testing.T) {
 			gets++
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"request_id":"req1","status":"SUCCEEDED","result":{"exit_code":0,"stdout":"hello\n","stderr":"warn\n"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/requests/req1/logs/live":
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		default:
 			t.Fatalf("%s %s", r.Method, r.URL.Path)
 		}
@@ -58,10 +62,50 @@ func TestCLIRunCreatesRequestWaitsAndPrintsSections(t *testing.T) {
 	if gets == 0 {
 		t.Fatalf("request was not polled")
 	}
-	for _, want := range []string{"request_id: req1", "status: SUCCEEDED", "exit_code: 0", "stdout:\nhello\n", "stderr:\nwarn\n"} {
+	if !strings.Contains(errOut.String(), "status: SUBMITTED") {
+		t.Fatalf("stderr=%q, want submitted client state", errOut.String())
+	}
+	for _, want := range []string{"Request: req1", "Status: SUCCEEDED", "Exit code: 0", "stdout:\nhello\n", "stderr:\nwarn\n"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("stdout=%q, want contains %q", out.String(), want)
 		}
+	}
+}
+
+func TestCLIRunAcceptsExecutionTimeoutAsDuration(t *testing.T) {
+	var timeoutSec int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/requests":
+			var posted struct {
+				Op struct {
+					Payload struct {
+						TimeoutSec int `json:"timeout_sec"`
+					} `json:"payload"`
+				} `json:"op"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&posted); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			timeoutSec = posted.Op.Payload.TimeoutSec
+			_, _ = w.Write([]byte(`{"request_id":"req1","status":"PENDING_APPROVAL"}`))
+		default:
+			t.Fatalf("%s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer ts.Close()
+
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	code := NewRoot(&out, &errOut).Run([]string{
+		"run", "--host", ts.URL, "--token", "tok", "--no-wait",
+		"--execution-timeout", "1m30s", "--", "/bin/echo", "hi",
+	})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	if timeoutSec != 90 {
+		t.Fatalf("timeout_sec=%d, want 90", timeoutSec)
 	}
 }
 
@@ -175,5 +219,235 @@ func TestCLIRequestTailPrintsLiveDeltaUntilTerminal(t *testing.T) {
 	}
 	if out.String() != "abcdef" {
 		t.Fatalf("stdout=%q", out.String())
+	}
+}
+
+func TestCLIRequestWaitShowsTransitionsStreamsOutputAndPrintsReport(t *testing.T) {
+	statuses := []string{
+		`{"request_id":"req1","status":"PENDING_APPROVAL","created_at":"2026-08-26T10:00:00Z"}`,
+		`{"request_id":"req1","status":"QUEUED","created_at":"2026-08-26T10:00:00Z","decision":{"decided_at":"2026-08-26T10:02:00Z"}}`,
+		`{"request_id":"req1","status":"RUNNING","created_at":"2026-08-26T10:00:00Z","decision":{"decided_at":"2026-08-26T10:02:00Z"}}`,
+		`{"request_id":"req1","status":"SUCCEEDED","created_at":"2026-08-26T10:00:00Z","decision":{"decided_at":"2026-08-26T10:02:00Z"},"result":{"started_at":"2026-08-26T10:02:03Z","finished_at":"2026-08-26T10:02:08Z","duration_ms":5000,"exit_code":0,"stdout":"hello\n","stderr":"","stdout_truncated":false,"stderr_truncated":false}}`,
+	}
+	var statusGets atomic.Int32
+	var liveGets atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/requests/req1":
+			i := int(statusGets.Add(1)) - 1
+			if i >= len(statuses) {
+				i = len(statuses) - 1
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(statuses[i]))
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/requests/req1/logs/live":
+			if liveGets.Add(1) < 2 {
+				_, _ = w.Write([]byte("O: hel"))
+				return
+			}
+			_, _ = w.Write([]byte("O: hello\n"))
+		default:
+			t.Fatalf("%s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer ts.Close()
+
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	code := NewRoot(&out, &errOut).Run([]string{
+		"request", "wait", "req1",
+		"--host", ts.URL, "--token", "tok",
+		"--poll-interval", "1ms", "--status-interval", "0",
+	})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s stdout=%s", code, errOut.String(), out.String())
+	}
+	for _, want := range []string{"status: PENDING_APPROVAL", "status: QUEUED", "status: RUNNING", "status: SUCCEEDED"} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Fatalf("stderr=%q, want %q", errOut.String(), want)
+		}
+	}
+	for _, want := range []string{
+		"O: hello\n",
+		"Request: req1",
+		"Status: SUCCEEDED",
+		"Approval wait: 2m0s",
+		"Queue wait: 3s",
+		"Execution: 5s",
+		"Exit code: 0",
+		"Stdout: 6 B",
+		"Output truncated: no",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("stdout=%q, want %q", out.String(), want)
+		}
+	}
+	if strings.Count(out.String(), "hello") != 1 {
+		t.Fatalf("live output was duplicated in final result: %q", out.String())
+	}
+}
+
+func TestCLIRequestWaitReconnectsWithoutCreatingOrCancellingRequest(t *testing.T) {
+	var gets atomic.Int32
+	var nonGets atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			nonGets.Add(1)
+		}
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/requests/req1":
+			if gets.Add(1) == 1 {
+				http.Error(w, "temporary", http.StatusServiceUnavailable)
+				return
+			}
+			_, _ = w.Write([]byte(`{"request_id":"req1","status":"SUCCEEDED","result":{"exit_code":7,"stdout":"done\n","stderr":""}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/requests/req1/logs/live":
+			_, _ = w.Write([]byte(""))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	code := NewRoot(&out, &errOut).Run([]string{
+		"request", "wait", "req1",
+		"--host", ts.URL, "--token", "tok",
+		"--poll-interval", "1ms", "--reconnect-timeout", "100ms", "--status-interval", "0",
+	})
+	if code != 7 {
+		t.Fatalf("code=%d stderr=%s stdout=%s", code, errOut.String(), out.String())
+	}
+	for _, want := range []string{"status: CONNECTION_LOST", "status: CONNECTION_RESTORED"} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Fatalf("stderr=%q, want %q", errOut.String(), want)
+		}
+	}
+	if nonGets.Load() != 0 {
+		t.Fatalf("wait sent %d non-GET requests", nonGets.Load())
+	}
+}
+
+func TestCLIRequestWaitTimeoutDoesNotCancelRemoteRequest(t *testing.T) {
+	var killCalls atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/kill") {
+			killCalls.Add(1)
+			return
+		}
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/requests/req1" {
+			_, _ = w.Write([]byte(`{"request_id":"req1","status":"PENDING_APPROVAL"}`))
+			return
+		}
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/requests/req1/logs/live" {
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	code := NewRoot(&out, &errOut).Run([]string{
+		"request", "wait", "req1",
+		"--host", ts.URL, "--token", "tok",
+		"--poll-interval", "1ms", "--wait-timeout", "10ms", "--status-interval", "1ns",
+	})
+	if code != 1 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	if killCalls.Load() != 0 {
+		t.Fatalf("local timeout sent %d remote kill requests", killCalls.Load())
+	}
+	for _, want := range []string{
+		"request is still pending approval",
+		"The remote request was not cancelled.",
+		"racg request wait req1",
+	} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Fatalf("stderr=%q, want %q", errOut.String(), want)
+		}
+	}
+}
+
+func TestCLIRequestWaitTimeoutInterruptsHungStatusPoll(t *testing.T) {
+	release := make(chan struct{})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/requests/req1" {
+			http.NotFound(w, r)
+			return
+		}
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	defer func() {
+		close(release)
+		ts.Close()
+	}()
+
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	started := time.Now()
+	code := NewRoot(&out, &errOut).Run([]string{
+		"request", "wait", "req1",
+		"--host", ts.URL, "--token", "tok",
+		"--wait-timeout", "30ms", "--reconnect-timeout", "30ms", "--status-interval", "0",
+	})
+	if code != 1 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("local timeout took %s", elapsed)
+	}
+}
+
+func TestRequestExitCodePreservesFullProcessExitCodeRange(t *testing.T) {
+	for _, code := range []int{0, 1, 125, 126, 127, 255} {
+		rec := requestStatusResp{Status: "FAILED", Result: &resultStatus{ExitCode: code}}
+		if got := requestExitCode(rec); got != code {
+			t.Fatalf("exit code %d normalized to %d", code, got)
+		}
+	}
+	for _, code := range []int{-1, 256} {
+		rec := requestStatusResp{Status: "FAILED", Result: &resultStatus{ExitCode: code}}
+		if got := requestExitCode(rec); got != 1 {
+			t.Fatalf("invalid exit code %d normalized to %d", code, got)
+		}
+	}
+}
+
+func TestPrintRequestReportFallsBackToStoredStreams(t *testing.T) {
+	rec := requestStatusResp{
+		RequestID: "req1",
+		Status:    "FAILED",
+		Result: &resultStatus{
+			ExitCode:        9,
+			Stdout:          "partial\n",
+			Stderr:          "failed\n",
+			StdoutTruncated: true,
+		},
+	}
+	var out bytes.Buffer
+	printRequestReport(&out, rec, false)
+	for _, want := range []string{"Status: FAILED", "Exit code: 9", "stdout:\npartial\n", "stderr:\nfailed\n", "Output truncated: yes"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("report=%q, want %q", out.String(), want)
+		}
+	}
+}
+
+func TestWaitHeartbeatTextDescribesCurrentState(t *testing.T) {
+	for status, want := range map[string]string{
+		"PENDING_APPROVAL": "pending approval",
+		"APPROVED":         "approved and waiting for execution",
+		"QUEUED":           "queued for execution",
+		"RUNNING":          "running without new status",
+	} {
+		if got := waitHeartbeatText(status, time.Minute); !strings.Contains(got, want) {
+			t.Fatalf("status=%s heartbeat=%q, want %q", status, got, want)
+		}
 	}
 }
