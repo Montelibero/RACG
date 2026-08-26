@@ -389,6 +389,31 @@ func TestRuleScopeCandidatesIncludeEachShellSegment(t *testing.T) {
 	}
 }
 
+func TestRuleScopeAnalysisExplainsUnsupportedDynamicShellWord(t *testing.T) {
+	api := New(config.Defaults())
+	op := map[string]any{
+		"type": "cmd.run",
+		"payload": map[string]any{
+			"argv": []string{"bash", "-c", `git config --file /root/realme26-awg.conf Interface.PrivateKey "$(< /etc/amnezia/realme26.key)"`},
+		},
+	}
+	b, err := json.Marshal(op)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	api.reqs["req1"] = requestRecord{ID: "req1", Status: "PENDING_APPROVAL", Op: b, SessionID: "sess1"}
+
+	candidates, problem := api.RuleScopeAnalysisForTUI("req1")
+	if len(candidates) != 0 {
+		t.Fatalf("candidates=%#v, want none", candidates)
+	}
+	for _, want := range []string{"dynamic shell word", "git config"} {
+		if !strings.Contains(problem, want) {
+			t.Fatalf("problem=%q, want %q", problem, want)
+		}
+	}
+}
+
 func TestRuleScopeCandidatesQuoteArgsWithShellOperators(t *testing.T) {
 	api := New(config.Defaults())
 	op := map[string]any{
@@ -417,25 +442,32 @@ func TestRuleScopeCandidatesQuoteArgsWithShellOperators(t *testing.T) {
 }
 
 func TestRuleScopeCandidatesIncludePathOps(t *testing.T) {
-	api := New(config.Defaults())
-	op := map[string]any{
-		"type": "fs.read",
-		"payload": map[string]any{
-			"path": "/apps/haproxy/haproxy.cfg",
-		},
-	}
-	b, err := json.Marshal(op)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	api.reqs["req1"] = requestRecord{ID: "req1", Status: "PENDING_APPROVAL", Op: b, SessionID: "sess1", ClientID: "cli"}
+	for _, opType := range []string{
+		"fs.read", "fs.patch_unified", "fs.upload", "fs.download",
+		"fs.append_block", "fs.replace_literal", "conf.set", "conf.set_kv",
+	} {
+		t.Run(opType, func(t *testing.T) {
+			api := New(config.Defaults())
+			op := map[string]any{
+				"type": opType,
+				"payload": map[string]any{
+					"path": "/apps/haproxy/haproxy.cfg",
+				},
+			}
+			b, err := json.Marshal(op)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			api.reqs["req1"] = requestRecord{ID: "req1", Status: "PENDING_APPROVAL", Op: b, SessionID: "sess1", ClientID: "cli"}
 
-	got := api.RuleScopeCandidatesForTUI("req1")
-	if len(got) != 1 {
-		t.Fatalf("candidates=%d want 1: %#v", len(got), got)
-	}
-	if got[0].OpType != "fs.read" || got[0].Segment != "/apps/haproxy/haproxy.cfg" || got[0].Pattern != "/apps/haproxy/haproxy.cfg" {
-		t.Fatalf("candidate=%#v", got[0])
+			got := api.RuleScopeCandidatesForTUI("req1")
+			if len(got) != 1 {
+				t.Fatalf("candidates=%d want 1: %#v", len(got), got)
+			}
+			if got[0].OpType != opType || got[0].Segment != "/apps/haproxy/haproxy.cfg" || got[0].Pattern != "/apps/haproxy/haproxy.cfg" {
+				t.Fatalf("candidate=%#v", got[0])
+			}
+		})
 	}
 }
 

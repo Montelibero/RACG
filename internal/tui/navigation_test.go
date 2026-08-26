@@ -65,6 +65,28 @@ func TestRulesPageOffersManualSessionAndAlwaysButtons(t *testing.T) {
 	}
 }
 
+func TestRuleScopeOverlayWithoutCandidatesDoesNotOfferSave(t *testing.T) {
+	app := tview.NewApplication()
+	pages := tview.NewPages()
+	s := newUIState(httpapi.New(config.Defaults()), nil)
+	s.selectedPending = "missing-request"
+	s.openRuleScopeOverlay(app, pages, "ALLOW_SESSION")
+
+	name, primitive := pages.GetFrontPage()
+	if name != "rule_scope" {
+		t.Fatalf("front=%q, want rule_scope", name)
+	}
+	var labels []string
+	collectButtonLabels(primitive, &labels)
+	joined := strings.Join(labels, "|")
+	if strings.Contains(joined, "Save") {
+		t.Fatalf("buttons=%q unexpectedly offer Save", joined)
+	}
+	if !strings.Contains(joined, "Close") {
+		t.Fatalf("buttons=%q missing Close", joined)
+	}
+}
+
 func TestRulesPageManualRuleHotkeysWorkOnEnglishAndRussianLayouts(t *testing.T) {
 	for _, key := range []rune{'a', 'ф', 's', 'ы'} {
 		t.Run(string(key), func(t *testing.T) {

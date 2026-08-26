@@ -1464,7 +1464,7 @@ func (s *uiState) openRuleScopeOverlay(app *tview.Application, pages *tview.Page
 		return
 	}
 	requestID := s.selectedPending
-	candidates := s.api.RuleScopeCandidatesForTUI(requestID)
+	candidates, scopeProblem := s.api.RuleScopeAnalysisForTUI(requestID)
 
 	prevFocus := app.GetFocus()
 	title := "Allow scope"
@@ -1473,9 +1473,45 @@ func (s *uiState) openRuleScopeOverlay(app *tview.Application, pages *tview.Page
 	} else if decision == "ALLOW_SESSION" {
 		title = "Allow session scope"
 	}
+	if len(candidates) == 0 {
+		message := "A reusable rule cannot be created for this request."
+		if strings.TrimSpace(scopeProblem) != "" {
+			message += "\n\nReason: " + scopeProblem
+		}
+		message += "\n\nUse Allow once, or rewrite the request without the unsupported construct."
+		body := tview.NewTextView().SetDynamicColors(false).SetText(message)
+		btnClose := tview.NewButton("Close")
+		root := tview.NewFlex().SetDirection(tview.FlexRow).
+			AddItem(body, 0, 1, false).
+			AddItem(btnClose, 1, 0, true)
+		root.SetBorder(true).SetTitle(title)
+		close := func() {
+			pages.RemovePage("rule_scope")
+			s.overlayClose = nil
+			if prevFocus != nil {
+				app.SetFocus(prevFocus)
+			}
+		}
+		btnClose.SetSelectedFunc(close)
+		root.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
+			if ev.Key() == tcell.KeyEsc {
+				close()
+				return nil
+			}
+			return ev
+		})
+		s.overlayClose = close
+		pages.AddPage("rule_scope", centered(root, 92, 10), true, true)
+		app.SetFocus(btnClose)
+		return
+	}
 
 	info := tview.NewTextView().SetDynamicColors(false)
-	info.SetText(ruleScopeHelpText(candidates))
+	infoText := ruleScopeHelpText(candidates)
+	if strings.TrimSpace(scopeProblem) != "" {
+		infoText += "\nSkipped: " + scopeProblem
+	}
+	info.SetText(infoText)
 
 	segmentsText := tview.NewTextView().SetDynamicColors(false)
 	if len(candidates) > 0 {
@@ -1489,30 +1525,19 @@ func (s *uiState) openRuleScopeOverlay(app *tview.Application, pages *tview.Page
 	checks := make([]*tview.Checkbox, 0, len(candidates))
 	inputs := make([]*tview.InputField, 0, len(candidates))
 	inputRows := tview.NewFlex().SetDirection(tview.FlexRow)
-	if len(candidates) == 0 {
-		check := tview.NewCheckbox().SetLabel("save: ").SetChecked(true)
-		input := tview.NewInputField().SetLabel("scope: ")
+	for i, c := range candidates {
+		check := tview.NewCheckbox().
+			SetLabel(fmt.Sprintf("save %d: ", i+1)).
+			SetChecked(true)
+		input := tview.NewInputField().
+			SetLabel(fmt.Sprintf("scope %d: ", i+1)).
+			SetText(c.Pattern)
 		checks = append(checks, check)
 		inputs = append(inputs, input)
 		row := tview.NewFlex().SetDirection(tview.FlexColumn).
-			AddItem(check, 12, 0, true).
+			AddItem(check, 12, 0, i == 0).
 			AddItem(input, 0, 1, false)
-		inputRows.AddItem(row, 1, 0, true)
-	} else {
-		for i, c := range candidates {
-			check := tview.NewCheckbox().
-				SetLabel(fmt.Sprintf("save %d: ", i+1)).
-				SetChecked(true)
-			input := tview.NewInputField().
-				SetLabel(fmt.Sprintf("scope %d: ", i+1)).
-				SetText(c.Pattern)
-			checks = append(checks, check)
-			inputs = append(inputs, input)
-			row := tview.NewFlex().SetDirection(tview.FlexColumn).
-				AddItem(check, 12, 0, i == 0).
-				AddItem(input, 0, 1, false)
-			inputRows.AddItem(row, 1, 0, i == 0)
-		}
+		inputRows.AddItem(row, 1, 0, i == 0)
 	}
 	errText := tview.NewTextView().SetDynamicColors(false).SetTextColor(tcell.ColorRed)
 
@@ -1703,8 +1728,14 @@ func ruleScopeHelpText(candidates []httpapi.RuleScopeCandidate) string {
 			return "Allow uploading to this exact server file path for the selected scope."
 		case "fs.download":
 			return "Allow downloading this exact server file path for the selected scope."
+		case "fs.append_block":
+			return "Allow appending managed blocks to this exact file path for the selected scope."
+		case "fs.replace_literal":
+			return "Allow literal replacements in this exact file path for the selected scope."
 		case "conf.set":
 			return "Allow structured config edits for this exact file path for the selected scope."
+		case "conf.set_kv":
+			return "Allow key/value config edits for this exact file path for the selected scope."
 		}
 	}
 	return "Edit one scope per command segment. Shell separators like &&, |, ; are rejected.\nExamples: docker stop nginx | docker stop n*"

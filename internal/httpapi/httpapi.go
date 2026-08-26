@@ -423,56 +423,73 @@ func (a *API) DecideWithRulesForTUI(requestID string, decision string, rulesToCr
 }
 
 func (a *API) RuleScopeCandidatesForTUI(requestID string) []RuleScopeCandidate {
+	candidates, _ := a.RuleScopeAnalysisForTUI(requestID)
+	return candidates
+}
+
+func (a *API) RuleScopeAnalysisForTUI(requestID string) ([]RuleScopeCandidate, string) {
 	a.reqsMu.Lock()
 	rec, ok := a.reqs[requestID]
 	a.reqsMu.Unlock()
 	if !ok {
-		return nil
+		return nil, "request not found"
 	}
 	var op rules.Op
 	if err := json.Unmarshal(rec.Op, &op); err != nil {
-		return nil
+		return nil, "invalid request operation"
 	}
-	switch op.Type {
-	case "fs.read", "fs.patch_unified", "fs.upload", "fs.download", "conf.set":
+	if manualPathRuleOp(op.Type) {
 		var p struct {
 			Path string `json:"path"`
 		}
 		if err := json.Unmarshal(op.Payload, &p); err != nil || strings.TrimSpace(p.Path) == "" {
-			return nil
+			return nil, "operation has no reusable file path"
 		}
-		return []RuleScopeCandidate{{OpType: op.Type, Segment: p.Path, Pattern: p.Path}}
+		return []RuleScopeCandidate{{OpType: op.Type, Segment: p.Path, Pattern: p.Path}}, ""
 	}
 	analysis := rules.AnalyzeCommandOp(op)
 	out := make([]RuleScopeCandidate, 0, len(analysis.Segments))
+	problems := make([]string, 0)
+	if analysis.Unsupported != "" {
+		problems = append(problems, analysis.Unsupported)
+	}
 	for _, segment := range analysis.Segments {
 		if segment.Unsupported != "" || len(segment.Argv) == 0 {
+			detail := strings.TrimSpace(segment.Unsupported)
+			if detail == "" {
+				detail = "empty command segment"
+			}
+			if source := strings.TrimSpace(segment.Source); source != "" {
+				detail = source + ": " + detail
+			}
+			problems = append(problems, detail)
 			continue
 		}
 		exact := shellQuoteArgv(segment.Argv)
 		out = append(out, RuleScopeCandidate{OpType: "cmd.run", Segment: exact, Pattern: exact})
 	}
-	return dedupeScopeCandidates(out)
+	if len(out) == 0 && len(problems) == 0 {
+		problems = append(problems, "no reusable rule scope could be derived")
+	}
+	return dedupeScopeCandidates(out), strings.Join(problems, "\n")
 }
 
 func ruleFromScopePatternForOp(op rules.Op, pattern string) (rules.Rule, error) {
-	switch op.Type {
-	case "fs.read", "fs.patch_unified", "fs.upload", "fs.download", "conf.set":
+	if manualPathRuleOp(op.Type) {
 		path := strings.TrimSpace(pattern)
 		if path == "" {
 			return rules.Rule{}, errors.New("empty path pattern")
 		}
 		return rules.Rule{OpType: op.Type, Path: &rules.PathRule{Exact: path}}, nil
-	default:
-		rule, err := ruleFromScopePattern(pattern)
-		if err != nil {
-			return rules.Rule{}, err
-		}
-		if rule.Cmd != nil {
-			rule.Cmd.StdinSHA256 = stdinSHA256ForOp(op)
-		}
-		return rule, nil
 	}
+	rule, err := ruleFromScopePattern(pattern)
+	if err != nil {
+		return rules.Rule{}, err
+	}
+	if rule.Cmd != nil {
+		rule.Cmd.StdinSHA256 = stdinSHA256ForOp(op)
+	}
+	return rule, nil
 }
 
 func ruleFromScopePattern(pattern string) (rules.Rule, error) {
