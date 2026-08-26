@@ -15,12 +15,17 @@ import (
 )
 
 type RequestCmd struct {
+	stdin  io.Reader
 	stdout io.Writer
 	stderr io.Writer
 }
 
 func NewRequestCmd(stdout, stderr io.Writer) *RequestCmd {
-	return &RequestCmd{stdout: stdout, stderr: stderr}
+	return NewRequestCmdWithInput(os.Stdin, stdout, stderr)
+}
+
+func NewRequestCmdWithInput(stdin io.Reader, stdout, stderr io.Writer) *RequestCmd {
+	return &RequestCmd{stdin: stdin, stdout: stdout, stderr: stderr}
 }
 
 func (c *RequestCmd) Run(args []string) int {
@@ -63,6 +68,11 @@ func (c *RequestCmd) RunRun(args []string) int {
 	waitTimeout := fs.Duration("wait-timeout", 0, "maximum time to wait for terminal status")
 	statusInterval := fs.Duration("status-interval", 30*time.Second, "heartbeat interval while status is unchanged; 0 disables")
 	reconnectTimeout := fs.Duration("reconnect-timeout", 5*time.Minute, "maximum time to restore observation after a connection failure")
+	scriptPath := fs.String("script", "", "execute a local script through interpreter stdin")
+	scriptStdin := fs.Bool("script-stdin", false, "read a script from local stdin and execute it")
+	stdinFile := fs.String("stdin-file", "", "pass a local file as exact command stdin")
+	stdinFlag := fs.Bool("stdin", false, "pass local stdin as exact command stdin")
+	interpreter := fs.String("interpreter", "/bin/bash", "interpreter used by --script and --script-stdin")
 
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -75,7 +85,29 @@ func (c *RequestCmd) RunRun(args []string) int {
 		fmt.Fprintln(c.stderr, "--execution-timeout must not be negative")
 		return 2
 	}
+	inputModes := 0
+	for _, selected := range []bool{*scriptPath != "", *scriptStdin, *stdinFile != "", *stdinFlag} {
+		if selected {
+			inputModes++
+		}
+	}
+	if inputModes > 1 {
+		fmt.Fprintln(c.stderr, "use only one of --script, --script-stdin, --stdin-file, or --stdin")
+		return 2
+	}
 	argv := fs.Args()
+	scriptMode := *scriptPath != "" || *scriptStdin
+	if scriptMode {
+		if len(argv) != 0 {
+			fmt.Fprintln(c.stderr, "--script and --script-stdin do not accept a command after --")
+			return 2
+		}
+		if strings.TrimSpace(*interpreter) == "" {
+			fmt.Fprintln(c.stderr, "--interpreter must not be empty")
+			return 2
+		}
+		argv = []string{*interpreter, "-s"}
+	}
 	if len(argv) == 0 {
 		fmt.Fprintln(c.stderr, "usage: racg run --host URL --token TOKEN -- <command> [args...]")
 		return 2
@@ -93,6 +125,35 @@ func (c *RequestCmd) RunRun(args []string) int {
 	}
 
 	payload := map[string]any{"argv": argv}
+	var input io.Reader
+	var inputFile *os.File
+	switch {
+	case *scriptPath != "":
+		inputFile, err = openRunInputFile(*scriptPath)
+		input = inputFile
+	case *stdinFile != "":
+		inputFile, err = openRunInputFile(*stdinFile)
+		input = inputFile
+	case *scriptStdin || *stdinFlag:
+		input = c.stdin
+	}
+	if err != nil {
+		fmt.Fprintf(c.stderr, "open command stdin failed: %v\n", err)
+		return 1
+	}
+	if inputFile != nil {
+		defer inputFile.Close()
+	}
+	if input != nil {
+		staged, stageErr := client.stageUpload(input)
+		if stageErr != nil {
+			fmt.Fprintf(c.stderr, "command stdin staging failed: %v\n", stageErr)
+			return 1
+		}
+		payload["stdin_upload_id"] = staged.UploadID
+		payload["stdin_size"] = staged.Size
+		payload["stdin_sha256"] = staged.SHA256
+	}
 	if *cwd != "" {
 		payload["cwd"] = *cwd
 	}
@@ -137,6 +198,23 @@ func (c *RequestCmd) RunRun(args []string) int {
 	}
 	printRequestReport(c.stdout, outcome.Record, outcome.LiveOutputPrinted)
 	return requestExitCode(outcome.Record)
+}
+
+func openRunInputFile(path string) (*os.File, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		_ = f.Close()
+		return nil, fmt.Errorf("input source must be a regular file")
+	}
+	return f, nil
 }
 
 func (c *RequestCmd) runWait(args []string) int {

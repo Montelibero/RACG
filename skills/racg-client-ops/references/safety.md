@@ -24,6 +24,9 @@ Before submitting a command, identify:
 
 Use `--execution-timeout` to constrain remote execution. Do not confuse it with `--wait-timeout`, which only stops local observation and deliberately leaves the approved remote request running. Resume observation with `racg request wait <id>` instead of submitting the command again.
 
+For multiline scripts and SQL, use `--script`, `--script-stdin`, `--stdin-file`, or `--stdin` instead of adding quoting layers. RACG shows exact staged content before approval and binds saved rules to its SHA-256. An argv-only rule must never be treated as approval for arbitrary stdin content.
+These modes are not secret transport: the approval TUI intentionally displays their content. Do not place passwords or tokens in script/stdin input when they must remain hidden from the approver or audit workflow.
+
 ## Risk Words
 
 Treat these as requiring extra care and usually manual approval:

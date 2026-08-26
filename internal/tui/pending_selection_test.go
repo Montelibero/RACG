@@ -32,3 +32,23 @@ func TestPendingSelectionIndexEmpty(t *testing.T) {
 		t.Fatalf("index=%d, want -1", got)
 	}
 }
+
+func TestPendingDetailsCacheLoadsSelectedRequestOnce(t *testing.T) {
+	s := newUIState(nil, nil)
+	loads := 0
+	load := func() (string, bool) {
+		loads++
+		return "large exact script", true
+	}
+	first, ok := s.cachedPendingDetails("req-1", load)
+	if !ok || first != "large exact script" {
+		t.Fatalf("first=%q ok=%t", first, ok)
+	}
+	second, ok := s.cachedPendingDetails("req-1", load)
+	if !ok || second != first || loads != 1 {
+		t.Fatalf("second=%q ok=%t loads=%d", second, ok, loads)
+	}
+	if _, ok := s.cachedPendingDetails("req-2", load); !ok || loads != 2 {
+		t.Fatalf("new selection ok=%t loads=%d", ok, loads)
+	}
+}

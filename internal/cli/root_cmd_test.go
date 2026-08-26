@@ -42,6 +42,9 @@ func TestRootHelpIncludesFileAndConfigExamples(t *testing.T) {
 		"--execution-timeout 2m",
 		"--status-interval 30s",
 		"--reconnect-timeout 5m",
+		"racg run --script ./maintenance.sh",
+		"racg run --stdin-file ./query.sql",
+		"racg run --script-stdin",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("help missing %q:\n%s", want, got)

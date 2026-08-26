@@ -16,6 +16,8 @@ Use RACG when command execution must go through a human-approved gateway instead
 2. Submit commands with `racg run -- <argv...>`.
    - Use `--no-wait` for long-running commands or when the user wants to approve in TUI first.
    - Use `--wait-timeout` for bounded waits.
+   - For multiline shell, use `racg run --script <file>` or `racg run --script-stdin`; do not embed a large script in `sh -lc`.
+   - For SQL or exact command input, use `racg run --stdin-file <file> -- <argv...>` or pipe into `racg run --stdin -- <argv...>`.
 3. For config edits in `env`, `json`, or `yaml`, prefer `racg config set` over ad-hoc shell/Python scripts.
    - Use dotted keys for `json`/`yaml`, for example `server.port` or `image.tag`.
    - Set `--type` for non-string values such as booleans, integers, floats, null, or JSON fragments.
@@ -48,6 +50,7 @@ Use RACG when command execution must go through a human-approved gateway instead
 ## Operating Rules
 
 - Use narrow commands and explicit argv. Avoid large opaque shell strings unless the user specifically needs shell composition.
+- Use script/stdin modes for multiline code, SQL, templates, quotes, or literal `$VARIABLE` content. RACG stages exact bytes and binds saved rules to their SHA-256.
 - For simple `env`/`json`/`yaml` config key updates, use `racg config set` instead of generating scripts or raw patches.
 - For arbitrary text edits, use `racg file read` plus `racg file patch`; avoid ad-hoc scripts when a unified diff is enough.
 - For whole-file transfer, use `racg file upload` or `racg file download`; use `--force` only when replacing the named local destination is intended.

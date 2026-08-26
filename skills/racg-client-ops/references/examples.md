@@ -37,6 +37,20 @@ Stop it:
 racg request cancel <id>
 ```
 
+## Multiline Scripts And SQL
+
+```bash
+racg run --script ./maintenance.sh --interpreter /bin/bash
+racg run --script-stdin <<'SCRIPT'
+set -Eeuo pipefail
+printf '%s\n' "$VARIABLE"
+docker inspect --format '{{json .Mounts}}' app
+SCRIPT
+racg run --stdin-file ./query.sql -- isql -database main.fdb
+```
+
+These forms preserve quotes, dollar signs, templates, and line endings without an extra shell-escaping layer.
+
 ## Git
 
 Read-only:

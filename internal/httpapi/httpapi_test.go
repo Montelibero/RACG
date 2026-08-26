@@ -119,6 +119,189 @@ func TestFileUploadAndDownloadTransferBinaryContent(t *testing.T) {
 	}
 }
 
+func TestCmdRunConsumesStagedStdinAndRemovesIt(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.DBPath = filepath.Join(t.TempDir(), "racg.db")
+	tm := auth.NewTokenManager(auth.RealClock{})
+	token, _ := tm.Issue("sess-stdin", "client-stdin", time.Hour)
+	api := New(cfg, WithTokenManager(tm))
+	handler := api.Handler()
+	input := []byte("select '$VALUE', '{{json .Mounts}}';\n")
+
+	stage := httptest.NewRequest(http.MethodPost, "http://example/v1/uploads", bytes.NewReader(input))
+	stage.Header.Set("Authorization", "Bearer "+token)
+	stageRW := httptest.NewRecorder()
+	handler.ServeHTTP(stageRW, stage)
+	if stageRW.Code != http.StatusOK {
+		t.Fatalf("stage status=%d body=%s", stageRW.Code, stageRW.Body.String())
+	}
+	var staged stagedUpload
+	if err := json.Unmarshal(stageRW.Body.Bytes(), &staged); err != nil {
+		t.Fatalf("decode staged: %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]any{"op": map[string]any{
+		"type": "cmd.run", "payload": map[string]any{
+			"argv": []string{"/bin/cat"}, "stdin_upload_id": staged.UploadID,
+		},
+	}})
+	create := httptest.NewRequest(http.MethodPost, "http://example/v1/requests", bytes.NewReader(body))
+	create.Header.Set("Authorization", "Bearer "+token)
+	createRW := httptest.NewRecorder()
+	handler.ServeHTTP(createRW, create)
+	if createRW.Code != http.StatusOK {
+		t.Fatalf("create status=%d body=%s", createRW.Code, createRW.Body.String())
+	}
+	var created struct {
+		RequestID string `json:"request_id"`
+	}
+	_ = json.Unmarshal(createRW.Body.Bytes(), &created)
+	if err := api.DecideForTUI(created.RequestID, "ALLOW_ONCE"); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	rec := waitRequestTerminalForTest(t, api, token, created.RequestID)
+	result, _ := rec["result"].(map[string]any)
+	if result["stdout"] != string(input) || result["exit_code"] != float64(0) {
+		t.Fatalf("result=%+v", result)
+	}
+	for _, path := range []string{api.uploadDataPath(staged.UploadID), api.uploadMetaPath(staged.UploadID)} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("staged file still exists: %s err=%v", path, err)
+		}
+	}
+}
+
+func TestCmdRunRemovesStagedStdinWhenRequestPersistenceFails(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.DBPath = filepath.Join(t.TempDir(), "racg.db")
+	tm := auth.NewTokenManager(auth.RealClock{})
+	token, _ := tm.Issue("sess-stdin", "client-stdin", time.Hour)
+	st, err := store.Open(filepath.Join(t.TempDir(), "closed.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+	api := New(cfg, WithTokenManager(tm), WithStore(st))
+	handler := api.Handler()
+
+	stage := httptest.NewRequest(http.MethodPost, "http://example/v1/uploads", strings.NewReader("echo exact\n"))
+	stage.Header.Set("Authorization", "Bearer "+token)
+	stageRW := httptest.NewRecorder()
+	handler.ServeHTTP(stageRW, stage)
+	if stageRW.Code != http.StatusOK {
+		t.Fatalf("stage status=%d body=%s", stageRW.Code, stageRW.Body.String())
+	}
+	var staged stagedUpload
+	if err := json.Unmarshal(stageRW.Body.Bytes(), &staged); err != nil {
+		t.Fatalf("decode staged: %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]any{"op": map[string]any{
+		"type": "cmd.run", "payload": map[string]any{
+			"argv": []string{"/bin/bash", "-s"}, "stdin_upload_id": staged.UploadID,
+		},
+	}})
+	create := httptest.NewRequest(http.MethodPost, "http://example/v1/requests", bytes.NewReader(body))
+	create.Header.Set("Authorization", "Bearer "+token)
+	createRW := httptest.NewRecorder()
+	handler.ServeHTTP(createRW, create)
+	if createRW.Code != http.StatusInternalServerError {
+		t.Fatalf("create status=%d body=%s", createRW.Code, createRW.Body.String())
+	}
+	for _, path := range []string{api.uploadDataPath(staged.UploadID), api.uploadMetaPath(staged.UploadID)} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("staged file still exists: %s err=%v", path, err)
+		}
+	}
+}
+
+func TestDeniedCmdRunRemovesStagedStdin(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.DBPath = filepath.Join(t.TempDir(), "racg.db")
+	api := New(cfg)
+	if err := os.MkdirAll(api.transferDir(), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	id := "11111111-1111-4111-8111-111111111111"
+	for path, content := range map[string][]byte{
+		api.uploadDataPath(id): []byte("echo no\n"),
+		api.uploadMetaPath(id): []byte(`{"upload_id":"11111111-1111-4111-8111-111111111111"}`),
+	} {
+		if err := os.WriteFile(path, content, 0o600); err != nil {
+			t.Fatalf("write staged file: %v", err)
+		}
+	}
+	op, _ := json.Marshal(map[string]any{"type": "cmd.run", "payload": map[string]any{
+		"argv": []string{"/bin/bash", "-s"}, "stdin_upload_id": id,
+	}})
+	api.reqs["req-deny-stdin"] = requestRecord{ID: "req-deny-stdin", Status: "PENDING_APPROVAL", Op: op}
+	if err := api.DecideForTUI("req-deny-stdin", "DENY"); err != nil {
+		t.Fatalf("deny: %v", err)
+	}
+	for _, path := range []string{api.uploadDataPath(id), api.uploadMetaPath(id)} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("staged file still exists: %s err=%v", path, err)
+		}
+	}
+}
+
+func TestCmdRunRejectsStagedStdinFromAnotherSession(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.DBPath = filepath.Join(t.TempDir(), "racg.db")
+	api := New(cfg)
+	if err := os.MkdirAll(api.transferDir(), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	id := "11111111-1111-4111-8111-111111111111"
+	meta, _ := json.Marshal(stagedUpload{UploadID: id, SessionID: "session-a", Size: 1, SHA256: strings.Repeat("a", 64)})
+	if err := os.WriteFile(api.uploadMetaPath(id), meta, 0o600); err != nil {
+		t.Fatalf("write metadata: %v", err)
+	}
+	op := rules.Op{Type: "cmd.run", Payload: json.RawMessage(`{"argv":["/bin/cat"],"stdin_upload_id":"` + id + `"}`)}
+	if err := api.prepareTransferOp(auth.Claims{SessionID: "session-b"}, &op); err == nil || !strings.Contains(err.Error(), "another session") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestCmdRunRejectsClientSuppliedStdinMetadataWithoutUpload(t *testing.T) {
+	api := New(config.Defaults())
+	op := rules.Op{Type: "cmd.run", Payload: json.RawMessage(`{
+		"argv":["/bin/bash","-s"],
+		"stdin_size":42,
+		"stdin_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	}`)}
+	if err := api.prepareTransferOp(auth.Claims{SessionID: "session"}, &op); err == nil || !strings.Contains(err.Error(), "stdin_upload_id") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestStagedStdinCanBeClaimedByOnlyOneRequest(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.DBPath = filepath.Join(t.TempDir(), "racg.db")
+	api := New(cfg)
+	if err := os.MkdirAll(api.transferDir(), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	id := "11111111-1111-4111-8111-111111111111"
+	meta, _ := json.Marshal(stagedUpload{UploadID: id, SessionID: "session", Size: 1, SHA256: strings.Repeat("a", 64)})
+	if err := os.WriteFile(api.uploadMetaPath(id), meta, 0o600); err != nil {
+		t.Fatalf("write metadata: %v", err)
+	}
+	newOp := func() rules.Op {
+		return rules.Op{Type: "cmd.run", Payload: json.RawMessage(`{"argv":["/bin/cat"],"stdin_upload_id":"` + id + `"}`)}
+	}
+	first := newOp()
+	if err := api.prepareTransferOp(auth.Claims{SessionID: "session"}, &first); err != nil {
+		t.Fatalf("first claim: %v", err)
+	}
+	second := newOp()
+	if err := api.prepareTransferOp(auth.Claims{SessionID: "session"}, &second); err == nil || !strings.Contains(err.Error(), "already claimed") {
+		t.Fatalf("second claim error=%v", err)
+	}
+}
+
 func TestRejectedUploadRemovesStagedContent(t *testing.T) {
 	for _, action := range []string{"DENY", "CANCEL"} {
 		t.Run(action, func(t *testing.T) {
@@ -1463,7 +1646,7 @@ func waitRequestTerminalForTest(t *testing.T, api *API, token string, requestID 
 		var rec map[string]any
 		_ = json.Unmarshal(getRw.Body.Bytes(), &rec)
 		switch rec["status"] {
-		case "RUNNING", "APPROVED", "PENDING_APPROVAL":
+		case "RUNNING", "QUEUED", "APPROVED", "PENDING_APPROVAL":
 			time.Sleep(10 * time.Millisecond)
 			continue
 		default:

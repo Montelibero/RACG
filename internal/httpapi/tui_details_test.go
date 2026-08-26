@@ -44,6 +44,40 @@ func TestTUIDetailsForCmdRunShowsStructuredPreviewAndRiskHints(t *testing.T) {
 	}
 }
 
+func TestTUIDetailsForCmdRunShowsStdinMetadataAndExactContent(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.DBPath = filepath.Join(t.TempDir(), "racg.db")
+	api := New(cfg)
+	if err := os.MkdirAll(api.transferDir(), 0o700); err != nil {
+		t.Fatalf("mkdir transfers: %v", err)
+	}
+	uploadID := "11111111-1111-4111-8111-111111111111"
+	content := "select '$VALUE', '{{json .Mounts}}';\n"
+	if err := os.WriteFile(api.uploadDataPath(uploadID), []byte(content), 0o600); err != nil {
+		t.Fatalf("write staged stdin: %v", err)
+	}
+	op, _ := json.Marshal(map[string]any{
+		"type": "cmd.run",
+		"payload": map[string]any{
+			"argv": []string{"isql"}, "stdin_upload_id": uploadID,
+			"stdin_size": len(content), "stdin_sha256": strings.Repeat("a", 64),
+		},
+	})
+
+	got := api.tuiDetails(requestRecord{Op: op})
+	for _, want := range []string{
+		"stdin:", "size:", "sha256: " + strings.Repeat("a", 64),
+		"content:", content,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("details missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, uploadID) {
+		t.Fatalf("details expose staging id:\n%s", got)
+	}
+}
+
 func TestTUIDetailsForFSReadShowsOperationAndEffect(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "haproxy.cfg")
 	if err := os.WriteFile(path, []byte("global\n    maxconn 2000\n"), 0o600); err != nil {
@@ -469,5 +503,48 @@ func TestDecideWithRulePatternsForTUISavesEachSessionRule(t *testing.T) {
 		if !got[want] {
 			t.Fatalf("missing rule %s in %#v", want, got)
 		}
+	}
+}
+
+func TestAllowSessionForStdinCommandBindsRuleToHash(t *testing.T) {
+	api := New(config.Defaults())
+	hash := strings.Repeat("b", 64)
+	op, _ := json.Marshal(map[string]any{
+		"type": "cmd.run",
+		"payload": map[string]any{
+			"argv": []string{"/bin/bash", "-s"}, "stdin_sha256": hash,
+		},
+	})
+	api.reqs["req-stdin-rule"] = requestRecord{
+		ID: "req-stdin-rule", Status: "PENDING_APPROVAL", Op: op, SessionID: "sess", ClientID: "cli",
+	}
+	if err := api.DecideForTUI("req-stdin-rule", "ALLOW_SESSION"); err != nil {
+		t.Fatalf("allow session: %v", err)
+	}
+	rows := api.ListSessionRulesForTUI()
+	if len(rows) != 1 || rows[0].CmdStdinSHA256 == nil || *rows[0].CmdStdinSHA256 != hash {
+		t.Fatalf("rows=%+v", rows)
+	}
+}
+
+func TestAllowSessionOverrideRuleForStdinCommandBindsRuleToHash(t *testing.T) {
+	api := New(config.Defaults())
+	hash := strings.Repeat("c", 64)
+	op, _ := json.Marshal(map[string]any{
+		"type": "cmd.run",
+		"payload": map[string]any{
+			"argv": []string{"/bin/bash", "-s"}, "stdin_sha256": hash,
+		},
+	})
+	api.reqs["req-stdin-override"] = requestRecord{
+		ID: "req-stdin-override", Status: "PENDING_APPROVAL", Op: op, SessionID: "sess", ClientID: "cli",
+	}
+	override := rules.Rule{OpType: "cmd.run", Cmd: &rules.CmdRule{ArgvPrefix: []string{"/bin/bash", "-s"}}}
+	if err := api.DecideWithRuleForTUI("req-stdin-override", "ALLOW_SESSION", override); err != nil {
+		t.Fatalf("allow session: %v", err)
+	}
+	rows := api.ListSessionRulesForTUI()
+	if len(rows) != 1 || rows[0].CmdStdinSHA256 == nil || *rows[0].CmdStdinSHA256 != hash {
+		t.Fatalf("rows=%+v", rows)
 	}
 }

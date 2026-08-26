@@ -3,13 +3,138 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestCLIRunScriptStagesExactFileAndUsesInterpreterStdin(t *testing.T) {
+	script := "set -Eeuo pipefail\nprintf '%s\\n' \"$VALUE\" '{{json .Mounts}}'\n"
+	path := t.TempDir() + "/maintenance.sh"
+	if err := os.WriteFile(path, []byte(script), 0o600); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+
+	var staged []byte
+	var payload struct {
+		Argv          []string `json:"argv"`
+		StdinUploadID string   `json:"stdin_upload_id"`
+	}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/uploads":
+			staged, _ = io.ReadAll(r.Body)
+			_, _ = w.Write([]byte(`{"upload_id":"11111111-1111-4111-8111-111111111111","size":64,"sha256":"abc123"}`))
+		case "/v1/requests":
+			var body struct {
+				Op struct {
+					Payload json.RawMessage `json:"payload"`
+				} `json:"op"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode request: %v", err)
+			}
+			if err := json.Unmarshal(body.Op.Payload, &payload); err != nil {
+				t.Fatalf("decode payload: %v", err)
+			}
+			_, _ = w.Write([]byte(`{"request_id":"req-script","status":"PENDING_APPROVAL"}`))
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer ts.Close()
+
+	var out, errOut bytes.Buffer
+	code := NewRoot(&out, &errOut).Run([]string{
+		"run", "--host", ts.URL, "--token", "tok", "--no-wait",
+		"--script", path, "--interpreter", "/bin/bash",
+	})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	if string(staged) != script {
+		t.Fatalf("staged=%q want exact script %q", staged, script)
+	}
+	if strings.Join(payload.Argv, "\x00") != "/bin/bash\x00-s" || payload.StdinUploadID == "" {
+		t.Fatalf("payload=%+v", payload)
+	}
+}
+
+func TestCLIRunScriptStdinReadsInjectedInput(t *testing.T) {
+	input := "echo '$VALUE'\n"
+	var staged []byte
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/uploads":
+			staged, _ = io.ReadAll(r.Body)
+			_, _ = w.Write([]byte(`{"upload_id":"11111111-1111-4111-8111-111111111111","size":14,"sha256":"abc123"}`))
+		case "/v1/requests":
+			_, _ = w.Write([]byte(`{"request_id":"req-script","status":"PENDING_APPROVAL"}`))
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer ts.Close()
+
+	var out, errOut bytes.Buffer
+	code := NewRootWithInput(strings.NewReader(input), &out, &errOut).Run([]string{
+		"run", "--host", ts.URL, "--token", "tok", "--no-wait", "--script-stdin",
+	})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	if string(staged) != input {
+		t.Fatalf("staged=%q want %q", staged, input)
+	}
+}
+
+func TestCLIRunStdinFilePreservesDirectCommandArgv(t *testing.T) {
+	input := "select 1;\n"
+	path := t.TempDir() + "/query.sql"
+	if err := os.WriteFile(path, []byte(input), 0o600); err != nil {
+		t.Fatalf("write SQL: %v", err)
+	}
+	var argv []string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/uploads":
+			got, _ := io.ReadAll(r.Body)
+			if string(got) != input {
+				t.Fatalf("staged=%q", got)
+			}
+			_, _ = w.Write([]byte(`{"upload_id":"11111111-1111-4111-8111-111111111111","size":10,"sha256":"abc123"}`))
+		case "/v1/requests":
+			var body struct {
+				Op struct {
+					Payload struct {
+						Argv []string `json:"argv"`
+					} `json:"payload"`
+				} `json:"op"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			argv = body.Op.Payload.Argv
+			_, _ = w.Write([]byte(`{"request_id":"req-sql","status":"PENDING_APPROVAL"}`))
+		}
+	}))
+	defer ts.Close()
+
+	var out, errOut bytes.Buffer
+	code := NewRoot(&out, &errOut).Run([]string{
+		"run", "--host", ts.URL, "--token", "tok", "--no-wait",
+		"--stdin-file", path, "--", "isql", "-database", "main.fdb",
+	})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	if strings.Join(argv, "\x00") != "isql\x00-database\x00main.fdb" {
+		t.Fatalf("argv=%q", argv)
+	}
+}
 
 func TestCLIRunCreatesRequestWaitsAndPrintsSections(t *testing.T) {
 	var posted struct {

@@ -80,6 +80,28 @@ racg run -- date
 racg run -- bash -lc 'date && uname -a'
 ```
 
+Run multiline shell without nested quoting:
+
+```bash
+racg run --script ./maintenance.sh --interpreter /bin/bash
+
+racg run --script-stdin <<'SCRIPT'
+set -Eeuo pipefail
+printf '%s\n' "$VARIABLE"
+docker inspect --format '{{json .Mounts}}' app
+SCRIPT
+```
+
+Pass a local SQL file or local stdin directly to a command without a remote file:
+
+```bash
+racg run --stdin-file ./query.sql -- isql -database main.fdb
+printf 'select 1;\n' | racg run --stdin -- isql -database main.fdb
+```
+
+The input is staged outside request JSON, verified with SHA-256, displayed in the approval TUI, and supplied directly to process stdin. It is removed after denial, cancellation, or execution. Rules saved for stdin requests include the exact stdin SHA-256, so changing the script or SQL requires a new approval.
+Script/stdin modes are not secret transport because their content is intentionally visible during approval.
+
 Expected output is compact, not a full JSON document:
 
 ```text
@@ -113,6 +135,11 @@ Useful flags:
 --wait-timeout <dur>     maximum local wait; does not cancel the request
 --status-interval <dur>  unchanged-status heartbeat; 0 disables
 --reconnect-timeout <d>  maximum time to restore observation
+--script <file>          execute a local script through interpreter stdin
+--script-stdin           read a script from local stdin
+--interpreter <path>     interpreter for script modes; default /bin/bash
+--stdin-file <file>      pass a local file as exact command stdin
+--stdin                  pass local stdin as exact command stdin
 ```
 
 Resume an existing request after `--no-wait`, a local timeout, terminal closure, or a temporary connection loss:

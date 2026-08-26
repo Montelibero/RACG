@@ -3,9 +3,31 @@ package executor
 import (
 	"context"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestRunPassesStdinWithoutShellInterpolation(t *testing.T) {
+	if _, err := exec.LookPath("/bin/cat"); err != nil {
+		t.Skip("/bin/cat not found")
+	}
+
+	input := "select '$VALUE', '{{json .Mounts}}';\n"
+	ex := New(Options{MaxOutputBytes: 1024, KillGrace: 50 * time.Millisecond})
+	res := ex.Run(context.Background(), Spec{
+		Argv:    []string{"/bin/cat"},
+		Stdin:   strings.NewReader(input),
+		Timeout: 2 * time.Second,
+	})
+
+	if res.Status != "SUCCEEDED" || res.ExitCode != 0 {
+		t.Fatalf("result=%+v", res)
+	}
+	if res.Stdout != input {
+		t.Fatalf("stdout=%q want exact stdin %q", res.Stdout, input)
+	}
+}
 
 func TestRunEcho(t *testing.T) {
 	if _, err := exec.LookPath("/bin/echo"); err != nil {

@@ -238,7 +238,11 @@ func formatRule(r rules.Rule) string {
 	switch r.OpType {
 	case "cmd.run":
 		if r.Cmd != nil && len(r.Cmd.ArgvPrefix) > 0 {
-			return fmt.Sprintf("%s\tcmd.run\targv_prefix=%q", r.ID, strings.Join(r.Cmd.ArgvPrefix, " "))
+			formatted := fmt.Sprintf("%s\tcmd.run\targv_prefix=%q", r.ID, strings.Join(r.Cmd.ArgvPrefix, " "))
+			if r.Cmd.StdinSHA256 != "" {
+				formatted += "\tstdin_sha256=" + r.Cmd.StdinSHA256
+			}
+			return formatted
 		}
 		return fmt.Sprintf("%s\tcmd.run", r.ID)
 	default:

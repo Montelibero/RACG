@@ -159,6 +159,9 @@
           "argv": { "type": "array", "items": { "type": "string" } },
           "cwd": { "type": "string" },
           "timeout_sec": { "type": "integer" },
+          "stdin_upload_id": { "type": "string", "format": "uuid", "description": "Session-owned staged content supplied to the process as stdin." },
+          "stdin_size": { "type": "integer", "format": "int64", "description": "Canonical staged stdin size supplied by the server." },
+          "stdin_sha256": { "type": "string", "description": "Canonical staged stdin SHA-256 supplied by the server and used to bind approval rules to exact content." },
           "run_as": { "type": "string", "description": "Accepted but currently ignored by the executor; server runs in root mode." }
         }
       },

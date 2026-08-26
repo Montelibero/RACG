@@ -55,6 +55,40 @@ func TestAlwaysRulesCRUD(t *testing.T) {
 	}
 }
 
+func TestAlwaysRulePersistsStdinHash(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open("file::memory:?cache=shared")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+	if err := s.Migrate(ctx); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	r := rules.Rule{ID: "script", OpType: "cmd.run", Cmd: &rules.CmdRule{
+		ArgvPrefix:  []string{"/bin/bash", "-s"},
+		StdinSHA256: "abc123",
+	}}
+	if err := s.InsertAlwaysRule(ctx, r, time.Now().UTC()); err != nil {
+		t.Fatalf("InsertAlwaysRule: %v", err)
+	}
+	loaded, err := s.LoadEnabledAlwaysRules(ctx)
+	if err != nil {
+		t.Fatalf("LoadEnabledAlwaysRules: %v", err)
+	}
+	if len(loaded) != 1 || loaded[0].Cmd == nil || loaded[0].Cmd.StdinSHA256 != "abc123" {
+		t.Fatalf("loaded=%+v", loaded)
+	}
+	rows, err := s.ListRules(ctx, 10)
+	if err != nil {
+		t.Fatalf("ListRules: %v", err)
+	}
+	if len(rows) != 1 || rows[0].CmdStdinSHA256 == nil || *rows[0].CmdStdinSHA256 != "abc123" {
+		t.Fatalf("rows=%+v", rows)
+	}
+}
+
 func TestListRulesIncludesDisabled(t *testing.T) {
 	ctx := context.Background()
 

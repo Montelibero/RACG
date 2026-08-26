@@ -20,8 +20,9 @@ type Rule struct {
 }
 
 type CmdRule struct {
-	ArgvPrefix []string
-	TailAny    bool
+	ArgvPrefix  []string
+	TailAny     bool
+	StdinSHA256 string
 }
 
 type PathRule struct {
@@ -90,7 +91,7 @@ func (e *Engine) Match(sessionID string, op Op) (Match, bool) {
 	always := append([]Rule(nil), e.always...)
 	e.mu.Unlock()
 
-	if op.Type == "cmd.run" {
+	if op.Type == "cmd.run" && cmdRunStdinSHA256(op) == "" {
 		if m, ok := matchAnalyzedCommand(sess, always, op); ok || len(m.SegmentDecisions) > 0 {
 			return m, ok
 		}
@@ -115,7 +116,7 @@ func (e *Engine) Explain(sessionID string, op Op) Explanation {
 	always := append([]Rule(nil), e.always...)
 	e.mu.Unlock()
 
-	if op.Type == "cmd.run" {
+	if op.Type == "cmd.run" && cmdRunStdinSHA256(op) == "" {
 		if m, ok := matchAnalyzedCommand(sess, always, op); ok || len(m.SegmentDecisions) > 0 {
 			fillSegmentReasons(m.SegmentDecisions)
 			return Explanation{Allowed: ok, Segments: m.SegmentDecisions}
@@ -123,6 +124,24 @@ func (e *Engine) Explain(sessionID string, op Op) Explanation {
 	}
 
 	analysis := AnalyzeCommandOp(op)
+	if op.Type == "cmd.run" && cmdRunStdinSHA256(op) != "" {
+		decision := SegmentDecision{Argv: append([]string(nil), analysis.OriginalArgv...), SourceText: strings.Join(analysis.OriginalArgv, " ")}
+		for _, candidate := range []struct {
+			source string
+			rules  []Rule
+		}{{"session", sess}, {"always", always}} {
+			for _, rule := range candidate.rules {
+				if ruleMatches(rule, op) {
+					decision.Allowed = true
+					decision.Source = candidate.source
+					decision.RuleID = rule.ID
+					return Explanation{Allowed: true, Segments: []SegmentDecision{decision}}
+				}
+			}
+		}
+		decision.Reason = "no matching rule for stdin sha256"
+		return Explanation{Segments: []SegmentDecision{decision}}
+	}
 	segments := make([]SegmentDecision, 0, len(analysis.Segments))
 	for _, segment := range analysis.Segments {
 		decision := SegmentDecision{Argv: append([]string(nil), segment.Argv...), SourceText: segment.Source, Unsupported: segment.Unsupported}
@@ -207,6 +226,9 @@ func matchCmdArgvRules(rs []Rule, argv []string) (Rule, bool) {
 		if r.OpType != "cmd.run" || r.Cmd == nil {
 			continue
 		}
+		if r.Cmd.StdinSHA256 != "" {
+			continue
+		}
 		if argvHasPrefix(argv, r.Cmd.ArgvPrefix) {
 			return r, true
 		}
@@ -225,12 +247,13 @@ func ruleMatches(r Rule, op Op) bool {
 			return false
 		}
 		var p struct {
-			Argv []string `json:"argv"`
+			Argv        []string `json:"argv"`
+			StdinSHA256 string   `json:"stdin_sha256"`
 		}
 		if err := json.Unmarshal(op.Payload, &p); err != nil {
 			return false
 		}
-		return argvHasPrefix(p.Argv, r.Cmd.ArgvPrefix)
+		return argvHasPrefix(p.Argv, r.Cmd.ArgvPrefix) && p.StdinSHA256 == r.Cmd.StdinSHA256
 	case "fs.read", "fs.patch_unified", "fs.upload", "fs.download", "fs.append_block", "fs.replace_literal", "conf.set", "conf.set_kv":
 		if r.Path == nil {
 			return false
@@ -246,6 +269,19 @@ func ruleMatches(r Rule, op Op) bool {
 		// MVP: only cmd.run + basic path operations.
 		return false
 	}
+}
+
+func cmdRunStdinSHA256(op Op) string {
+	if op.Type != "cmd.run" {
+		return ""
+	}
+	var payload struct {
+		StdinSHA256 string `json:"stdin_sha256"`
+	}
+	if json.Unmarshal(op.Payload, &payload) != nil {
+		return ""
+	}
+	return strings.TrimSpace(payload.StdinSHA256)
 }
 
 func argvHasPrefix(argv, prefix []string) bool {

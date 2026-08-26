@@ -61,7 +61,26 @@ Useful flags:
 --wait-timeout <dur>     maximum local wait; does not cancel remote work
 --status-interval <dur>  status heartbeat; 0 disables
 --reconnect-timeout <d>  maximum time to restore observation
+--script <file>          execute a local script through interpreter stdin
+--script-stdin           read a script from local stdin
+--interpreter <path>     interpreter for script modes; default /bin/bash
+--stdin-file <file>      pass a local file as exact command stdin
+--stdin                  pass local stdin as exact command stdin
 ```
+
+Multiline scripts and exact stdin:
+
+```bash
+racg run --script ./maintenance.sh --interpreter /bin/bash
+racg run --script-stdin <<'SCRIPT'
+set -Eeuo pipefail
+printf '%s\n' "$VARIABLE"
+SCRIPT
+racg run --stdin-file ./query.sql -- isql -database main.fdb
+cat ./query.sql | racg run --stdin -- isql -database main.fdb
+```
+
+Input bytes are staged outside request JSON and no persistent remote file is created. The approval view includes size, SHA-256, and exact content. Saved session/always rules include the stdin SHA-256 in addition to argv; existing argv-only rules do not approve requests carrying stdin.
 
 Status transitions are written to stderr. Live output and the final report are written to stdout:
 

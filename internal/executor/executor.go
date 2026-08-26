@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"hash"
+	"io"
 	"os/exec"
 	"syscall"
 	"time"
@@ -24,6 +25,7 @@ type Executor struct {
 type Spec struct {
 	Argv    []string
 	Cwd     string
+	Stdin   io.Reader
 	Timeout time.Duration
 
 	// Optional streaming callbacks (used by TUI for live output).
@@ -80,6 +82,7 @@ func (e *Executor) Run(ctx context.Context, s Spec) Result {
 	stderrCap := newStreamCapture(e.opts.MaxOutputBytes, s.OnStderr)
 	cmd.Stdout = stdoutCap
 	cmd.Stderr = stderrCap
+	cmd.Stdin = s.Stdin
 
 	if err := cmd.Start(); err != nil {
 		res.Stderr = err.Error()

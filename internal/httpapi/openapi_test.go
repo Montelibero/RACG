@@ -65,4 +65,11 @@ func TestOpenAPIDocumentCoversCoreEndpoints(t *testing.T) {
 			t.Fatalf("missing schema %q", name)
 		}
 	}
+	cmdRun, _ := schemas["CmdRunPayload"].(map[string]any)
+	properties, _ := cmdRun["properties"].(map[string]any)
+	for _, name := range []string{"stdin_upload_id", "stdin_size", "stdin_sha256"} {
+		if _, ok := properties[name]; !ok {
+			t.Fatalf("CmdRunPayload missing property %q", name)
+		}
+	}
 }

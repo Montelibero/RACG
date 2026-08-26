@@ -4,18 +4,24 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/itolstov/racg/internal/config"
 	"github.com/itolstov/racg/internal/version"
 )
 
 type Root struct {
+	stdin  io.Reader
 	stdout io.Writer
 	stderr io.Writer
 }
 
 func NewRoot(stdout, stderr io.Writer) *Root {
-	return &Root{stdout: stdout, stderr: stderr}
+	return NewRootWithInput(os.Stdin, stdout, stderr)
+}
+
+func NewRootWithInput(stdin io.Reader, stdout, stderr io.Writer) *Root {
+	return &Root{stdin: stdin, stdout: stdout, stderr: stderr}
 }
 
 // Run executes the CLI and returns an exit code.
@@ -59,7 +65,7 @@ func (r *Root) Run(args []string) int {
 	case "session":
 		return NewAuthCmd(r.stdout, r.stderr).RunSession(rest[1:])
 	case "run":
-		return NewRequestCmd(r.stdout, r.stderr).RunRun(rest[1:])
+		return NewRequestCmdWithInput(r.stdin, r.stdout, r.stderr).RunRun(rest[1:])
 	case "request":
 		return NewRequestCmd(r.stdout, r.stderr).Run(rest[1:])
 	case "rules":
@@ -104,6 +110,9 @@ common commands:
   racg run -- bash -lc 'date && uname -a'
   racg run --name prod -- bash -lc 'date && uname -a'
   racg run --execution-timeout 2m -- bash -lc 'date && uname -a'
+  racg run --script ./maintenance.sh --interpreter /bin/bash
+  racg run --script-stdin
+  racg run --stdin-file ./query.sql -- isql -database main.fdb
   racg run --no-wait -- /bin/sh -c 'while true; do date; sleep 3; done'
   racg request wait <id> --status-interval 30s --reconnect-timeout 5m
   racg request logs <id> --live

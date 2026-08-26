@@ -90,6 +90,8 @@ type API struct {
 
 	liveMu sync.Mutex
 	live   map[string]*liveOutput
+
+	transferMu sync.Mutex
 }
 
 type requestRecord struct {
@@ -448,7 +450,14 @@ func ruleFromScopePatternForOp(op rules.Op, pattern string) (rules.Rule, error) 
 		}
 		return rules.Rule{OpType: op.Type, Path: &rules.PathRule{Exact: path}}, nil
 	default:
-		return ruleFromScopePattern(pattern)
+		rule, err := ruleFromScopePattern(pattern)
+		if err != nil {
+			return rules.Rule{}, err
+		}
+		if rule.Cmd != nil {
+			rule.Cmd.StdinSHA256 = stdinSHA256ForOp(op)
+		}
+		return rule, nil
 	}
 }
 
@@ -695,6 +704,10 @@ func (a *API) ListSessionRulesForTUI() []store.RuleRow {
 				if err == nil {
 					s := string(b)
 					row.CmdArgvJSON = &s
+				}
+				if r.Cmd.StdinSHA256 != "" {
+					v := r.Cmd.StdinSHA256
+					row.CmdStdinSHA256 = &v
 				}
 			}
 			if r.Path != nil {
@@ -977,6 +990,7 @@ func (a *API) handleRequests(w http.ResponseWriter, r *http.Request, c auth.Clai
 			a.reqsMu.Lock()
 			delete(a.reqs, id)
 			a.reqsMu.Unlock()
+			a.cleanupUploadForOp(req.Op)
 			writeError(w, http.StatusInternalServerError, "INTERNAL", err.Error(), "")
 			return
 		}
@@ -1137,11 +1151,29 @@ func (a *API) executeApprovedRequest(requestID string, c auth.Claims, op rules.O
 	switch op.Type {
 	case "cmd.run":
 		var payload struct {
-			Argv       []string `json:"argv"`
-			Cwd        string   `json:"cwd"`
-			TimeoutSec int      `json:"timeout_sec"`
+			Argv          []string `json:"argv"`
+			Cwd           string   `json:"cwd"`
+			TimeoutSec    int      `json:"timeout_sec"`
+			StdinUploadID string   `json:"stdin_upload_id"`
 		}
 		_ = json.Unmarshal(op.Payload, &payload)
+		stdin, stdinErr := a.openStagedCommandInput(c, op)
+		if payload.StdinUploadID != "" {
+			defer a.cleanupUploadForOp(op)
+		}
+		if stdinErr != nil {
+			finishedAt = time.Now().UTC()
+			message := stdinErr.Error()
+			rr = &resultRecord{
+				StartedAt: startedAt.Format(time.RFC3339Nano), FinishedAt: finishedAt.Format(time.RFC3339Nano),
+				DurationMs: finishedAt.Sub(startedAt).Milliseconds(), ExitCode: -1, Status: "FAILED", Stderr: message,
+				StdoutSHA256: sha256Hex(nil), StderrSHA256: sha256Hex([]byte(message)),
+			}
+			break
+		}
+		if stdin != nil {
+			defer stdin.Close()
+		}
 		timeout := time.Duration(payload.TimeoutSec) * time.Second
 		if timeout <= 0 {
 			timeout = time.Duration(a.cfg.DefaultTimeoutSec) * time.Second
@@ -1159,6 +1191,7 @@ func (a *API) executeApprovedRequest(requestID string, c auth.Claims, op rules.O
 		res := a.exec.Run(execCtx, executor.Spec{
 			Argv:    payload.Argv,
 			Cwd:     payload.Cwd,
+			Stdin:   stdin,
 			Timeout: timeout,
 			OnStdout: func(b []byte) {
 				a.liveMu.Lock()
@@ -1537,7 +1570,7 @@ func (a *API) decideInternalWithRules(ctx context.Context, requestID string, dec
 		if decision == "ALLOW_SESSION" || decision == "ALLOW_ALWAYS" {
 			if len(overrideRules) > 0 {
 				for _, overrideRule := range overrideRules {
-					createdRule := overrideRule
+					createdRule := bindRuleToCommandInput(overrideRule, op)
 					if createdRule.ID == "" {
 						createdRule.ID = uuid.NewString()
 					}
@@ -1607,6 +1640,17 @@ func (a *API) decideInternalWithRules(ctx context.Context, requestID string, dec
 	}
 }
 
+func bindRuleToCommandInput(rule rules.Rule, op rules.Op) rules.Rule {
+	hash := stdinSHA256ForOp(op)
+	if hash == "" || rule.Cmd == nil {
+		return rule
+	}
+	cmd := *rule.Cmd
+	cmd.StdinSHA256 = hash
+	rule.Cmd = &cmd
+	return rule
+}
+
 func (a *API) handleKill(w http.ResponseWriter, r *http.Request, c auth.Claims, requestID string) {
 	if err := a.killInternal(r.Context(), requestID, c); err != nil {
 		if err.Error() == "REQUEST_NOT_FOUND" {
@@ -1623,12 +1667,13 @@ func ruleFromOpExact(ruleID string, op rules.Op) (rules.Rule, bool) {
 	switch op.Type {
 	case "cmd.run":
 		var p struct {
-			Argv []string `json:"argv"`
+			Argv        []string `json:"argv"`
+			StdinSHA256 string   `json:"stdin_sha256"`
 		}
 		if err := json.Unmarshal(op.Payload, &p); err != nil || len(p.Argv) == 0 {
 			return rules.Rule{}, false
 		}
-		return rules.Rule{ID: ruleID, OpType: "cmd.run", Cmd: &rules.CmdRule{ArgvPrefix: p.Argv}}, true
+		return rules.Rule{ID: ruleID, OpType: "cmd.run", Cmd: &rules.CmdRule{ArgvPrefix: p.Argv, StdinSHA256: p.StdinSHA256}}, true
 	case "fs.read", "fs.download":
 		var p struct {
 			Path string `json:"path"`
@@ -1656,6 +1701,17 @@ func ruleFromOpExact(ruleID string, op rules.Op) (rules.Rule, bool) {
 	default:
 		return rules.Rule{}, false
 	}
+}
+
+func stdinSHA256ForOp(op rules.Op) string {
+	if op.Type != "cmd.run" {
+		return ""
+	}
+	var payload struct {
+		StdinSHA256 string `json:"stdin_sha256"`
+	}
+	_ = json.Unmarshal(op.Payload, &payload)
+	return payload.StdinSHA256
 }
 
 func riskFlags(op rules.Op) []string {
@@ -1781,7 +1837,22 @@ func tuiDetails(rec requestRecord) string {
 }
 
 func (a *API) tuiDetails(rec requestRecord) string {
-	return tuiDetailsWithRules(rec, a.rules)
+	details := tuiDetailsWithRules(rec, a.rules)
+	var op rules.Op
+	if json.Unmarshal(rec.Op, &op) != nil || op.Type != "cmd.run" {
+		return details
+	}
+	var payload struct {
+		UploadID string `json:"stdin_upload_id"`
+	}
+	if json.Unmarshal(op.Payload, &payload) != nil || !validTransferID(payload.UploadID) {
+		return details
+	}
+	content, err := os.ReadFile(a.uploadDataPath(payload.UploadID))
+	if err != nil {
+		return details + "\n  content: unavailable"
+	}
+	return details + "\n  content:\n" + escapeTUIViewText(string(content))
 }
 
 func tuiDetailsWithRules(rec requestRecord, engine *rules.Engine) string {
@@ -1793,9 +1864,11 @@ func tuiDetailsWithRules(rec requestRecord, engine *rules.Engine) string {
 	switch op.Type {
 	case "cmd.run":
 		var p struct {
-			Argv       []string `json:"argv"`
-			Cwd        string   `json:"cwd"`
-			TimeoutSec int      `json:"timeout_sec"`
+			Argv        []string `json:"argv"`
+			Cwd         string   `json:"cwd"`
+			TimeoutSec  int      `json:"timeout_sec"`
+			StdinSize   int64    `json:"stdin_size"`
+			StdinSHA256 string   `json:"stdin_sha256"`
 		}
 		_ = json.Unmarshal(op.Payload, &p)
 		if len(p.Argv) == 0 {
@@ -1813,6 +1886,11 @@ func tuiDetailsWithRules(rec requestRecord, engine *rules.Engine) string {
 		b.WriteString("argv:\n")
 		for i, arg := range p.Argv {
 			fmt.Fprintf(&b, "  [%d] %s\n", i, escapeTUIViewText(arg))
+		}
+		if p.StdinSHA256 != "" {
+			b.WriteString("\nstdin:\n")
+			fmt.Fprintf(&b, "  size: %d bytes\n", p.StdinSize)
+			fmt.Fprintf(&b, "  sha256: %s\n", escapeTUIViewText(p.StdinSHA256))
 		}
 		if hints := commandReviewHints(p.Argv); len(hints) > 0 {
 			fmt.Fprintf(&b, "\nreview_hints: %s", strings.Join(hints, ", "))

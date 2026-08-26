@@ -150,15 +150,17 @@ type uiState struct {
 	focus []tview.Primitive
 
 	// Selected IDs.
-	selectedPending   string
-	selectedJob       string
-	pendingIDs        []string
-	jobIDs            []string
-	jobListSig        string
-	showAllJobs       bool
-	activeMainTab     string
-	pairingAutoSwitch bool
-	serverFocus       tview.Primitive
+	selectedPending    string
+	pendingDetailsID   string
+	pendingDetailsText string
+	selectedJob        string
+	pendingIDs         []string
+	jobIDs             []string
+	jobListSig         string
+	showAllJobs        bool
+	activeMainTab      string
+	pairingAutoSwitch  bool
+	serverFocus        tview.Primitive
 
 	// Optional page refresh hooks (for non-dashboard pages).
 	rulesRefresh   func()
@@ -1056,22 +1058,41 @@ func pendingSelectionIndex(ids []string, prevSelectedID string, prevIndex int) i
 }
 
 func (s *uiState) refreshDetails(requestID string) {
-	info, ok := s.api.GetRequestInfoForTUI(requestID)
+	text, ok := s.cachedPendingDetails(requestID, func() (string, bool) {
+		info, found := s.api.GetRequestInfoForTUI(requestID)
+		if !found {
+			return "", false
+		}
+		var b strings.Builder
+		fmt.Fprintf(&b, "id: %s\nstatus: %s\nclient_id: %s\nsession_id: %s\nrequested_at: %s\n\n",
+			info.ID, info.Status, info.ClientID, info.SessionID, info.CreatedAt)
+		if len(info.RiskFlags) > 0 {
+			fmt.Fprintf(&b, "risk: %s\n\n", strings.Join(info.RiskFlags, ", "))
+		}
+		if info.Details != "" {
+			b.WriteString(info.Details)
+			b.WriteString("\n")
+		}
+		return b.String(), true
+	})
 	if !ok {
 		s.details.SetText("")
 		return
 	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "id: %s\nstatus: %s\nclient_id: %s\nsession_id: %s\nrequested_at: %s\n\n",
-		info.ID, info.Status, info.ClientID, info.SessionID, info.CreatedAt)
-	if len(info.RiskFlags) > 0 {
-		fmt.Fprintf(&b, "risk: %s\n\n", strings.Join(info.RiskFlags, ", "))
+	s.details.SetText(text)
+}
+
+func (s *uiState) cachedPendingDetails(requestID string, load func() (string, bool)) (string, bool) {
+	if requestID == s.pendingDetailsID {
+		return s.pendingDetailsText, true
 	}
-	if info.Details != "" {
-		b.WriteString(info.Details)
-		b.WriteString("\n")
+	text, ok := load()
+	if !ok {
+		return "", false
 	}
-	s.details.SetText(b.String())
+	s.pendingDetailsID = requestID
+	s.pendingDetailsText = text
+	return text, true
 }
 
 func (s *uiState) refreshJobs() {
@@ -2013,7 +2034,11 @@ func ruleScopeLabel(r store.RuleRow) string {
 		return "path_glob=" + *r.PathGlob
 	}
 	if r.CmdArgvJSON != nil && *r.CmdArgvJSON != "" {
-		return "argv=" + *r.CmdArgvJSON
+		label := "argv=" + *r.CmdArgvJSON
+		if r.CmdStdinSHA256 != nil && *r.CmdStdinSHA256 != "" {
+			label += " stdin_sha256=" + *r.CmdStdinSHA256
+		}
+		return label
 	}
 	return "-"
 }

@@ -27,6 +27,7 @@ type stagedUpload struct {
 	Size      int64  `json:"size"`
 	SHA256    string `json:"sha256"`
 	CreatedAt string `json:"created_at"`
+	Claimed   bool   `json:"claimed,omitempty"`
 }
 
 type downloadArtifact struct {
@@ -124,17 +125,25 @@ func (a *API) handleUploadStage(w http.ResponseWriter, r *http.Request, c auth.C
 }
 
 func (a *API) cleanupUploadForOp(op rules.Op) {
-	if op.Type != "fs.upload" {
-		return
-	}
 	var p struct {
-		UploadID string `json:"upload_id"`
+		UploadID      string `json:"upload_id"`
+		StdinUploadID string `json:"stdin_upload_id"`
 	}
-	if json.Unmarshal(op.Payload, &p) != nil || !validTransferID(p.UploadID) {
+	if json.Unmarshal(op.Payload, &p) != nil {
 		return
 	}
-	_ = os.Remove(a.uploadDataPath(p.UploadID))
-	_ = os.Remove(a.uploadMetaPath(p.UploadID))
+	id := ""
+	switch op.Type {
+	case "fs.upload":
+		id = p.UploadID
+	case "cmd.run":
+		id = p.StdinUploadID
+	}
+	if !validTransferID(id) {
+		return
+	}
+	_ = os.Remove(a.uploadDataPath(id))
+	_ = os.Remove(a.uploadMetaPath(id))
 }
 
 func (a *API) cleanupExpiredTransfers(maxAge time.Duration) {
@@ -156,6 +165,34 @@ func (a *API) cleanupExpiredTransfers(maxAge time.Duration) {
 
 func (a *API) prepareTransferOp(c auth.Claims, op *rules.Op) error {
 	switch op.Type {
+	case "cmd.run":
+		var payload map[string]any
+		if err := json.Unmarshal(op.Payload, &payload); err != nil {
+			return fmt.Errorf("invalid cmd.run payload: %w", err)
+		}
+		rawID, hasID := payload["stdin_upload_id"]
+		_, hasSize := payload["stdin_size"]
+		_, hasSHA256 := payload["stdin_sha256"]
+		if !hasID {
+			if hasSize || hasSHA256 {
+				return errors.New("cmd.run stdin metadata requires stdin_upload_id")
+			}
+			return nil
+		}
+		id, ok := rawID.(string)
+		if !ok || strings.TrimSpace(id) == "" {
+			return errors.New("cmd.run requires a valid stdin_upload_id")
+		}
+		if !validTransferID(id) {
+			return errors.New("cmd.run requires a valid stdin_upload_id")
+		}
+		meta, err := a.claimStagedUpload(id, c.SessionID)
+		if err != nil {
+			return fmt.Errorf("staged stdin: %w", err)
+		}
+		payload["stdin_size"] = meta.Size
+		payload["stdin_sha256"] = meta.SHA256
+		op.Payload = mustJSON(payload)
 	case "fs.upload":
 		var p struct {
 			Path     string `json:"path"`
@@ -173,12 +210,9 @@ func (a *API) prepareTransferOp(c auth.Claims, op *rules.Op) error {
 				return err
 			}
 		}
-		meta, err := a.loadStagedUpload(p.UploadID)
+		meta, err := a.claimStagedUpload(p.UploadID, c.SessionID)
 		if err != nil {
-			return fmt.Errorf("staged upload not found: %w", err)
-		}
-		if meta.SessionID != c.SessionID {
-			return errors.New("staged upload belongs to another session")
+			return fmt.Errorf("staged upload: %w", err)
 		}
 		op.Payload = mustJSON(map[string]any{
 			"path": p.Path, "upload_id": p.UploadID, "size": meta.Size,
@@ -195,6 +229,44 @@ func (a *API) prepareTransferOp(c auth.Claims, op *rules.Op) error {
 	return nil
 }
 
+func (a *API) openStagedCommandInput(c auth.Claims, op rules.Op) (*os.File, error) {
+	var payload struct {
+		UploadID string `json:"stdin_upload_id"`
+		Size     int64  `json:"stdin_size"`
+		SHA256   string `json:"stdin_sha256"`
+	}
+	if err := json.Unmarshal(op.Payload, &payload); err != nil {
+		return nil, err
+	}
+	if payload.UploadID == "" {
+		return nil, nil
+	}
+	meta, err := a.loadStagedUpload(payload.UploadID)
+	if err != nil {
+		return nil, err
+	}
+	if meta.SessionID != c.SessionID || meta.Size != payload.Size || meta.SHA256 != payload.SHA256 {
+		return nil, errors.New("staged stdin metadata mismatch")
+	}
+	f, err := os.Open(a.uploadDataPath(payload.UploadID))
+	if err != nil {
+		return nil, err
+	}
+	h := sha256.New()
+	n, err := io.Copy(h, f)
+	if err == nil && (n != payload.Size || hex.EncodeToString(h.Sum(nil)) != payload.SHA256) {
+		err = errors.New("staged stdin checksum mismatch")
+	}
+	if err == nil {
+		_, err = f.Seek(0, io.SeekStart)
+	}
+	if err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	return f, nil
+}
+
 func (a *API) loadStagedUpload(id string) (stagedUpload, error) {
 	var meta stagedUpload
 	b, err := os.ReadFile(a.uploadMetaPath(id))
@@ -203,6 +275,27 @@ func (a *API) loadStagedUpload(id string) (stagedUpload, error) {
 	}
 	if err := json.Unmarshal(b, &meta); err != nil {
 		return meta, err
+	}
+	return meta, nil
+}
+
+func (a *API) claimStagedUpload(id, sessionID string) (stagedUpload, error) {
+	a.transferMu.Lock()
+	defer a.transferMu.Unlock()
+
+	meta, err := a.loadStagedUpload(id)
+	if err != nil {
+		return stagedUpload{}, fmt.Errorf("not found: %w", err)
+	}
+	if meta.SessionID != sessionID {
+		return stagedUpload{}, errors.New("belongs to another session")
+	}
+	if meta.Claimed {
+		return stagedUpload{}, errors.New("already claimed by another request")
+	}
+	meta.Claimed = true
+	if err := writeJSONFileAtomic(a.uploadMetaPath(id), meta, 0o600); err != nil {
+		return stagedUpload{}, err
 	}
 	return meta, nil
 }
