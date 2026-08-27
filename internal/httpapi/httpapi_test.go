@@ -1142,7 +1142,7 @@ func TestFSReadExecution(t *testing.T) {
 
 		var rec map[string]any
 		_ = json.Unmarshal(getRw.Body.Bytes(), &rec)
-		if rec["status"] == "RUNNING" || rec["status"] == "APPROVED" || rec["status"] == "PENDING_APPROVAL" {
+		if rec["status"] == "RUNNING" || rec["status"] == "QUEUED" || rec["status"] == "APPROVED" || rec["status"] == "PENDING_APPROVAL" {
 			time.Sleep(10 * time.Millisecond)
 			continue
 		}
@@ -1340,7 +1340,7 @@ func TestFSPatchUnifiedExecution(t *testing.T) {
 		}
 		var rec map[string]any
 		_ = json.Unmarshal(getRw.Body.Bytes(), &rec)
-		if rec["status"] == "RUNNING" || rec["status"] == "APPROVED" || rec["status"] == "PENDING_APPROVAL" {
+		if rec["status"] == "RUNNING" || rec["status"] == "QUEUED" || rec["status"] == "APPROVED" || rec["status"] == "PENDING_APPROVAL" {
 			time.Sleep(10 * time.Millisecond)
 			continue
 		}
