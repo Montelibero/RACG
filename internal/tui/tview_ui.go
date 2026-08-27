@@ -1719,23 +1719,24 @@ func jobViewText(mode string, info httpapi.TUIRequestInfo, combined string, live
 
 func ruleScopeHelpText(candidates []httpapi.RuleScopeCandidate) string {
 	if len(candidates) > 0 {
+		const wildcardHelp = " Edit the path; * creates a glob, while a leading = keeps it literal."
 		switch candidates[0].OpType {
 		case "fs.read":
-			return "Allow reading this exact file path for the selected scope."
+			return "Allow reading this server file path for the selected scope." + wildcardHelp
 		case "fs.patch_unified":
-			return "Allow patching this exact file path for the selected scope. The diff itself is not scoped."
+			return "Allow patching this server file path for the selected scope. The diff itself is not scoped." + wildcardHelp
 		case "fs.upload":
-			return "Allow uploading to this exact server file path for the selected scope."
+			return "Allow uploading to this server file path for the selected scope." + wildcardHelp
 		case "fs.download":
-			return "Allow downloading this exact server file path for the selected scope."
+			return "Allow downloading this server file path for the selected scope." + wildcardHelp
 		case "fs.append_block":
-			return "Allow appending managed blocks to this exact file path for the selected scope."
+			return "Allow appending managed blocks to this file path for the selected scope." + wildcardHelp
 		case "fs.replace_literal":
-			return "Allow literal replacements in this exact file path for the selected scope."
+			return "Allow literal replacements in this file path for the selected scope." + wildcardHelp
 		case "conf.set":
-			return "Allow structured config edits for this exact file path for the selected scope."
+			return "Allow structured config edits for this file path for the selected scope." + wildcardHelp
 		case "conf.set_kv":
-			return "Allow key/value config edits for this exact file path for the selected scope."
+			return "Allow key/value config edits for this file path for the selected scope." + wildcardHelp
 		}
 	}
 	return "Edit one scope per command segment. Shell separators like &&, |, ; are rejected.\nExamples: docker stop nginx | docker stop n*"

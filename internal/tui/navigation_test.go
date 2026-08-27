@@ -87,6 +87,18 @@ func TestRuleScopeOverlayWithoutCandidatesDoesNotOfferSave(t *testing.T) {
 	}
 }
 
+func TestPathRuleScopeHelpExplainsWildcard(t *testing.T) {
+	for _, opType := range []string{"fs.upload", "fs.download"} {
+		got := ruleScopeHelpText([]httpapi.RuleScopeCandidate{{OpType: opType}})
+		if !strings.Contains(got, "* creates a glob") {
+			t.Fatalf("op=%s help=%q", opType, got)
+		}
+		if !strings.Contains(got, "leading = keeps it literal") {
+			t.Fatalf("op=%s help=%q", opType, got)
+		}
+	}
+}
+
 func TestRulesPageManualRuleHotkeysWorkOnEnglishAndRussianLayouts(t *testing.T) {
 	for _, key := range []rune{'a', 'ф', 's', 'ы'} {
 		t.Run(string(key), func(t *testing.T) {

@@ -445,7 +445,11 @@ func (a *API) RuleScopeAnalysisForTUI(requestID string) ([]RuleScopeCandidate, s
 		if err := json.Unmarshal(op.Payload, &p); err != nil || strings.TrimSpace(p.Path) == "" {
 			return nil, "operation has no reusable file path"
 		}
-		return []RuleScopeCandidate{{OpType: op.Type, Segment: p.Path, Pattern: p.Path}}, ""
+		pattern := p.Path
+		if strings.Contains(pattern, "*") {
+			pattern = "=" + pattern
+		}
+		return []RuleScopeCandidate{{OpType: op.Type, Segment: p.Path, Pattern: pattern}}, ""
 	}
 	analysis := rules.AnalyzeCommandOp(op)
 	out := make([]RuleScopeCandidate, 0, len(analysis.Segments))
@@ -480,7 +484,18 @@ func ruleFromScopePatternForOp(op rules.Op, pattern string) (rules.Rule, error) 
 		if path == "" {
 			return rules.Rule{}, errors.New("empty path pattern")
 		}
-		return rules.Rule{OpType: op.Type, Path: &rules.PathRule{Exact: path}}, nil
+		if strings.HasPrefix(path, "=") {
+			path = strings.TrimPrefix(path, "=")
+			if path == "" {
+				return rules.Rule{}, errors.New("empty exact path")
+			}
+			return rules.Rule{OpType: op.Type, Path: &rules.PathRule{Exact: path}}, nil
+		}
+		pathRule := &rules.PathRule{Exact: path}
+		if strings.Contains(path, "*") {
+			pathRule = &rules.PathRule{Glob: path}
+		}
+		return rules.Rule{OpType: op.Type, Path: pathRule}, nil
 	}
 	rule, err := ruleFromScopePattern(pattern)
 	if err != nil {
@@ -1840,6 +1855,14 @@ func (a *API) decideInternalWithRules(ctx context.Context, requestID string, dec
 				rule, ok := ruleFromOpExact(createdRuleID, op)
 				if ok {
 					createdRules = append(createdRules, rule)
+				}
+			}
+		}
+		if decision == "ALLOW_ALWAYS" && !a.cfg.AllowAlwaysForDangerous {
+			for _, createdRule := range createdRules {
+				if manualRuleMayMatchDangerousOperation(createdRule) {
+					a.reqsMu.Unlock()
+					return errors.New("ALLOW_ALWAYS_NOT_PERMITTED")
 				}
 			}
 		}

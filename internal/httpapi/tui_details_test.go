@@ -502,6 +502,100 @@ func TestDecideWithRulePatternsForTUISavesPathRule(t *testing.T) {
 	}
 }
 
+func TestDecideWithRulePatternsForTUISavesTransferWildcardAsGlob(t *testing.T) {
+	for _, opType := range []string{"fs.upload", "fs.download"} {
+		t.Run(opType, func(t *testing.T) {
+			api := New(config.Defaults())
+			op := map[string]any{
+				"type":    opType,
+				"payload": map[string]any{"path": "/srv/files/original.bin"},
+			}
+			b, err := json.Marshal(op)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			api.reqs["req1"] = requestRecord{ID: "req1", Status: "PENDING_APPROVAL", Op: b, SessionID: "sess1", ClientID: "cli"}
+
+			if err := api.DecideWithRulePatternsForTUI("req1", "ALLOW_SESSION", []string{"/srv/files/*.bin"}); err != nil {
+				t.Fatalf("DecideWithRulePatternsForTUI: %v", err)
+			}
+
+			rows := api.ListSessionRulesForTUI()
+			if len(rows) != 1 || rows[0].PathGlob == nil || *rows[0].PathGlob != "/srv/files/*.bin" {
+				t.Fatalf("session rules=%#v, want path glob", rows)
+			}
+			matching := rules.Op{Type: opType, Payload: json.RawMessage(`{"path":"/srv/files/next.bin"}`)}
+			if _, ok := api.rules.Match("sess1", matching); !ok {
+				t.Fatal("wildcard session rule did not match another transfer path")
+			}
+			outside := rules.Op{Type: opType, Payload: json.RawMessage(`{"path":"/etc/shadow"}`)}
+			if _, ok := api.rules.Match("sess1", outside); ok {
+				t.Fatal("wildcard session rule matched outside its path")
+			}
+		})
+	}
+}
+
+func TestTransferScopePreservesLiteralWildcardInRequestedPath(t *testing.T) {
+	api := New(config.Defaults())
+	op := map[string]any{
+		"type":    "fs.download",
+		"payload": map[string]any{"path": "/srv/files/report*.txt"},
+	}
+	b, err := json.Marshal(op)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	api.reqs["req1"] = requestRecord{ID: "req1", Status: "PENDING_APPROVAL", Op: b, SessionID: "sess1", ClientID: "cli"}
+
+	candidates, problem := api.RuleScopeAnalysisForTUI("req1")
+	if problem != "" || len(candidates) != 1 {
+		t.Fatalf("candidates=%#v problem=%q", candidates, problem)
+	}
+	if candidates[0].Pattern != `=/srv/files/report*.txt` {
+		t.Fatalf("pattern=%q, want explicit exact path", candidates[0].Pattern)
+	}
+	if err := api.DecideWithRulePatternsForTUI("req1", "ALLOW_SESSION", []string{candidates[0].Pattern}); err != nil {
+		t.Fatalf("DecideWithRulePatternsForTUI: %v", err)
+	}
+
+	rows := api.ListSessionRulesForTUI()
+	if len(rows) != 1 || rows[0].PathExact == nil || *rows[0].PathExact != "/srv/files/report*.txt" {
+		t.Fatalf("session rules=%#v, want literal wildcard path exact", rows)
+	}
+	other := rules.Op{Type: "fs.download", Payload: json.RawMessage(`{"path":"/srv/files/report-secret.txt"}`)}
+	if _, ok := api.rules.Match("sess1", other); ok {
+		t.Fatal("literal wildcard path scope matched another filename")
+	}
+}
+
+func TestDecideWithRulePatternsForTUIRejectsDangerousAlwaysPathGlob(t *testing.T) {
+	for _, pattern := range []string{"*", "/etc/*"} {
+		t.Run(pattern, func(t *testing.T) {
+			api := New(config.Defaults())
+			op := map[string]any{
+				"type":    "fs.upload",
+				"payload": map[string]any{"path": "/srv/files/original.bin"},
+			}
+			b, err := json.Marshal(op)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			api.reqs["req1"] = requestRecord{ID: "req1", Status: "PENDING_APPROVAL", Op: b, SessionID: "sess1", ClientID: "cli"}
+
+			err = api.DecideWithRulePatternsForTUI("req1", "ALLOW_ALWAYS", []string{pattern})
+			if err == nil || err.Error() != "ALLOW_ALWAYS_NOT_PERMITTED" {
+				t.Fatalf("err=%v, want ALLOW_ALWAYS_NOT_PERMITTED", err)
+			}
+			if _, ok := api.rules.Match("other-session", rules.Op{
+				Type: "fs.upload", Payload: json.RawMessage(`{"path":"/etc/shadow"}`),
+			}); ok {
+				t.Fatal("dangerous always rule was activated")
+			}
+		})
+	}
+}
+
 func TestDecideWithRulePatternsForTUISavesEachSessionRule(t *testing.T) {
 	api := New(config.Defaults())
 	op := map[string]any{
