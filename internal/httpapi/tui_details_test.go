@@ -632,7 +632,7 @@ func TestDecideWithRulePatternsForTUISavesEachSessionRule(t *testing.T) {
 	}
 }
 
-func TestAllowSessionForStdinCommandBindsRuleToHash(t *testing.T) {
+func TestAllowSessionForStdinCommandCreatesReusableArgvRule(t *testing.T) {
 	api := New(config.Defaults())
 	hash := strings.Repeat("b", 64)
 	op, _ := json.Marshal(map[string]any{
@@ -648,12 +648,16 @@ func TestAllowSessionForStdinCommandBindsRuleToHash(t *testing.T) {
 		t.Fatalf("allow session: %v", err)
 	}
 	rows := api.ListSessionRulesForTUI()
-	if len(rows) != 1 || rows[0].CmdStdinSHA256 == nil || *rows[0].CmdStdinSHA256 != hash {
+	if len(rows) != 1 {
 		t.Fatalf("rows=%+v", rows)
+	}
+	changed := rules.Op{Type: "cmd.run", Payload: json.RawMessage(`{"argv":["/bin/bash","-s"],"stdin_sha256":"different"}`)}
+	if _, ok := api.rules.Match("sess", changed); !ok {
+		t.Fatal("session argv rule did not match different stdin content")
 	}
 }
 
-func TestAllowSessionOverrideRuleForStdinCommandBindsRuleToHash(t *testing.T) {
+func TestAllowSessionOverrideRuleForStdinCommandDoesNotBindHash(t *testing.T) {
 	api := New(config.Defaults())
 	hash := strings.Repeat("c", 64)
 	op, _ := json.Marshal(map[string]any{
@@ -670,7 +674,7 @@ func TestAllowSessionOverrideRuleForStdinCommandBindsRuleToHash(t *testing.T) {
 		t.Fatalf("allow session: %v", err)
 	}
 	rows := api.ListSessionRulesForTUI()
-	if len(rows) != 1 || rows[0].CmdStdinSHA256 == nil || *rows[0].CmdStdinSHA256 != hash {
+	if len(rows) != 1 {
 		t.Fatalf("rows=%+v", rows)
 	}
 }

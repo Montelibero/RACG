@@ -28,27 +28,24 @@ func TestMatchCmdRunArgvPrefix(t *testing.T) {
 	}
 }
 
-func TestCmdRuleRequiresExactStdinHashWhenRequestHasStdin(t *testing.T) {
+func TestCmdRuleMatchesAnyStdinContent(t *testing.T) {
 	e := NewEngine()
 	e.AddAlways(Rule{ID: "argv-only", OpType: "cmd.run", Cmd: &CmdRule{ArgvPrefix: []string{"/bin/bash", "-s"}}})
-	e.AddAlways(Rule{ID: "exact-script", OpType: "cmd.run", Cmd: &CmdRule{
-		ArgvPrefix:  []string{"/bin/bash", "-s"},
-		StdinSHA256: "abc123",
-	}})
 
-	exact := Op{Type: "cmd.run", Payload: mustJSON(t, map[string]any{
+	first := Op{Type: "cmd.run", Payload: mustJSON(t, map[string]any{
 		"argv": []string{"/bin/bash", "-s"}, "stdin_sha256": "abc123",
 	})}
-	match, ok := e.Match("sess", exact)
-	if !ok || match.RuleID != "exact-script" {
-		t.Fatalf("exact stdin match=%+v ok=%t", match, ok)
+	match, ok := e.Match("sess", first)
+	if !ok || match.RuleID != "argv-only" {
+		t.Fatalf("first stdin match=%+v ok=%t", match, ok)
 	}
 
 	changed := Op{Type: "cmd.run", Payload: mustJSON(t, map[string]any{
 		"argv": []string{"/bin/bash", "-s"}, "stdin_sha256": "different",
 	})}
-	if _, ok := e.Match("sess", changed); ok {
-		t.Fatal("argv-only rule allowed changed stdin")
+	match, ok = e.Match("sess", changed)
+	if !ok || match.RuleID != "argv-only" {
+		t.Fatalf("changed stdin match=%+v ok=%t", match, ok)
 	}
 
 	withoutStdin := Op{Type: "cmd.run", Payload: mustJSON(t, map[string]any{
@@ -57,6 +54,30 @@ func TestCmdRuleRequiresExactStdinHashWhenRequestHasStdin(t *testing.T) {
 	match, ok = e.Match("sess", withoutStdin)
 	if !ok || match.RuleID != "argv-only" {
 		t.Fatalf("plain command match=%+v ok=%t", match, ok)
+	}
+}
+
+func TestExactShellArgvRuleMatchesAnyStdinContent(t *testing.T) {
+	e := NewEngine()
+	e.AddSession("sess", Rule{ID: "exact-shell", OpType: "cmd.run", Cmd: &CmdRule{
+		ArgvPrefix: []string{"/bin/bash", "-c", "cat"},
+	}})
+
+	for _, hash := range []string{"abc123", "different"} {
+		op := Op{Type: "cmd.run", Payload: mustJSON(t, map[string]any{
+			"argv": []string{"/bin/bash", "-c", "cat"}, "stdin_sha256": hash,
+		})}
+		match, ok := e.Match("sess", op)
+		if !ok || match.RuleID != "exact-shell" {
+			t.Fatalf("hash=%q match=%+v ok=%t", hash, match, ok)
+		}
+	}
+
+	changedScript := Op{Type: "cmd.run", Payload: mustJSON(t, map[string]any{
+		"argv": []string{"/bin/bash", "-c", "rm /"}, "stdin_sha256": "abc123",
+	})}
+	if _, ok := e.Match("sess", changedScript); ok {
+		t.Fatal("exact shell argv rule matched changed script")
 	}
 }
 

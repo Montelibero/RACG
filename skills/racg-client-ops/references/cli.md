@@ -80,7 +80,7 @@ racg run --stdin-file ./query.sql -- isql -database main.fdb
 cat ./query.sql | racg run --stdin -- isql -database main.fdb
 ```
 
-Input bytes are staged outside request JSON and no persistent remote file is created. The approval view includes size, SHA-256, and exact content. Saved session/always rules include the stdin SHA-256 in addition to argv; existing argv-only rules do not approve requests carrying stdin.
+Input bytes are staged outside request JSON and no persistent remote file is created. The approval view includes size, SHA-256, and exact content. The hash verifies and audits the staged bytes; saved session/always rules match the approved argv scope regardless of stdin content.
 
 Status transitions are written to stderr. Live output and the final report are written to stdout:
 

@@ -51,7 +51,7 @@ Use RACG when command execution must go through a human-approved gateway instead
 ## Operating Rules
 
 - Use narrow commands and explicit argv. Avoid large opaque shell strings unless the user specifically needs shell composition.
-- Use script/stdin modes for multiline code, SQL, templates, quotes, or literal `$VARIABLE` content. RACG stages exact bytes and binds saved rules to their SHA-256.
+- Use script/stdin modes for multiline code, SQL, templates, quotes, or literal `$VARIABLE` content. RACG stages exact bytes and uses their SHA-256 for integrity verification and audit. Saved rules match the approved argv scope, not the stdin hash.
 - For simple `env`/`json`/`yaml` config key updates, use `racg config set` instead of generating scripts or raw patches.
 - For arbitrary text edits, use `racg file read` plus `racg file patch`; avoid ad-hoc scripts when a unified diff is enough.
 - For whole-file transfer, use `racg file upload` or `racg file download`; use `--force` only when replacing the named local destination is intended.

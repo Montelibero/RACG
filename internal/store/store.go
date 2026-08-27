@@ -32,17 +32,16 @@ type Session struct {
 }
 
 type RuleRow struct {
-	RuleID         string
-	Source         string
-	OpType         string
-	Enabled        bool
-	CreatedAt      time.Time
-	DisabledAt     *time.Time
-	CmdArgvJSON    *string
-	CmdStdinSHA256 *string
-	PathExact      *string
-	PathPrefix     *string
-	PathGlob       *string
+	RuleID      string
+	Source      string
+	OpType      string
+	Enabled     bool
+	CreatedAt   time.Time
+	DisabledAt  *time.Time
+	CmdArgvJSON *string
+	PathExact   *string
+	PathPrefix  *string
+	PathGlob    *string
 }
 
 func Open(dsn string) (*Store, error) {
@@ -250,7 +249,6 @@ func (s *Store) InsertAlwaysRule(ctx context.Context, r rules.Rule, createdAt ti
 	}
 
 	var argvJSON sql.NullString
-	var stdinSHA256 sql.NullString
 	var pathExact sql.NullString
 	var pathPrefix sql.NullString
 	var pathGlob sql.NullString
@@ -261,9 +259,6 @@ func (s *Store) InsertAlwaysRule(ctx context.Context, r rules.Rule, createdAt ti
 			return err
 		}
 		argvJSON = sql.NullString{String: string(b), Valid: true}
-		if r.Cmd.StdinSHA256 != "" {
-			stdinSHA256 = sql.NullString{String: r.Cmd.StdinSHA256, Valid: true}
-		}
 	}
 	if r.Path != nil {
 		if r.Path.Exact != "" {
@@ -284,7 +279,7 @@ func (s *Store) InsertAlwaysRule(ctx context.Context, r rules.Rule, createdAt ti
 		"always",
 		r.OpType,
 		argvJSON,
-		stdinSHA256,
+		nil,
 		pathExact,
 		pathPrefix,
 		pathGlob,
@@ -310,11 +305,11 @@ func (s *Store) LoadEnabledAlwaysRules(ctx context.Context) ([]rules.Rule, error
 		var id string
 		var opType string
 		var argvJSON sql.NullString
-		var stdinSHA256 sql.NullString
+		var legacyStdinSHA256 sql.NullString
 		var pathExact sql.NullString
 		var pathPrefix sql.NullString
 		var pathGlob sql.NullString
-		if err := rows.Scan(&id, &opType, &argvJSON, &stdinSHA256, &pathExact, &pathPrefix, &pathGlob); err != nil {
+		if err := rows.Scan(&id, &opType, &argvJSON, &legacyStdinSHA256, &pathExact, &pathPrefix, &pathGlob); err != nil {
 			return nil, err
 		}
 
@@ -325,7 +320,7 @@ func (s *Store) LoadEnabledAlwaysRules(ctx context.Context) ([]rules.Rule, error
 				return nil, err
 			}
 			if len(argv) > 0 {
-				r.Cmd = &rules.CmdRule{ArgvPrefix: argv, StdinSHA256: stdinSHA256.String}
+				r.Cmd = &rules.CmdRule{ArgvPrefix: argv}
 			}
 		}
 		if pathExact.Valid || pathPrefix.Valid || pathGlob.Valid {
@@ -421,7 +416,7 @@ func (s *Store) ListRules(ctx context.Context, limit int) ([]RuleRow, error) {
 	}
 
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT rule_id, source, op_type, enabled, created_at, disabled_at, cmd_argv_prefix_json, cmd_stdin_sha256, path_exact, path_prefix, path_glob
+		`SELECT rule_id, source, op_type, enabled, created_at, disabled_at, cmd_argv_prefix_json, path_exact, path_prefix, path_glob
 		   FROM rules
 		  ORDER BY created_at DESC
 		  LIMIT ?`,
@@ -439,7 +434,6 @@ func (s *Store) ListRules(ctx context.Context, limit int) ([]RuleRow, error) {
 		var created string
 		var disabled sql.NullString
 		var cmdJSON sql.NullString
-		var cmdStdinSHA256 sql.NullString
 		var pathExact sql.NullString
 		var pathPrefix sql.NullString
 		var pathGlob sql.NullString
@@ -452,7 +446,6 @@ func (s *Store) ListRules(ctx context.Context, limit int) ([]RuleRow, error) {
 			&created,
 			&disabled,
 			&cmdJSON,
-			&cmdStdinSHA256,
 			&pathExact,
 			&pathPrefix,
 			&pathGlob,
@@ -476,10 +469,6 @@ func (s *Store) ListRules(ctx context.Context, limit int) ([]RuleRow, error) {
 		if cmdJSON.Valid {
 			v := cmdJSON.String
 			rr.CmdArgvJSON = &v
-		}
-		if cmdStdinSHA256.Valid {
-			v := cmdStdinSHA256.String
-			rr.CmdStdinSHA256 = &v
 		}
 		if pathExact.Valid {
 			v := pathExact.String

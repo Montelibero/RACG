@@ -8,11 +8,10 @@ import (
 	"github.com/itolstov/racg/internal/store"
 )
 
-func TestRuleScopeLabelShowsStdinHash(t *testing.T) {
+func TestRuleScopeLabelShowsCommandArgv(t *testing.T) {
 	argv := `["/bin/bash","-s"]`
-	hash := "abc123"
-	got := ruleScopeLabel(store.RuleRow{CmdArgvJSON: &argv, CmdStdinSHA256: &hash})
-	if !strings.Contains(got, "argv="+argv) || !strings.Contains(got, "stdin_sha256="+hash) {
+	got := ruleScopeLabel(store.RuleRow{CmdArgvJSON: &argv})
+	if !strings.Contains(got, "argv="+argv) || strings.Contains(got, "stdin_sha256") {
 		t.Fatalf("label=%q", got)
 	}
 }

@@ -501,9 +501,6 @@ func ruleFromScopePatternForOp(op rules.Op, pattern string) (rules.Rule, error) 
 	if err != nil {
 		return rules.Rule{}, err
 	}
-	if rule.Cmd != nil {
-		rule.Cmd.StdinSHA256 = stdinSHA256ForOp(op)
-	}
 	return rule, nil
 }
 
@@ -750,10 +747,6 @@ func (a *API) ListSessionRulesForTUI() []store.RuleRow {
 				if err == nil {
 					s := string(b)
 					row.CmdArgvJSON = &s
-				}
-				if r.Cmd.StdinSHA256 != "" {
-					v := r.Cmd.StdinSHA256
-					row.CmdStdinSHA256 = &v
 				}
 			}
 			if r.Path != nil {
@@ -1844,7 +1837,7 @@ func (a *API) decideInternalWithRules(ctx context.Context, requestID string, dec
 		if decision == "ALLOW_SESSION" || decision == "ALLOW_ALWAYS" {
 			if len(overrideRules) > 0 {
 				for _, overrideRule := range overrideRules {
-					createdRule := bindRuleToCommandInput(overrideRule, op)
+					createdRule := overrideRule
 					if createdRule.ID == "" {
 						createdRule.ID = uuid.NewString()
 					}
@@ -1922,17 +1915,6 @@ func (a *API) decideInternalWithRules(ctx context.Context, requestID string, dec
 	}
 }
 
-func bindRuleToCommandInput(rule rules.Rule, op rules.Op) rules.Rule {
-	hash := stdinSHA256ForOp(op)
-	if hash == "" || rule.Cmd == nil {
-		return rule
-	}
-	cmd := *rule.Cmd
-	cmd.StdinSHA256 = hash
-	rule.Cmd = &cmd
-	return rule
-}
-
 func (a *API) handleKill(w http.ResponseWriter, r *http.Request, c auth.Claims, requestID string) {
 	if err := a.killInternal(r.Context(), requestID, c); err != nil {
 		if err.Error() == "REQUEST_NOT_FOUND" {
@@ -1949,13 +1931,12 @@ func ruleFromOpExact(ruleID string, op rules.Op) (rules.Rule, bool) {
 	switch op.Type {
 	case "cmd.run":
 		var p struct {
-			Argv        []string `json:"argv"`
-			StdinSHA256 string   `json:"stdin_sha256"`
+			Argv []string `json:"argv"`
 		}
 		if err := json.Unmarshal(op.Payload, &p); err != nil || len(p.Argv) == 0 {
 			return rules.Rule{}, false
 		}
-		return rules.Rule{ID: ruleID, OpType: "cmd.run", Cmd: &rules.CmdRule{ArgvPrefix: p.Argv, StdinSHA256: p.StdinSHA256}}, true
+		return rules.Rule{ID: ruleID, OpType: "cmd.run", Cmd: &rules.CmdRule{ArgvPrefix: p.Argv}}, true
 	case "fs.read", "fs.download":
 		var p struct {
 			Path string `json:"path"`
@@ -1983,17 +1964,6 @@ func ruleFromOpExact(ruleID string, op rules.Op) (rules.Rule, bool) {
 	default:
 		return rules.Rule{}, false
 	}
-}
-
-func stdinSHA256ForOp(op rules.Op) string {
-	if op.Type != "cmd.run" {
-		return ""
-	}
-	var payload struct {
-		StdinSHA256 string `json:"stdin_sha256"`
-	}
-	_ = json.Unmarshal(op.Payload, &payload)
-	return payload.StdinSHA256
 }
 
 func riskFlags(op rules.Op) []string {

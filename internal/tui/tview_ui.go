@@ -2246,11 +2246,7 @@ func ruleScopeLabel(r store.RuleRow) string {
 		return "path_glob=" + *r.PathGlob
 	}
 	if r.CmdArgvJSON != nil && *r.CmdArgvJSON != "" {
-		label := "argv=" + *r.CmdArgvJSON
-		if r.CmdStdinSHA256 != nil && *r.CmdStdinSHA256 != "" {
-			label += " stdin_sha256=" + *r.CmdStdinSHA256
-		}
-		return label
+		return "argv=" + *r.CmdArgvJSON
 	}
 	return "-"
 }
