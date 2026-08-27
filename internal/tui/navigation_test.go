@@ -317,21 +317,24 @@ func TestStatusBarDoesNotShowRootMode(t *testing.T) {
 	}
 }
 
-func TestTerminalTitleShowsStableActivityMarkerWhenWorkIsActive(t *testing.T) {
-	static := terminalTitle("0.2.5", "docker @ server1:8777", 0, 0, 0)
-	if static != "RACG v0.2.5 · docker @ server1:8777" {
-		t.Fatalf("static title=%q", static)
+func TestTerminalTitleDistinguishesApprovalFromRunning(t *testing.T) {
+	tests := []struct {
+		name             string
+		pending, running int
+		want             string
+	}{
+		{name: "idle", want: "RACG v0.2.5 · docker @ server1:8777"},
+		{name: "approval", pending: 2, want: "[APPROVAL 2] RACG v0.2.5 · docker @ server1:8777"},
+		{name: "running", running: 3, want: "[RUN 3] RACG v0.2.5 · docker @ server1:8777"},
+		{name: "approval wins", pending: 2, running: 3, want: "[APPROVAL 2] RACG v0.2.5 · docker @ server1:8777 · running=3"},
 	}
-
-	active1 := terminalTitle("0.2.5", "docker @ server1:8777", 1, 0, 0)
-	active2 := terminalTitle("0.2.5", "docker @ server1:8777", 1, 0, 1)
-	if active1 != active2 {
-		t.Fatalf("active title must not animate through terminal writes: %q != %q", active1, active2)
-	}
-	for _, want := range []string{"RACG v0.2.5", "docker @ server1:8777", "pending=1", "running=0"} {
-		if !strings.Contains(active1, want) {
-			t.Fatalf("active title=%q want %q", active1, want)
-		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := terminalTitle("0.2.5", "docker @ server1:8777", tt.pending, tt.running, 0)
+			if got != tt.want {
+				t.Fatalf("title=%q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

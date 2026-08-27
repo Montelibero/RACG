@@ -351,7 +351,14 @@ func terminalTitle(version, identity string, pending, running, frame int) string
 	if pending == 0 && running == 0 {
 		return base
 	}
-	return fmt.Sprintf("* %s pending=%d running=%d", base, pending, running)
+	if pending > 0 {
+		title := fmt.Sprintf("[APPROVAL %d] %s", pending, base)
+		if running > 0 {
+			title += fmt.Sprintf(" · running=%d", running)
+		}
+		return title
+	}
+	return fmt.Sprintf("[RUN %d] %s", running, base)
 }
 
 func serverIdentity(profile, hostname, listen string) string {
