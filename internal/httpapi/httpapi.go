@@ -1177,9 +1177,10 @@ func (a *API) handleSessionOpen(w http.ResponseWriter, r *http.Request) {
 	tok, exp := a.tokens.Issue(sessionID, req.ClientID, 8*time.Hour)
 
 	resp := map[string]any{
-		"session_id":    sessionID,
-		"session_token": tok,
-		"expires_at":    exp.Format(time.RFC3339Nano),
+		"session_id":     sessionID,
+		"session_token":  tok,
+		"expires_at":     exp.Format(time.RFC3339Nano),
+		"server_version": version.Version,
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

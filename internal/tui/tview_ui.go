@@ -66,6 +66,7 @@ func RunServeUI(ctx context.Context, cfg ServeUIConfig) error {
 	state.setActiveMainTab("server")
 
 	app.SetRoot(pages, true)
+	state.startServerUpdateCheck(ctx, app)
 
 	app.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
 		return state.handleGlobalInput(app, pages, cfg, ev)
@@ -161,7 +162,8 @@ type uiState struct {
 	showAllJobs        bool
 	activeMainTab      string
 	pairingAutoSwitch  bool
-	serverFocus        tview.Primitive
+	serverFocus        []tview.Primitive
+	serverUpdate       serverUpdateStatus
 
 	// Optional page refresh hooks (for non-dashboard pages).
 	rulesRefresh   func()
@@ -181,7 +183,7 @@ type uiState struct {
 }
 
 func newUIState(api *httpapi.API, st *store.Store) *uiState {
-	s := &uiState{api: api, store: st, follow: true, page: "pairing", showAllJobs: true, activeMainTab: "server", pairingAutoSwitch: true, jobMode: "combined"}
+	s := &uiState{api: api, store: st, follow: true, page: "pairing", showAllJobs: true, activeMainTab: "server", pairingAutoSwitch: true, jobMode: "combined", serverUpdate: serverUpdateStatus{Phase: updateChecking}}
 	if api != nil {
 		s.decisionRunner = api.DecideForTUI
 	}
@@ -208,6 +210,9 @@ func (s *uiState) handleGlobalInput(app *tview.Application, pages *tview.Pages, 
 		if s.closeOverlay(pages) {
 			return nil
 		}
+	}
+	if confirmationOverlayVisible(pages) {
+		return ev
 	}
 	if s.overlayClose != nil {
 		return ev
@@ -464,7 +469,7 @@ func (s *uiState) switchMainPage(pages *tview.Pages, name string) {
 		return
 	}
 	s.closeOverlay(pages)
-	for _, p := range []string{"pairing", "dashboard", "rules", "history", "help", "copy", "confirm_kill", "rule_scope"} {
+	for _, p := range []string{"pairing", "dashboard", "rules", "history", "help", "copy", "confirm_kill", "confirm_update", "rule_scope"} {
 		pages.HidePage(p)
 	}
 	pages.ShowPage(name)
@@ -479,7 +484,7 @@ func (s *uiState) renderMainTabs() string {
 		label string
 	}
 	tabs := []tab{
-		{page: "pairing", key: "0", name: "server", label: "Server"},
+		{page: "pairing", key: "0", name: "server", label: s.serverTabLabel()},
 		{page: "dashboard", key: "1", name: "pending", label: "Pending"},
 		{page: "dashboard", key: "2", name: "jobs", label: "Jobs"},
 		{page: "rules", key: "3", name: "rules", label: "Rules"},
@@ -503,6 +508,17 @@ func (s *uiState) renderMainTabs() string {
 func (s *uiState) setActiveMainTab(name string) {
 	s.activeMainTab = name
 	s.refreshMainTabs()
+}
+
+func (s *uiState) serverTabLabel() string {
+	switch s.serverUpdateSnapshot().Phase {
+	case updateAvailable, updateFailed:
+		return "Server ↑"
+	case updateInstalled:
+		return "Server ↻"
+	default:
+		return "Server"
+	}
 }
 
 func (s *uiState) refreshMainTabs() {
@@ -555,30 +571,29 @@ func mainTabAt(x int, text string) string {
 	if x < 0 {
 		return ""
 	}
-	for _, tab := range []struct {
-		name  string
-		label string
-	}{
-		{name: "server", label: "0 Server"},
-		{name: "pending", label: "1 Pending"},
-		{name: "jobs", label: "2 Jobs"},
-		{name: "rules", label: "3 Rules"},
-		{name: "history", label: "4 History"},
-	} {
-		start := strings.Index(text, tab.label)
-		if start < 0 {
-			continue
+	column := 0
+	for _, segment := range strings.Split(text, "   ") {
+		width := tview.TaggedStringWidth(segment)
+		if x >= column && x < column+width {
+			fields := strings.Fields(strings.Trim(segment, "[]"))
+			if len(fields) == 0 {
+				return ""
+			}
+			switch fields[0] {
+			case "0":
+				return "server"
+			case "1":
+				return "pending"
+			case "2":
+				return "jobs"
+			case "3":
+				return "rules"
+			case "4":
+				return "history"
+			}
+			return ""
 		}
-		end := start + len(tab.label)
-		if start > 0 && text[start-1] == '[' {
-			start--
-		}
-		if end < len(text) && text[end] == ']' {
-			end++
-		}
-		if x >= start && x < end {
-			return tab.name
-		}
+		column += width + 3
 	}
 	return ""
 }
@@ -651,8 +666,8 @@ func (s *uiState) showServer(app *tview.Application, pages *tview.Pages) {
 	if s.pairingRefresh != nil {
 		s.pairingRefresh()
 	}
-	if app != nil && s.serverFocus != nil {
-		app.SetFocus(s.serverFocus)
+	if app != nil && len(s.serverFocus) > 0 {
+		app.SetFocus(s.serverFocus[0])
 	}
 }
 
@@ -715,18 +730,22 @@ func (s *uiState) leaveJobPage(app *tview.Application, pages *tview.Pages, focus
 }
 
 func (s *uiState) cycleFocus(app *tview.Application) {
-	if len(s.focus) == 0 {
+	focus := s.focus
+	if s.currentPage() == "pairing" {
+		focus = s.serverFocus
+	}
+	if len(focus) == 0 {
 		return
 	}
 	cur := app.GetFocus()
-	for i, p := range s.focus {
+	for i, p := range focus {
 		if p == cur {
-			next := s.focus[(i+1)%len(s.focus)]
+			next := focus[(i+1)%len(focus)]
 			app.SetFocus(next)
 			return
 		}
 	}
-	app.SetFocus(s.focus[0])
+	app.SetFocus(focus[0])
 }
 
 func (s *uiState) cycleFocusTo(app *tview.Application, p tview.Primitive) {
@@ -756,6 +775,14 @@ func (s *uiState) closeOverlay(pages *tview.Pages) bool {
 			pages.RemovePage("confirm_kill")
 			closed = true
 		}
+		if pageVisible(pages, "confirm_update") {
+			pages.RemovePage("confirm_update")
+			closed = true
+		}
+		if pageVisible(pages, "confirm_delete_rule") {
+			pages.RemovePage("confirm_delete_rule")
+			closed = true
+		}
 		if pageVisible(pages, "rule_scope") {
 			pages.RemovePage("rule_scope")
 			closed = true
@@ -765,8 +792,20 @@ func (s *uiState) closeOverlay(pages *tview.Pages) bool {
 }
 
 func pageVisible(pages *tview.Pages, name string) bool {
+	if pages == nil {
+		return false
+	}
 	for _, visible := range pages.GetPageNames(true) {
 		if visible == name {
+			return true
+		}
+	}
+	return false
+}
+
+func confirmationOverlayVisible(pages *tview.Pages) bool {
+	for _, name := range []string{"confirm_update", "confirm_kill", "confirm_delete_rule"} {
+		if pageVisible(pages, name) {
 			return true
 		}
 	}
@@ -1201,6 +1240,7 @@ func buildPairingPage(ctx context.Context, app *tview.Application, pages *tview.
 	title := tview.NewTextView().SetDynamicColors(false).SetTextAlign(tview.AlignLeft)
 	code := tview.NewTextView().SetDynamicColors(false).SetTextAlign(tview.AlignLeft)
 	meta := tview.NewTextView().SetDynamicColors(false).SetTextAlign(tview.AlignLeft)
+	var refresh func()
 
 	goDashboard := func() {
 		s.showDashboard(app, pages)
@@ -1227,11 +1267,54 @@ func buildPairingPage(ctx context.Context, app *tview.Application, pages *tview.
 		s.openCopyOverlay(app, pages, "Pairing Info", PairingCopyText(listenURL, pc, cfg.Version))
 	}
 	btnCopy := tview.NewButton("Copy").SetSelectedFunc(copy)
+	btnUpdate := tview.NewButton("Checking...")
+	openUpdateConfirm := func() {
+		status := s.serverUpdateSnapshot()
+		if status.Phase != updateAvailable && status.Phase != updateFailed {
+			return
+		}
+		latest := status.Latest
+		modal := tview.NewModal().
+			SetText(fmt.Sprintf("Update RACG %s -> %s?\n\nRunning jobs will not be interrupted.\nThe new version takes effect after server restart.", cfg.Version, latest)).
+			AddButtons([]string{"Cancel", "Update"}).
+			SetDoneFunc(func(index int, _ string) {
+				pages.RemovePage("confirm_update")
+				if index != 1 {
+					return
+				}
+				s.setServerUpdate(serverUpdateStatus{Phase: updateInstalling, Latest: latest})
+				s.refreshServerUpdateUI()
+				go func() {
+					installCtx, cancel := context.WithTimeout(ctx, serverUpdateInstallTimeout)
+					defer cancel()
+					err := installServerUpdate(installCtx, latest)
+					if ctx.Err() != nil {
+						return
+					}
+					status := serverUpdateStatus{Phase: updateInstalled, Latest: latest}
+					if err != nil {
+						status = serverUpdateStatus{Phase: updateFailed, Latest: latest, Message: err.Error()}
+					}
+					s.setServerUpdate(status)
+					app.QueueUpdateDraw(s.refreshServerUpdateUI)
+				}()
+			})
+		modal.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+			if event.Key() == tcell.KeyEsc {
+				pages.RemovePage("confirm_update")
+				return nil
+			}
+			return event
+		})
+		pages.AddPage("confirm_update", modal, true, true)
+	}
+	btnUpdate.SetSelectedFunc(openUpdateConfirm)
 
 	btns := tview.NewFlex().SetDirection(tview.FlexColumn).
 		AddItem(btnDash, 0, 1, false).
 		AddItem(btnCopy, 0, 1, false).
 		AddItem(btnRegen, 0, 1, false).
+		AddItem(btnUpdate, 0, 1, false).
 		AddItem(btnQuit, 0, 1, false)
 
 	root := tview.NewFlex().SetDirection(tview.FlexRow).
@@ -1241,26 +1324,25 @@ func buildPairingPage(ctx context.Context, app *tview.Application, pages *tview.
 		AddItem(meta, 0, 1, false).
 		AddItem(btns, 1, 0, true)
 
-	refresh := func() {
+	refresh = func() {
 		title.SetText(serverInfoText(cfg))
 		pc := cfg.API.PairingCode()
 		code.SetText("PAIRING CODE:\n" + pc + "\n\nRACG_CODE=" + pc + "\nopen_session --code " + pc + "\n")
-		meta.SetText(fmt.Sprintf("expires in %s\npending=%d  running=%d\n",
+		status := s.serverUpdateSnapshot()
+		meta.SetText(fmt.Sprintf("expires in %s\npending=%d  running=%d\n%s\n",
 			formatMMSS(cfg.API.PairingExpiresIn()),
 			len(cfg.API.ListPendingForTUI()),
 			len(cfg.API.ListRunningForTUI()),
+			serverUpdateText(cfg.Version, status),
 		))
+		label, enabled := serverUpdateButton(status)
+		btnUpdate.SetLabel(label).SetDisabled(!enabled)
 	}
 	s.pairingRefresh = refresh
 	refresh()
 
 	// Pairing page-specific keys.
 	root.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
-		switch ev.Key() {
-		case tcell.KeyEnter:
-			goDashboard()
-			return nil
-		}
 		switch hotkeyRune(ev.Rune()) {
 		case 'r':
 			regen()
@@ -1290,8 +1372,7 @@ func buildPairingPage(ctx context.Context, app *tview.Application, pages *tview.
 	}()
 
 	s.setCurrentPage("pairing")
-	s.serverFocus = btnDash
-	s.focus = []tview.Primitive{btnDash, btnCopy, btnRegen, btnQuit}
+	s.serverFocus = []tview.Primitive{btnDash, btnCopy, btnRegen, btnUpdate, btnQuit}
 	return root
 }
 
@@ -1903,6 +1984,7 @@ func helpText() string {
 	return "Keys:\n" +
 		"  Tab focus\n" +
 		"  0 server / 1 pending / 2 jobs / 3 rules / 4 history\n" +
+		"  server: select Update with Tab and press Enter\n" +
 		"  pending: a once / s session / A always / d deny\n" +
 		"  rules: a add always / s add session\n" +
 		"  job view: 1 combined / 2 stdout / 3 stderr / 4 meta\n" +

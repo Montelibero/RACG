@@ -63,6 +63,10 @@ sudo racg update --target /usr/local/bin/racg
 
 `racg update` verifies the release checksum before replacing the binary. If the target path is not writable, rerun with privileges or pass `--sudo`. A running `racg serve` process keeps using the old in-memory binary until it is restarted.
 
+`racg serve` checks for a newer release once in the background with a three-second deadline. Server startup, the API, and the TUI never wait for this check; an offline server continues normally. When an update is available, the Server tab shows `↑` and the Server page offers an Update button. Installation does not restart the server or interrupt running jobs. After installation, the tab shows `↻` until the server is restarted.
+
+During `racg login`, the client compares its embedded version with `server_version` returned by the server. A mismatch prints a recommendation only; it never blocks pairing. This comparison uses the RACG connection and does not require internet access.
+
 Release process for maintainers is documented in `docs/developer-run.md`.
 
 ## API quick check

@@ -71,6 +71,10 @@ sudo racg update --target /usr/local/bin/racg
 
 The updater verifies release checksums. If `racg serve` is running, restart it after update so the server process uses the new binary.
 
+The server performs one non-blocking update check in the background with a three-second deadline. Offline operation is unaffected. When a release is available, open the Server tab, focus the Update button with `Tab`, and press `Enter` (or click it). The installed binary changes immediately, but the running server remains on its current version until a deliberate restart.
+
+`racg login` compares the client version with the version returned by the server and prints a recommendation when either side is older. Pairing is never blocked, and this comparison does not contact GitHub.
+
 ## 2. Run Commands
 
 Submit a command and wait for terminal status:

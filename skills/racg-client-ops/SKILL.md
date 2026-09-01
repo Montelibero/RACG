@@ -11,6 +11,7 @@ Use RACG when command execution must go through a human-approved gateway instead
 
 1. Resolve server auth:
    - If the user provides a pairing code, run `racg login --host <url> --pairing-code <code>`.
+   - Treat a client/server version warning from `racg login` as a recommendation, not a login failure. Ask the user before updating either side.
    - Otherwise check `racg session status`.
    - Do not expose saved tokens in chat or logs.
 2. Submit commands with `racg run -- <argv...>`.

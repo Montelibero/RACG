@@ -9,6 +9,8 @@ racg login --host server --pairing-code ABC123
 export RACG_CLIENT_NAME=server
 ```
 
+Login compares the client and server versions without contacting the internet. A mismatch warning recommends which side to update but does not block pairing.
+
 Check saved auth:
 
 ```bash

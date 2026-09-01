@@ -64,11 +64,12 @@
       },
       "SessionOpenResponse": {
         "type": "object",
-        "required": ["session_id", "session_token", "expires_at"],
+        "required": ["session_id", "session_token", "expires_at", "server_version"],
         "properties": {
           "session_id": { "type": "string" },
           "session_token": { "type": "string" },
-          "expires_at": { "type": "string", "format": "date-time" }
+          "expires_at": { "type": "string", "format": "date-time" },
+          "server_version": { "type": "string" }
         }
       },
       "SessionMeResponse": {

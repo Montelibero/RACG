@@ -16,7 +16,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"time"
 
@@ -76,10 +75,10 @@ func (c *UpdateCmd) Run(args []string) int {
 		return 1
 	}
 	if opts.CheckOnly {
-		fmt.Fprintf(c.stdout, "current_version: %s\nlatest_version: %s\nupdate_available: %t\nrepo: %s\n", version.Version, strings.TrimPrefix(info.Tag, "v"), compareVersions(strings.TrimPrefix(info.Tag, "v"), version.Version) > 0, opts.Repo)
+		fmt.Fprintf(c.stdout, "current_version: %s\nlatest_version: %s\nupdate_available: %t\nrepo: %s\n", version.Version, strings.TrimPrefix(info.Tag, "v"), version.Compare(strings.TrimPrefix(info.Tag, "v"), version.Version) > 0, opts.Repo)
 		return 0
 	}
-	if compareVersions(strings.TrimPrefix(info.Tag, "v"), version.Version) == 0 && opts.ExplicitVersion == "" {
+	if version.Compare(strings.TrimPrefix(info.Tag, "v"), version.Version) == 0 && opts.ExplicitVersion == "" {
 		fmt.Fprintf(c.stdout, "updated=false\ncurrent_version: %s\nlatest_version: %s\n", version.Version, strings.TrimPrefix(info.Tag, "v"))
 		return 0
 	}
@@ -359,39 +358,4 @@ func installWithSudo(ctx context.Context, binaryPath, target string) error {
 		return fmt.Errorf("sudo install failed: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
-}
-
-func compareVersions(a, b string) int {
-	as := strings.Split(strings.TrimPrefix(a, "v"), ".")
-	bs := strings.Split(strings.TrimPrefix(b, "v"), ".")
-	n := len(as)
-	if len(bs) > n {
-		n = len(bs)
-	}
-	for i := 0; i < n; i++ {
-		av := versionPart(as, i)
-		bv := versionPart(bs, i)
-		if av > bv {
-			return 1
-		}
-		if av < bv {
-			return -1
-		}
-	}
-	return 0
-}
-
-func versionPart(parts []string, i int) int {
-	if i >= len(parts) {
-		return 0
-	}
-	part := parts[i]
-	if idx := strings.IndexFunc(part, func(r rune) bool { return r < '0' || r > '9' }); idx >= 0 {
-		part = part[:idx]
-	}
-	v, err := strconv.Atoi(part)
-	if err != nil {
-		return 0
-	}
-	return v
 }

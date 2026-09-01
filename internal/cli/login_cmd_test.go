@@ -3,12 +3,15 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/itolstov/racg/internal/version"
 )
 
 func TestCLILoginStoresClientConfigAndRunUsesIt(t *testing.T) {
@@ -63,6 +66,35 @@ func TestCLILoginStoresClientConfigAndRunUsesIt(t *testing.T) {
 	}
 	if createdWithAuth != "Bearer tok1" {
 		t.Fatalf("Authorization=%q", createdWithAuth)
+	}
+}
+
+func TestCLILoginWarnsWhenServerVersionDiffers(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		serverVersion string
+		want          string
+	}{
+		{name: "server older", serverVersion: "0.4.1", want: "server RACG 0.4.1 is older than client RACG "},
+		{name: "server newer", serverVersion: "9.0.0", want: "client RACG " + version.Version + " is older than server RACG 9.0.0"},
+		{name: "unknown old server", serverVersion: "", want: "server version is unavailable"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("RACG_CLIENT_CONFIG", filepath.Join(t.TempDir(), "client.json"))
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprintf(w, `{"session_id":"sess1","session_token":"tok","expires_at":"2030-01-01T00:00:00Z","server_version":%q}`, tc.serverVersion)
+			}))
+			defer ts.Close()
+
+			var out, errOut bytes.Buffer
+			code := NewRoot(&out, &errOut).Run([]string{"login", "--host", ts.URL, "--pairing-code", "ABC123"})
+			if code != 0 {
+				t.Fatalf("code=%d stderr=%s", code, errOut.String())
+			}
+			if !strings.Contains(errOut.String(), tc.want) {
+				t.Fatalf("stderr=%q want %q", errOut.String(), tc.want)
+			}
+		})
 	}
 }
 

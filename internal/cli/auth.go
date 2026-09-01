@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	"github.com/itolstov/racg/internal/version"
 )
 
 type AuthCmd struct {
@@ -75,6 +77,7 @@ func (c *AuthCmd) RunLogin(args []string) int {
 	fmt.Fprintf(c.stdout, "logged_in=true\nprofile: %s\nhost: %s\nsession_id: %s\nexpires_at: %s\nconfig_path: %s\n", profile, h, resp.SessionID, resp.ExpiresAt, configPath)
 	fmt.Fprintf(c.stdout, "hint: export RACG_CLIENT_NAME=%s\n", profile)
 	fmt.Fprintf(c.stdout, "hint: or pass --name %s per command\n", profile)
+	printVersionCompatibilityWarning(c.stderr, resp.ServerVersion)
 	return 0
 }
 
@@ -147,9 +150,24 @@ func (c *AuthCmd) runSessionStatus(args []string) int {
 }
 
 type sessionOpenResp struct {
-	SessionID    string `json:"session_id"`
-	SessionToken string `json:"session_token"`
-	ExpiresAt    string `json:"expires_at"`
+	SessionID     string `json:"session_id"`
+	SessionToken  string `json:"session_token"`
+	ExpiresAt     string `json:"expires_at"`
+	ServerVersion string `json:"server_version"`
+}
+
+func printVersionCompatibilityWarning(w io.Writer, serverVersion string) {
+	serverVersion = strings.TrimSpace(serverVersion)
+	if serverVersion == "" {
+		fmt.Fprintln(w, "warning: server version is unavailable; the server may be outdated")
+		return
+	}
+	switch version.Compare(serverVersion, version.Version) {
+	case -1:
+		fmt.Fprintf(w, "warning: server RACG %s is older than client RACG %s; update RACG on the server\n", serverVersion, version.Version)
+	case 1:
+		fmt.Fprintf(w, "warning: client RACG %s is older than server RACG %s; run racg update\n", version.Version, serverVersion)
+	}
 }
 
 func openSession(host string, clientID string, pairingCode string) (sessionOpenResp, error) {

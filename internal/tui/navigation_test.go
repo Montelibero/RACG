@@ -287,6 +287,12 @@ func TestMainTabAtUsesRenderedTabPositions(t *testing.T) {
 			x:    strings.Index("[1 Pending]   2 Jobs   3 Rules   4 History", "   "),
 			want: "",
 		},
+		{
+			name: "jobs after update marker",
+			text: "[0 Server ↑]   1 Pending   2 Jobs   3 Rules   4 History",
+			x:    tview.TaggedStringWidth("[0 Server ↑]   1 Pending   "),
+			want: "jobs",
+		},
 	}
 	for _, tt := range tests {
 		if got := mainTabAt(tt.x, tt.text); got != tt.want {
@@ -481,6 +487,28 @@ func TestGlobalTabDoesNotLeaveOverlay(t *testing.T) {
 	}
 	if got := app.GetFocus(); got != overlayInput {
 		t.Fatalf("focus=%T, want overlay input", got)
+	}
+}
+
+func TestGlobalTabIsPassedToConfirmationModal(t *testing.T) {
+	app := tview.NewApplication()
+	pages := tview.NewPages()
+	s := newUIState(nil, nil)
+	background := tview.NewButton("background")
+	modal := tview.NewModal().SetText("Update?").AddButtons([]string{"Cancel", "Update"})
+	s.serverFocus = []tview.Primitive{background}
+	s.setCurrentPage("pairing")
+	pages.AddPage("pairing", background, true, true)
+	pages.AddPage("confirm_update", modal, true, true)
+	app.SetFocus(modal)
+	before := app.GetFocus()
+
+	ev := tcell.NewEventKey(tcell.KeyTAB, 0, tcell.ModNone)
+	if got := s.handleGlobalInput(app, pages, ServeUIConfig{}, ev); got != ev {
+		t.Fatalf("Tab should be passed to confirmation modal, got %#v", got)
+	}
+	if got := app.GetFocus(); got != before {
+		t.Fatalf("focus changed from %T to %T", before, got)
 	}
 }
 

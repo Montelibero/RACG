@@ -374,15 +374,19 @@ func TestSessionOpenAndMe(t *testing.T) {
 	}
 
 	var resp struct {
-		SessionID    string `json:"session_id"`
-		SessionToken string `json:"session_token"`
-		ExpiresAt    string `json:"expires_at"`
+		SessionID     string `json:"session_id"`
+		SessionToken  string `json:"session_token"`
+		ExpiresAt     string `json:"expires_at"`
+		ServerVersion string `json:"server_version"`
 	}
 	if err := json.Unmarshal(rw.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("json: %v", err)
 	}
 	if resp.SessionToken == "" {
 		t.Fatalf("empty token")
+	}
+	if resp.ServerVersion == "" {
+		t.Fatalf("empty server version")
 	}
 
 	req2 := httptest.NewRequest(http.MethodGet, "http://example/v1/session/me", nil)
