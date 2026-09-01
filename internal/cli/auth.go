@@ -24,6 +24,10 @@ func NewAuthCmd(stdout, stderr io.Writer) *AuthCmd {
 }
 
 func (c *AuthCmd) RunLogin(args []string) int {
+	if helpRequested(args) {
+		fmt.Fprint(c.stdout, loginUsage())
+		return 0
+	}
 	fs := flag.NewFlagSet("racg login", flag.ContinueOnError)
 	fs.SetOutput(c.stderr)
 	host := fs.String("host", envOrDefault("RACG_HOST", "http://127.0.0.1:8777"), "RACG server URL")
@@ -79,6 +83,37 @@ func (c *AuthCmd) RunLogin(args []string) int {
 	fmt.Fprintf(c.stdout, "hint: or pass --name %s per command\n", profile)
 	printVersionCompatibilityWarning(c.stderr, resp.ServerVersion)
 	return 0
+}
+
+func loginUsage() string {
+	return `usage: racg login --host SERVER --pairing-code CODE [--name PROFILE] [--client-id ID]
+
+Opens a server session and stores its token in a named client profile. Without
+--name, the profile name is derived from the host after removing scheme and port.
+
+options:
+  --host SERVER       RACG server URL; a scheme is optional
+  --pairing-code CODE pairing code shown by racg serve
+  --name PROFILE      client profile name; defaults to the host-derived name
+  --client-id ID      audit client id; defaults to racg-cli
+
+examples:
+  racg login --host server --pairing-code ABC123
+  racg login --name prod --host https://server:8777 --pairing-code ABC123
+
+The login response compares the embedded client and server versions using only
+the RACG connection. It never contacts GitHub. A version mismatch or an older
+server without server_version prints a recommendation but never blocks login.
+`
+}
+
+func helpRequested(args []string) bool {
+	for _, arg := range args {
+		if arg == "-h" || arg == "--help" {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *AuthCmd) RunLogout(args []string) int {

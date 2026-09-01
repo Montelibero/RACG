@@ -98,6 +98,24 @@ func TestCLILoginWarnsWhenServerVersionDiffers(t *testing.T) {
 	}
 }
 
+func TestCLILoginHelpExplainsProfilesAndVersionWarnings(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := NewRoot(&out, &errOut).Run([]string{"login", "--help"})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	for _, want := range []string{
+		"racg login --host server --pairing-code ABC123",
+		"profile name is derived from the host",
+		"never contacts GitHub",
+		"never blocks login",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("help missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
 func TestCLILoginWithoutNameStoresAutoNamedProfileAndRequiresExplicitSelection(t *testing.T) {
 	configHome := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", configHome)

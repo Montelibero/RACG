@@ -11,6 +11,16 @@ export RACG_CLIENT_NAME=server
 
 Login compares the client and server versions without contacting the internet. A mismatch warning recommends which side to update but does not block pairing.
 
+Server update lifecycle:
+
+```bash
+racg update --check
+racg update
+sudo racg update --target /usr/local/bin/racg
+```
+
+`racg serve` performs one background release check with a three-second deadline, so offline startup is unaffected. The Server tab shows `↑` when an update is available. Its Update action verifies and replaces the binary without restarting the process or interrupting jobs. After installation, `↻` means a deliberate server restart is required.
+
 Check saved auth:
 
 ```bash

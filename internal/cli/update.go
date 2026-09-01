@@ -38,6 +38,10 @@ func NewUpdateCmd(stdout, stderr io.Writer) *UpdateCmd {
 }
 
 func (c *UpdateCmd) Run(args []string) int {
+	if helpRequested(args) {
+		fmt.Fprint(c.stdout, updateUsage())
+		return 0
+	}
 	fs := flag.NewFlagSet("racg update", flag.ContinueOnError)
 	fs.SetOutput(c.stderr)
 
@@ -50,7 +54,7 @@ func (c *UpdateCmd) Run(args []string) int {
 		return 2
 	}
 	if fs.NArg() != 0 {
-		fmt.Fprintln(c.stderr, "usage: racg update [--check] [--version vX.Y.Z] [--target PATH] [--sudo]")
+		fmt.Fprint(c.stderr, updateUsage())
 		return 2
 	}
 
@@ -90,6 +94,34 @@ func (c *UpdateCmd) Run(args []string) int {
 	fmt.Fprintf(c.stdout, "updated=true\nversion: %s\ntarget: %s\n", strings.TrimPrefix(info.Tag, "v"), info.Target)
 	fmt.Fprintln(c.stdout, "restart racg serve to use the new version")
 	return 0
+}
+
+func updateUsage() string {
+	return `usage: racg update [--check] [--version vX.Y.Z] [--target PATH] [--sudo]
+
+Checks GitHub Releases for Linux amd64/arm64 builds, verifies checksums.txt,
+and atomically replaces the target binary. The default target is the currently
+running racg executable. Use --sudo when that path is not writable.
+
+options:
+  --check           report current/latest versions without installing
+  --version TAG     install a specific release version or tag
+  --target PATH     replace PATH instead of the current executable
+  --sudo            install the verified binary through sudo
+  --repo OWNER/NAME override the release repository (or set RACG_REPO)
+
+examples:
+  racg update --check
+  racg update
+  sudo racg update --target /usr/local/bin/racg
+  racg update --version v0.5.0
+
+Updating a running racg serve process does not restart it or interrupt jobs.
+Restart the server deliberately to run the new binary. The Server page performs
+one non-blocking background check with a 3-second deadline.
+↑ means an update is available.
+↻ means the installed binary is waiting for a server restart.
+`
 }
 
 type updateOptions struct {

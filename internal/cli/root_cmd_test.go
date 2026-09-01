@@ -45,6 +45,10 @@ func TestRootHelpIncludesFileAndConfigExamples(t *testing.T) {
 		"racg run --script ./maintenance.sh",
 		"racg run --stdin-file ./query.sql",
 		"racg run --script-stdin",
+		"racg update --check",
+		"Server ↑ means an update is available",
+		"Server ↻ means the binary was updated",
+		"Version mismatch warnings are recommendations and never block login",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("help missing %q:\n%s", want, got)

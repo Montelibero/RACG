@@ -54,6 +54,9 @@ Use RACG when command execution must go through a human-approved gateway instead
 - Use narrow commands and explicit argv. Avoid large opaque shell strings unless the user specifically needs shell composition.
 - Use script/stdin modes for multiline code, SQL, templates, quotes, or literal `$VARIABLE` content. RACG stages exact bytes and uses their SHA-256 for integrity verification and audit. Saved rules match the approved argv scope, not the stdin hash.
 - For simple `env`/`json`/`yaml` config key updates, use `racg config set` instead of generating scripts or raw patches.
+- A server checks for updates once in the background with a three-second deadline. This never blocks offline startup.
+- In the Server tab, `↑` means an update is available and `↻` means the binary was replaced but the running server still needs a deliberate restart.
+- The TUI Update action verifies and replaces the binary but never restarts the server or interrupts running jobs. Ask the user before triggering it.
 - For arbitrary text edits, use `racg file read` plus `racg file patch`; avoid ad-hoc scripts when a unified diff is enough.
 - RACG masks common secret forms in displayed output by default. Use `--unredacted` only when exact command or file output is required; it does not change approval rules.
 - For whole-file transfer, use `racg file upload` or `racg file download`; use `--force` only when replacing the named local destination is intended.

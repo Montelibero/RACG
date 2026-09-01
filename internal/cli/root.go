@@ -121,6 +121,17 @@ common commands:
   racg request logs <id> --stdout --unredacted
   racg request cancel <id>
 
+updates and version compatibility:
+  racg update --check
+  racg update
+  sudo racg update --target /usr/local/bin/racg
+  racg serve checks once for updates in the background with a 3-second limit.
+  Offline startup is not blocked. Server ↑ means an update is available;
+  Server ↻ means the binary was updated and the running server needs a restart.
+  TUI Update replaces the binary after confirmation but never restarts the server.
+  racg login compares client and server versions without contacting GitHub.
+  Version mismatch warnings are recommendations and never block login.
+
 file helpers:
   racg file read /path/file.txt
   racg file read /path/file.txt --max-bytes 65536

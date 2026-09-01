@@ -16,6 +16,28 @@ import (
 	"testing"
 )
 
+func TestCLIUpdateHelpExplainsServerUpdateLifecycle(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := NewRoot(&out, &errOut).Run([]string{"update", "--help"})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	for _, want := range []string{
+		"verifies checksums.txt",
+		"--check",
+		"--version TAG",
+		"--target PATH",
+		"does not restart it or interrupt jobs",
+		"3-second deadline",
+		"↑ means an update is available",
+		"↻ means the installed binary",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("help missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
 func TestCLIUpdateCheckReportsLatestRelease(t *testing.T) {
 	withUpdateTestServer(t, "v9.8.7", []byte("new-binary"), func(ts *httptest.Server, _ string) {
 		var out bytes.Buffer
