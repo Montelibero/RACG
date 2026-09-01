@@ -180,8 +180,11 @@ Use `racg file read` and `racg file patch` for non-structured text configs such 
 ```bash
 racg file read /apps/haproxy/haproxy.cfg
 racg file read /apps/haproxy/haproxy.cfg --max-bytes 65536
+racg file read /apps/haproxy/haproxy.cfg --plain
 racg file patch /apps/haproxy/haproxy.cfg --diff-file /tmp/haproxy.patch
 ```
+
+`file read` includes line numbers by default to make unified-diff hunk coordinates explicit. Use `--plain` when exact file bytes must be printed. Output is automatically filtered for common secret forms; use `--unredacted` with `run`, `request wait/logs/tail`, or `file read` only when raw output is required. This display filter does not alter stored output or audit hashes.
 
 `racg file patch` sends `fs.patch_unified`, so the patch must be a unified diff against the current file content:
 
@@ -262,7 +265,7 @@ Follow live output until terminal status:
 racg request tail <request_id>
 ```
 
-Final raw streams after completion:
+Final streams after completion (add `--unredacted` only when exact raw output is required):
 
 ```bash
 racg request logs <request_id> --stdout

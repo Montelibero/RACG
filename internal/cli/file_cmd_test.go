@@ -166,10 +166,33 @@ func TestCLIFileReadCreatesFSReadRequestAndWaits(t *testing.T) {
 	if posted.Op.Payload.Path != "/apps/haproxy/haproxy.cfg" || posted.Op.Payload.MaxBytes != 4096 {
 		t.Fatalf("payload=%+v", posted.Op.Payload)
 	}
-	for _, want := range []string{"request_id: req1", "status: SUCCEEDED", "stdout:", "maxconn 2000"} {
+	for _, want := range []string{"request_id: req1", "status: SUCCEEDED", "stdout:", "1 | global", "2 |     maxconn 2000"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, out.String())
 		}
+	}
+}
+
+func TestCLIFileReadPlainUnredactedPrintsExactStoredContent(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/requests":
+			_, _ = w.Write([]byte(`{"request_id":"req1","status":"PENDING_APPROVAL"}`))
+		case "/v1/requests/req1":
+			_, _ = w.Write([]byte(`{"request_id":"req1","status":"SUCCEEDED","result":{"exit_code":0,"stdout":"PASSWORD=hunter2\nline two\n","stderr":""}}`))
+		default:
+			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer ts.Close()
+
+	var out, errOut bytes.Buffer
+	code := NewRoot(&out, &errOut).Run([]string{"file", "read", "/etc/app.conf", "--plain", "--unredacted", "--host", ts.URL, "--token", "tok"})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "stdout:\nPASSWORD=hunter2\nline two\n") {
+		t.Fatalf("stdout was transformed:\n%s", out.String())
 	}
 }
 

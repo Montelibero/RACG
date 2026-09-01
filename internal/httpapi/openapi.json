@@ -410,6 +410,13 @@
             "required": false,
             "schema": { "$ref": "#/components/schemas/RequestStatus" },
             "description": "Defaults to PENDING_APPROVAL."
+          },
+          {
+            "name": "unredacted",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "boolean", "default": false },
+            "description": "Return stored stdout and stderr without display redaction."
           }
         ],
         "responses": {
@@ -426,7 +433,8 @@
         "summary": "Get request",
         "security": [{ "bearerAuth": [] }],
         "parameters": [
-          { "name": "request_id", "in": "path", "required": true, "schema": { "type": "string" } }
+          { "name": "request_id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "unredacted", "in": "query", "required": false, "schema": { "type": "boolean", "default": false }, "description": "Return stored stdout and stderr without display redaction." }
         ],
         "responses": {
           "200": {
@@ -493,10 +501,11 @@
         "summary": "Get request stdout",
         "security": [{ "bearerAuth": [] }],
         "parameters": [
-          { "name": "request_id", "in": "path", "required": true, "schema": { "type": "string" } }
+          { "name": "request_id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "unredacted", "in": "query", "required": false, "schema": { "type": "boolean", "default": false }, "description": "Return raw stdout instead of display-redacted output." }
         ],
         "responses": {
-          "200": { "description": "raw stdout", "content": { "text/plain": { "schema": { "type": "string" } } } },
+          "200": { "description": "display-redacted stdout by default", "content": { "text/plain": { "schema": { "type": "string" } } } },
           "400": { "description": "bad request", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
           "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
           "404": { "description": "not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
@@ -510,7 +519,8 @@
         "description": "Returns the in-memory combined live output buffer for a request. This is available while a request is running and may be empty before the first output chunk.",
         "security": [{ "bearerAuth": [] }],
         "parameters": [
-          { "name": "request_id", "in": "path", "required": true, "schema": { "type": "string" } }
+          { "name": "request_id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "unredacted", "in": "query", "required": false, "schema": { "type": "boolean", "default": false }, "description": "Return raw live output instead of display-redacted output." }
         ],
         "responses": {
           "200": { "description": "live combined output", "content": { "text/plain": { "schema": { "type": "string" } } } },
@@ -524,10 +534,11 @@
         "summary": "Get request stderr",
         "security": [{ "bearerAuth": [] }],
         "parameters": [
-          { "name": "request_id", "in": "path", "required": true, "schema": { "type": "string" } }
+          { "name": "request_id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "unredacted", "in": "query", "required": false, "schema": { "type": "boolean", "default": false }, "description": "Return raw stderr instead of display-redacted output." }
         ],
         "responses": {
-          "200": { "description": "raw stderr", "content": { "text/plain": { "schema": { "type": "string" } } } },
+          "200": { "description": "display-redacted stderr by default", "content": { "text/plain": { "schema": { "type": "string" } } } },
           "400": { "description": "bad request", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
           "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
           "404": { "description": "not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
@@ -540,6 +551,9 @@
         "summary": "WebSocket events (upgrade)",
         "description": "Upgrade this endpoint to WebSocket. Authentication is via Authorization: Bearer <token> header.",
         "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "unredacted", "in": "query", "required": false, "schema": { "type": "boolean", "default": false }, "description": "Return raw request.output chunks instead of display-redacted chunks." }
+        ],
         "responses": {
           "101": { "description": "Switching Protocols (WebSocket)" },
           "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }

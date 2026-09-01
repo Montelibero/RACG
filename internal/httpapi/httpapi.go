@@ -27,6 +27,7 @@ import (
 	"github.com/itolstov/racg/internal/configedit"
 	"github.com/itolstov/racg/internal/events"
 	"github.com/itolstov/racg/internal/executor"
+	"github.com/itolstov/racg/internal/outputfilter"
 	"github.com/itolstov/racg/internal/rules"
 	"github.com/itolstov/racg/internal/store"
 	"github.com/itolstov/racg/internal/version"
@@ -211,7 +212,7 @@ func (a *API) GetLiveJobOutput(requestID string) (combined string, truncated boo
 	if o == nil {
 		return "", false
 	}
-	return string(o.combined), o.truncated
+	return outputfilter.Redact(string(o.combined)), o.truncated
 }
 
 func (a *API) SubscribeEvents(buf int) (<-chan events.Event, func()) {
@@ -1333,6 +1334,9 @@ func (a *API) handleRequestsList(w http.ResponseWriter, r *http.Request, c auth.
 	var out []requestRecord
 	for _, rec := range a.reqs {
 		if rec.Status == status {
+			if !requestUnredacted(r) {
+				rec = redactRequestRecord(rec)
+			}
 			out = append(out, rec)
 			if len(out) >= limit {
 				break
@@ -2390,6 +2394,16 @@ func (a *API) handleEventsWS(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
+			if !requestUnredacted(r) && e.Type == "request.output" {
+				data := make(map[string]any, len(e.Data))
+				for key, value := range e.Data {
+					data[key] = value
+				}
+				if chunk, ok := data["chunk"].(string); ok {
+					data["chunk"] = outputfilter.Redact(chunk)
+				}
+				e.Data = data
+			}
 			if err := wsjson.Write(ctx, conn, e); err != nil {
 				return
 			}
@@ -2420,6 +2434,9 @@ func (a *API) handleRequestByID(w http.ResponseWriter, r *http.Request, c auth.C
 		}
 
 		// In MVP we don't filter by session/client; token possession is sufficient.
+		if !requestUnredacted(r) {
+			rec = redactRequestRecord(rec)
+		}
 		writeJSON(w, http.StatusOK, rec)
 		return
 	}
@@ -2474,6 +2491,13 @@ func (a *API) handleRequestLog(w http.ResponseWriter, r *http.Request, c auth.Cl
 	}
 	if stream == "live" {
 		text, _ := a.GetLiveJobOutput(requestID)
+		if requestUnredacted(r) {
+			a.liveMu.Lock()
+			if output := a.live[requestID]; output != nil {
+				text = string(output.combined)
+			}
+			a.liveMu.Unlock()
+		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(text))
@@ -2494,10 +2518,29 @@ func (a *API) handleRequestLog(w http.ResponseWriter, r *http.Request, c auth.Cl
 		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "stream must be stdout or stderr", requestID)
 		return
 	}
+	if !requestUnredacted(r) {
+		text = outputfilter.Redact(text)
+	}
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.WriteString(w, text)
+}
+
+func requestUnredacted(r *http.Request) bool {
+	value := strings.TrimSpace(r.URL.Query().Get("unredacted"))
+	return value == "1" || strings.EqualFold(value, "true")
+}
+
+func redactRequestRecord(rec requestRecord) requestRecord {
+	if rec.Result == nil {
+		return rec
+	}
+	result := *rec.Result
+	result.Stdout = outputfilter.Redact(result.Stdout)
+	result.Stderr = outputfilter.Redact(result.Stderr)
+	rec.Result = &result
+	return rec
 }
 
 type authHandler func(http.ResponseWriter, *http.Request, auth.Claims)

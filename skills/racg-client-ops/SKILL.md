@@ -23,7 +23,7 @@ Use RACG when command execution must go through a human-approved gateway instead
    - Set `--type` for non-string values such as booleans, integers, floats, null, or JSON fragments.
    - Keep backups enabled unless the human explicitly asks not to.
    - For a missing config file, use `--create`; RACG validates the complete content and atomically creates the file with mode `0600`. The parent directory must already exist.
-4. For plain text files such as HAProxy, nginx, systemd units, or native `.cfg` files, use `racg file read` and `racg file patch` with a unified diff.
+4. For plain text files such as HAProxy, nginx, systemd units, or native `.cfg` files, use `racg file read` and `racg file patch` with a unified diff. `file read` shows line numbers by default; use `--plain` for exact text.
    - Do not treat native text configs as YAML just because a compose/stack file references them.
    - Read the current file before generating the unified diff.
 5. Resume or continue waiting for an existing request without resubmitting it:
@@ -54,6 +54,7 @@ Use RACG when command execution must go through a human-approved gateway instead
 - Use script/stdin modes for multiline code, SQL, templates, quotes, or literal `$VARIABLE` content. RACG stages exact bytes and uses their SHA-256 for integrity verification and audit. Saved rules match the approved argv scope, not the stdin hash.
 - For simple `env`/`json`/`yaml` config key updates, use `racg config set` instead of generating scripts or raw patches.
 - For arbitrary text edits, use `racg file read` plus `racg file patch`; avoid ad-hoc scripts when a unified diff is enough.
+- RACG masks common secret forms in displayed output by default. Use `--unredacted` only when exact command or file output is required; it does not change approval rules.
 - For whole-file transfer, use `racg file upload` or `racg file download`; use `--force` only when replacing the named local destination is intended.
 - Prefer read-only diagnostics before mutating operations.
 - If a request is pending approval, do not repeatedly resubmit the same command; use `racg request wait <id>`, tail live output, or cancel if requested.

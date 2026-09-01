@@ -1158,7 +1158,7 @@ func TestFSReadExecution(t *testing.T) {
 	}
 }
 
-func TestRequestLogsEndpointsReturnRawStreams(t *testing.T) {
+func TestRequestLogsEndpointsRedactByDefaultAndReturnRawWhenRequested(t *testing.T) {
 	cfg := config.Defaults()
 	clk := auth.NewFakeClock(time.Unix(1000, 0).UTC())
 	pair := auth.NewPairing(6, 3*time.Minute, clk)
@@ -1177,7 +1177,7 @@ func TestRequestLogsEndpointsReturnRawStreams(t *testing.T) {
 	}
 	_ = json.Unmarshal(rwOpen.Body.Bytes(), &openResp)
 
-	createBody := []byte(`{"op":{"type":"cmd.run","payload":{"argv":["/bin/sh","-c","echo out; echo err >&2"]}}}`)
+	createBody := []byte(`{"op":{"type":"cmd.run","payload":{"argv":["/bin/sh","-c","echo PASSWORD=hunter2; echo err >&2"]}}}`)
 	createReq := httptest.NewRequest(http.MethodPost, "http://example/v1/requests", bytes.NewReader(createBody))
 	createReq.Header.Set("Authorization", "Bearer "+openResp.SessionToken)
 	createReq.Header.Set("Content-Type", "application/json")
@@ -1228,8 +1228,16 @@ func TestRequestLogsEndpointsReturnRawStreams(t *testing.T) {
 	if got := stdoutRw.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
 		t.Fatalf("stdout content-type=%q", got)
 	}
-	if stdoutRw.Body.String() != "out\n" {
+	if stdoutRw.Body.String() != "PASSWORD=[REDACTED]\n" {
 		t.Fatalf("stdout=%q", stdoutRw.Body.String())
+	}
+
+	rawReq := httptest.NewRequest(http.MethodGet, "http://example/v1/requests/"+created.RequestID+"/logs/stdout?unredacted=1", nil)
+	rawReq.Header.Set("Authorization", "Bearer "+openResp.SessionToken)
+	rawRw := httptest.NewRecorder()
+	api.Handler().ServeHTTP(rawRw, rawReq)
+	if rawRw.Code != 200 || rawRw.Body.String() != "PASSWORD=hunter2\n" {
+		t.Fatalf("unredacted status=%d stdout=%q", rawRw.Code, rawRw.Body.String())
 	}
 
 	stderrReq := httptest.NewRequest(http.MethodGet, "http://example/v1/requests/"+created.RequestID+"/logs/stderr", nil)

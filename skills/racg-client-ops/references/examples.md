@@ -150,6 +150,7 @@ HAProxy config is plain text, not YAML. Read it first:
 
 ```bash
 racg file read /apps/haproxy/haproxy.cfg --max-bytes 65536
+racg file read /apps/haproxy/haproxy.cfg --plain
 ```
 
 Then submit a unified diff:

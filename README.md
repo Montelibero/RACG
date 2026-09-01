@@ -107,6 +107,7 @@ racg request tail <request_id>
 racg request logs <request_id> --stdout
 racg request logs <request_id> --stderr
 racg file read /apps/haproxy/haproxy.cfg
+racg file read /apps/haproxy/haproxy.cfg --plain --unredacted
 racg file patch /apps/haproxy/haproxy.cfg --diff-file /tmp/haproxy.patch
 racg file upload ./bundle.tar.gz /srv/releases/bundle.tar.gz
 racg file download /var/log/app/archive.gz ./archive.gz
@@ -123,11 +124,12 @@ You can still override saved config with `--host`, `--token`, `RACG_HOST`, and `
 `racg request wait <id>` resumes observation of an existing request without creating or repeating it. It follows live output, survives temporary connection failures for `--reconnect-timeout` (default `5m`), and returns the remote process exit code. A local `--wait-timeout` only stops the client: it never cancels the remote request. Run the same `request wait` command again to resume.
 Use `--execution-timeout 2m` to limit the remote process. The legacy `--timeout <seconds>` form remains supported. This execution timeout is independent from local `--wait-timeout`.
 Use `racg run --script <local-file>` or `--script-stdin` for multiline shell code without command-line quoting. Use `--stdin-file <local-file> -- <argv...>` or `--stdin -- <argv...>` to pass SQL or other exact bytes to any command. RACG stages the bytes, shows their content and SHA-256 in the approval TUI, sends them directly to process stdin, and removes the staged copy after denial, cancellation, or execution. No persistent remote file is created. The SHA-256 verifies and audits the staged bytes; reusable session/always rules match the approved argv scope regardless of stdin content.
-`racg request logs` reads raw stream endpoints (`/v1/requests/<id>/logs/stdout` and `/v1/requests/<id>/logs/stderr`) so large output can be consumed without parsing the full request JSON.
+`racg request logs` reads dedicated stream endpoints (`/v1/requests/<id>/logs/stdout` and `/v1/requests/<id>/logs/stderr`) so large output can be consumed without parsing the full request JSON.
 Use `racg request logs <id> --live` for the current in-memory live output snapshot while a request is still running, or `racg request tail <id>` to follow live output until the request reaches a terminal status.
 Use `racg request cancel <id>` to cancel a pending approval or stop a running command.
 Use `racg config set` to request a format-aware config edit without shell scripts. It supports `env`, `json`, and `yaml`; writes a backup next to an existing file by default; validates the result before replacing the file; and uses dotted keys for `json`/`yaml`. Pass `--create` to atomically create a missing file with mode `0600`; its parent directory must already exist.
 Use `racg file read` and `racg file patch` for plain text files such as HAProxy, nginx, systemd unit files, or other non-JSON/YAML configs. `file patch` submits an `fs.patch_unified` request and expects a unified diff.
+`racg file read` numbers lines by default so unified-diff hunk coordinates are visible; pass `--plain` for the original text. RACG masks common password, token, authorization, credential-URL, and private-key forms in command and file output by default. Pass `--unredacted` to `run`, `request wait/logs/tail`, or `file read` when the exact raw output is required. Redaction is best-effort presentation filtering; stored audit output and hashes remain unchanged.
 Use `racg file upload <local> <remote>` and `racg file download <remote> <local>` for binary or large files. Both create approval requests. File bytes are streamed outside JSON, checked with SHA-256, and written atomically. Upload preserves an existing target's permissions or uses `0644` for a new file; pass `--mode 0600` when needed. Download refuses to replace a local file unless `--force` is passed. The server default transfer limit is 100 MiB and can be changed with `racg serve --max-transfer-bytes N`.
 
 ## Agent skill

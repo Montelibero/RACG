@@ -286,6 +286,36 @@ func TestCLIRequestLogsPrintsSelectedStreams(t *testing.T) {
 	}
 }
 
+func TestCLIRequestLogsRedactsByDefaultAndAllowsUnredactedOutput(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("TOKEN=secret-value\n"))
+	}))
+	defer ts.Close()
+
+	for _, tc := range []struct {
+		name      string
+		args      []string
+		want      string
+		doNotWant string
+	}{
+		{name: "default", want: "TOKEN=[REDACTED]", doNotWant: "secret-value"},
+		{name: "unredacted", args: []string{"--unredacted"}, want: "TOKEN=secret-value", doNotWant: "[REDACTED]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out, errOut bytes.Buffer
+			args := []string{"request", "logs", "req1", "--host", ts.URL, "--token", "tok", "--stdout"}
+			args = append(args, tc.args...)
+			code := NewRoot(&out, &errOut).Run(args)
+			if code != 0 {
+				t.Fatalf("code=%d stderr=%s", code, errOut.String())
+			}
+			if !strings.Contains(out.String(), tc.want) || strings.Contains(out.String(), tc.doNotWant) {
+				t.Fatalf("stdout=%q want %q without %q", out.String(), tc.want, tc.doNotWant)
+			}
+		})
+	}
+}
+
 func TestCLIRequestLogsLivePrintsLiveSnapshot(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/v1/requests/req1/logs/live" {

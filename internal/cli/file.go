@@ -306,6 +306,8 @@ func (c *FileCmd) runRead(args []string) int {
 	fs := flag.NewFlagSet("racg file read", flag.ContinueOnError)
 	fs.SetOutput(c.stderr)
 	maxBytes := fs.Int("max-bytes", 0, "maximum bytes to read")
+	plain := fs.Bool("plain", false, "print file content without line numbers")
+	unredacted := fs.Bool("unredacted", false, "print file content without automatic secret redaction")
 	host := fs.String("host", strings.TrimSpace(os.Getenv("RACG_HOST")), "RACG server URL")
 	token := fs.String("token", strings.TrimSpace(os.Getenv("RACG_TOKEN")), "session bearer token")
 	name := fs.String("name", strings.TrimSpace(os.Getenv("RACG_CLIENT_NAME")), "client profile name")
@@ -317,7 +319,7 @@ func (c *FileCmd) runRead(args []string) int {
 	}
 	rest := fs.Args()
 	if len(rest) != 1 {
-		fmt.Fprintln(c.stderr, "usage: racg file read <path> [--max-bytes N]")
+		fmt.Fprintln(c.stderr, "usage: racg file read <path> [--max-bytes N] [--plain] [--unredacted]")
 		return 2
 	}
 
@@ -325,7 +327,7 @@ func (c *FileCmd) runRead(args []string) int {
 	if *maxBytes > 0 {
 		payload["max_bytes"] = *maxBytes
 	}
-	return c.submitFileRequest(*host, *token, *name, *noWait, *pollInterval, *waitTimeout, "fs.read", payload)
+	return c.submitFileRequest(*host, *token, *name, *noWait, *pollInterval, *waitTimeout, "fs.read", payload, *unredacted, !*plain)
 }
 
 func (c *FileCmd) runPatch(args []string) int {
@@ -362,10 +364,10 @@ func (c *FileCmd) runPatch(args []string) int {
 	}
 
 	payload := map[string]any{"path": rest[0], "diff": diffText}
-	return c.submitFileRequest(*host, *token, *name, *noWait, *pollInterval, *waitTimeout, "fs.patch_unified", payload)
+	return c.submitFileRequest(*host, *token, *name, *noWait, *pollInterval, *waitTimeout, "fs.patch_unified", payload, false, false)
 }
 
-func (c *FileCmd) submitFileRequest(host, token, name string, noWait bool, pollInterval, waitTimeout time.Duration, opType string, payload map[string]any) int {
+func (c *FileCmd) submitFileRequest(host, token, name string, noWait bool, pollInterval, waitTimeout time.Duration, opType string, payload map[string]any, unredacted, numberStdout bool) int {
 	resolvedHost, resolvedToken, err := resolveClientAuthNamed(host, token, name)
 	if err != nil {
 		fmt.Fprintf(c.stderr, "%v\n", err)
@@ -376,6 +378,7 @@ func (c *FileCmd) submitFileRequest(host, token, name string, noWait bool, pollI
 		fmt.Fprintf(c.stderr, "%v\n", err)
 		return 2
 	}
+	client.unredacted = unredacted
 	created, err := client.createRequest(map[string]any{
 		"op": map[string]any{
 			"type":    opType,
@@ -394,6 +397,12 @@ func (c *FileCmd) submitFileRequest(host, token, name string, noWait bool, pollI
 	if err != nil {
 		fmt.Fprintf(c.stderr, "file request wait failed: %v\n", err)
 		return 1
+	}
+	rec = filterRequestOutput(rec, unredacted)
+	if numberStdout && rec.Result != nil {
+		result := *rec.Result
+		result.Stdout = numberOutputLines(result.Stdout)
+		rec.Result = &result
 	}
 	printRequestResult(c.stdout, rec)
 	if rec.Status == "SUCCEEDED" && rec.Result != nil {
@@ -415,8 +424,10 @@ func interspersedFileArgs(args []string) []string {
 		"--mode":          true,
 	}
 	boolFlags := map[string]bool{
-		"--no-wait": true,
-		"--force":   true,
+		"--no-wait":    true,
+		"--force":      true,
+		"--plain":      true,
+		"--unredacted": true,
 	}
 	var flags []string
 	var positional []string
@@ -451,6 +462,7 @@ func fileUsage() string {
 Read plain text or arbitrary files through RACG approval:
   racg file read <path>
   racg file read <path> --max-bytes 65536
+  racg file read <path> --plain --unredacted
 
 Patch plain text files through RACG approval with a unified diff:
   racg file patch <path> --diff-file /tmp/change.patch

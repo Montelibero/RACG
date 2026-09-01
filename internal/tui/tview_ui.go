@@ -14,6 +14,7 @@ import (
 	"github.com/rivo/tview"
 
 	"github.com/itolstov/racg/internal/httpapi"
+	"github.com/itolstov/racg/internal/outputfilter"
 	"github.com/itolstov/racg/internal/rules"
 	"github.com/itolstov/racg/internal/store"
 )
@@ -1688,12 +1689,12 @@ func jobViewText(mode string, info httpapi.TUIRequestInfo, combined string, live
 		if info.Result == nil {
 			return "stdout is available after the request finishes.\n"
 		}
-		return info.Result.Stdout
+		return outputfilter.Redact(info.Result.Stdout)
 	case "stderr":
 		if info.Result == nil {
 			return "stderr is available after the request finishes.\n"
 		}
-		return info.Result.Stderr
+		return outputfilter.Redact(info.Result.Stderr)
 	case "meta":
 		var b strings.Builder
 		fmt.Fprintf(&b, "request_id: %s\nstatus: %s\nclient_id: %s\nsession_id: %s\ncreated_at: %s\n",
@@ -1712,9 +1713,9 @@ func jobViewText(mode string, info httpapi.TUIRequestInfo, combined string, live
 		return b.String()
 	default:
 		if combined == "" && info.Result != nil {
-			combined = "O: " + info.Result.Stdout
+			combined = "O: " + outputfilter.Redact(info.Result.Stdout)
 			if info.Result.Stderr != "" {
-				combined += "E: " + info.Result.Stderr
+				combined += "E: " + outputfilter.Redact(info.Result.Stderr)
 			}
 		}
 		if liveTruncated {

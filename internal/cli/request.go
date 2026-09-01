@@ -73,6 +73,7 @@ func (c *RequestCmd) RunRun(args []string) int {
 	stdinFile := fs.String("stdin-file", "", "pass a local file as exact command stdin")
 	stdinFlag := fs.Bool("stdin", false, "pass local stdin as exact command stdin")
 	interpreter := fs.String("interpreter", "/bin/bash", "interpreter used by --script and --script-stdin")
+	unredacted := fs.Bool("unredacted", false, "print output without automatic secret redaction")
 
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -123,6 +124,7 @@ func (c *RequestCmd) RunRun(args []string) int {
 		fmt.Fprintf(c.stderr, "%v\n", err)
 		return 2
 	}
+	client.unredacted = *unredacted
 
 	payload := map[string]any{"argv": argv}
 	var input io.Reader
@@ -190,13 +192,14 @@ func (c *RequestCmd) RunRun(args []string) int {
 		OutputWriter:     c.stdout,
 		Follow:           true,
 		RequestIDPrinted: true,
+		Unredacted:       *unredacted,
 	})
 	if err != nil {
 		fmt.Fprintf(c.stderr, "request wait failed: %v\n", err)
 		printResumeHint(c.stderr, created.RequestID, *name, resolvedHost)
 		return 1
 	}
-	printRequestReport(c.stdout, outcome.Record, outcome.LiveOutputPrinted)
+	printRequestReport(c.stdout, filterRequestOutput(outcome.Record, *unredacted), outcome.LiveOutputPrinted)
 	return requestExitCode(outcome.Record)
 }
 
@@ -233,6 +236,7 @@ func (c *RequestCmd) runWait(args []string) int {
 	waitTimeout := fs.Duration("wait-timeout", 0, "maximum local time to wait; does not cancel the remote request")
 	statusInterval := fs.Duration("status-interval", 30*time.Second, "heartbeat interval while status is unchanged; 0 disables")
 	reconnectTimeout := fs.Duration("reconnect-timeout", 5*time.Minute, "maximum time to restore observation after a connection failure")
+	unredacted := fs.Bool("unredacted", false, "print output without automatic secret redaction")
 	if err := fs.Parse(args[1:]); err != nil {
 		return 2
 	}
@@ -247,6 +251,7 @@ func (c *RequestCmd) runWait(args []string) int {
 		fmt.Fprintln(c.stderr, err)
 		return 2
 	}
+	client.unredacted = *unredacted
 
 	outcome, err := client.waitRequestWithOptions(requestID, requestWaitOptions{
 		PollInterval:     *pollInterval,
@@ -256,13 +261,14 @@ func (c *RequestCmd) runWait(args []string) int {
 		StatusWriter:     c.stderr,
 		OutputWriter:     c.stdout,
 		Follow:           true,
+		Unredacted:       *unredacted,
 	})
 	if err != nil {
 		fmt.Fprintf(c.stderr, "request wait failed: %v\n", err)
 		printResumeHint(c.stderr, requestID, *name, resolvedHost)
 		return 1
 	}
-	printRequestReport(c.stdout, outcome.Record, outcome.LiveOutputPrinted)
+	printRequestReport(c.stdout, filterRequestOutput(outcome.Record, *unredacted), outcome.LiveOutputPrinted)
 	return requestExitCode(outcome.Record)
 }
 
@@ -315,6 +321,7 @@ func (c *RequestCmd) runLogs(args []string) int {
 	stdoutOnly := fs.Bool("stdout", false, "print stdout only")
 	stderrOnly := fs.Bool("stderr", false, "print stderr only")
 	live := fs.Bool("live", false, "print current live combined output")
+	unredacted := fs.Bool("unredacted", false, "print output without automatic secret redaction")
 	if err := fs.Parse(args[1:]); err != nil {
 		return 2
 	}
@@ -329,6 +336,7 @@ func (c *RequestCmd) runLogs(args []string) int {
 		fmt.Fprintf(c.stderr, "%v\n", err)
 		return 2
 	}
+	client.unredacted = *unredacted
 
 	if *live {
 		text, err := client.getRequestLog(requestID, "live")
@@ -336,7 +344,7 @@ func (c *RequestCmd) runLogs(args []string) int {
 			fmt.Fprintf(c.stderr, "request logs failed: %v\n", err)
 			return 1
 		}
-		fmt.Fprint(c.stdout, text)
+		fmt.Fprint(c.stdout, visibleOutput(text, *unredacted))
 		return 0
 	}
 
@@ -347,7 +355,7 @@ func (c *RequestCmd) runLogs(args []string) int {
 				fmt.Fprintf(c.stderr, "request logs failed: %v\n", err)
 				return 1
 			}
-			fmt.Fprint(c.stdout, text)
+			fmt.Fprint(c.stdout, visibleOutput(text, *unredacted))
 		}
 		if *stderrOnly {
 			text, err := client.getRequestLog(requestID, "stderr")
@@ -355,7 +363,7 @@ func (c *RequestCmd) runLogs(args []string) int {
 				fmt.Fprintf(c.stderr, "request logs failed: %v\n", err)
 				return 1
 			}
-			fmt.Fprint(c.stdout, text)
+			fmt.Fprint(c.stdout, visibleOutput(text, *unredacted))
 		}
 		return 0
 	}
@@ -370,8 +378,8 @@ func (c *RequestCmd) runLogs(args []string) int {
 		fmt.Fprintf(c.stderr, "request logs failed: %v\n", err)
 		return 1
 	}
-	printStreamSection(c.stdout, "stdout", stdoutText)
-	printStreamSection(c.stdout, "stderr", stderrText)
+	printStreamSection(c.stdout, "stdout", visibleOutput(stdoutText, *unredacted))
+	printStreamSection(c.stdout, "stderr", visibleOutput(stderrText, *unredacted))
 	return 0
 }
 
@@ -388,6 +396,7 @@ func (c *RequestCmd) runTail(args []string) int {
 	token := fs.String("token", strings.TrimSpace(os.Getenv("RACG_TOKEN")), "session bearer token")
 	name := fs.String("name", strings.TrimSpace(os.Getenv("RACG_CLIENT_NAME")), "client profile name")
 	pollInterval := fs.Duration("poll-interval", 500*time.Millisecond, "poll interval while tailing")
+	unredacted := fs.Bool("unredacted", false, "print output without automatic secret redaction")
 	if err := fs.Parse(args[1:]); err != nil {
 		return 2
 	}
@@ -402,6 +411,7 @@ func (c *RequestCmd) runTail(args []string) int {
 		fmt.Fprintf(c.stderr, "%v\n", err)
 		return 2
 	}
+	client.unredacted = *unredacted
 	if *pollInterval <= 0 {
 		*pollInterval = 500 * time.Millisecond
 	}
@@ -413,6 +423,7 @@ func (c *RequestCmd) runTail(args []string) int {
 			fmt.Fprintf(c.stderr, "request tail failed: %v\n", err)
 			return 1
 		}
+		text = visibleOutput(text, *unredacted)
 		if len(text) > printed {
 			fmt.Fprint(c.stdout, text[printed:])
 			printed = len(text)
@@ -424,6 +435,7 @@ func (c *RequestCmd) runTail(args []string) int {
 		}
 		if isTerminalStatus(rec.Status) {
 			text, err := client.getRequestLog(requestID, "live")
+			text = visibleOutput(text, *unredacted)
 			if err == nil && len(text) > printed {
 				fmt.Fprint(c.stdout, text[printed:])
 			}
@@ -434,9 +446,10 @@ func (c *RequestCmd) runTail(args []string) int {
 }
 
 type racgClient struct {
-	baseURL string
-	token   string
-	http    *http.Client
+	baseURL    string
+	token      string
+	http       *http.Client
+	unredacted bool
 }
 
 type requestCreateResp struct {
@@ -480,6 +493,7 @@ type requestWaitOptions struct {
 	OutputWriter     io.Writer
 	Follow           bool
 	RequestIDPrinted bool
+	Unredacted       bool
 }
 
 type requestWaitOutcome struct {
@@ -531,7 +545,7 @@ func (c *racgClient) getRequest(requestID string) (requestStatusResp, error) {
 
 func (c *racgClient) getRequestContext(ctx context.Context, requestID string) (requestStatusResp, error) {
 	var out requestStatusResp
-	if err := c.doJSONContext(ctx, http.MethodGet, "/v1/requests/"+requestID, nil, &out); err != nil {
+	if err := c.doJSONContext(ctx, http.MethodGet, c.outputPath("/v1/requests/"+requestID), nil, &out); err != nil {
 		return requestStatusResp{}, err
 	}
 	if out.RequestID == "" {
@@ -545,7 +559,14 @@ func (c *racgClient) getRequestLog(requestID string, stream string) (string, err
 }
 
 func (c *racgClient) getRequestLogContext(ctx context.Context, requestID string, stream string) (string, error) {
-	return c.doTextContext(ctx, http.MethodGet, "/v1/requests/"+requestID+"/logs/"+stream, nil)
+	return c.doTextContext(ctx, http.MethodGet, c.outputPath("/v1/requests/"+requestID+"/logs/"+stream), nil)
+}
+
+func (c *racgClient) outputPath(path string) string {
+	if c.unredacted {
+		return path + "?unredacted=1"
+	}
+	return path
 }
 
 func (c *racgClient) sessionMe() (sessionMeResp, error) {
@@ -628,6 +649,7 @@ func (c *racgClient) waitRequestWithOptions(requestID string, opts requestWaitOp
 		if opts.Follow && !isTerminalStatus(rec.Status) {
 			text, logErr := c.getRequestLogContext(waitCtx, requestID, "live")
 			if logErr == nil {
+				text = visibleOutput(text, opts.Unredacted)
 				if len(text) < printedLiveBytes {
 					printedLiveBytes = 0
 				}
@@ -642,6 +664,7 @@ func (c *racgClient) waitRequestWithOptions(requestID string, opts requestWaitOp
 		if isTerminalStatus(rec.Status) {
 			if opts.Follow {
 				if text, logErr := c.getRequestLogContext(waitCtx, requestID, "live"); logErr == nil {
+					text = visibleOutput(text, opts.Unredacted)
 					if len(text) < printedLiveBytes {
 						printedLiveBytes = 0
 					}

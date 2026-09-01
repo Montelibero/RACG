@@ -113,15 +113,18 @@ common commands:
   racg run --script ./maintenance.sh --interpreter /bin/bash
   racg run --script-stdin
   racg run --stdin-file ./query.sql -- isql -database main.fdb
+  racg run --unredacted -- printenv
   racg run --no-wait -- /bin/sh -c 'while true; do date; sleep 3; done'
   racg request wait <id> --status-interval 30s --reconnect-timeout 5m
   racg request logs <id> --live
   racg request tail <id>
+  racg request logs <id> --stdout --unredacted
   racg request cancel <id>
 
 file helpers:
   racg file read /path/file.txt
   racg file read /path/file.txt --max-bytes 65536
+  racg file read /path/file.txt --plain --unredacted
   racg file patch /path/file.txt --diff-file /tmp/change.patch
   racg file patch /path/file.txt --diff '@@ -1 +1 @@...'
   racg file upload ./local.bin /srv/remote.bin

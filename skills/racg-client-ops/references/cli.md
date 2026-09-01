@@ -156,7 +156,11 @@ Read a file:
 ```bash
 racg file read /apps/haproxy/haproxy.cfg
 racg file read /apps/haproxy/haproxy.cfg --max-bytes 65536
+racg file read /apps/haproxy/haproxy.cfg --plain
+racg file read /apps/haproxy/haproxy.cfg --unredacted
 ```
+
+Line numbers are enabled by default for `file read` and are display-only. Pass `--plain` for exact text. Common secret forms are masked in displayed command and file output by default; `--unredacted` disables that presentation filter for `run`, `request wait/logs/tail`, and `file read`.
 
 Patch a file with a unified diff:
 
@@ -217,7 +221,7 @@ Follow live combined output until terminal status:
 racg request tail <id>
 ```
 
-Final raw streams after request completion:
+Final streams after request completion (add `--unredacted` only when exact raw output is required):
 
 ```bash
 racg request logs <id> --stdout
