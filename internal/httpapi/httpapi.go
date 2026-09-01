@@ -1430,9 +1430,6 @@ func (a *API) executeApprovedRequest(requestID string, c auth.Claims, op rules.O
 		}
 		_ = json.Unmarshal(op.Payload, &payload)
 		stdin, stdinErr := a.openStagedCommandInput(c, op)
-		if payload.StdinUploadID != "" {
-			defer a.cleanupUploadForOp(op)
-		}
 		if stdinErr != nil {
 			finishedAt = time.Now().UTC()
 			message := stdinErr.Error()
@@ -1442,9 +1439,6 @@ func (a *API) executeApprovedRequest(requestID string, c auth.Claims, op rules.O
 				StdoutSHA256: sha256Hex(nil), StderrSHA256: sha256Hex([]byte(message)),
 			}
 			break
-		}
-		if stdin != nil {
-			defer stdin.Close()
 		}
 		timeout := time.Duration(payload.TimeoutSec) * time.Second
 		if timeout <= 0 {
@@ -1500,6 +1494,9 @@ func (a *API) executeApprovedRequest(requestID string, c auth.Claims, op rules.O
 				})
 			},
 		})
+		if stdin != nil {
+			_ = stdin.Close()
+		}
 		a.runningMu.Lock()
 		delete(a.running, requestID)
 		a.runningMu.Unlock()
@@ -1684,6 +1681,9 @@ func (a *API) executeApprovedRequest(requestID string, c auth.Claims, op rules.O
 			Stderr:     "OP_NOT_SUPPORTED",
 		}
 	}
+	if op.Type == "cmd.run" {
+		a.cleanupUploadForOp(op)
+	}
 
 	terminalStatus := rr.Status
 	switch rr.Status {
@@ -1694,15 +1694,6 @@ func (a *API) executeApprovedRequest(requestID string, c auth.Claims, op rules.O
 	default:
 		terminalStatus = "FAILED"
 	}
-
-	a.reqsMu.Lock()
-	rec2, ok := a.reqs[requestID]
-	if ok {
-		rec2.Result = rr
-		rec2.Status = terminalStatus
-		a.reqs[requestID] = rec2
-	}
-	a.reqsMu.Unlock()
 
 	if a.st != nil && rr != nil {
 		_ = a.st.UpdateRequestStatus(context.Background(), requestID, terminalStatus)
@@ -1721,6 +1712,15 @@ func (a *API) executeApprovedRequest(requestID string, c auth.Claims, op rules.O
 			StderrSHA256:    rr.StderrSHA256,
 		})
 	}
+
+	a.reqsMu.Lock()
+	rec2, ok := a.reqs[requestID]
+	if ok {
+		rec2.Result = rr
+		rec2.Status = terminalStatus
+		a.reqs[requestID] = rec2
+	}
+	a.reqsMu.Unlock()
 
 	a.hub.Publish(events.Event{
 		Type:      "request.finished",

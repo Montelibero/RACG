@@ -84,6 +84,18 @@ func TestServerLoadsAlwaysRulesFromSQLiteOnStart(t *testing.T) {
 	if got["status"] != "APPROVED" {
 		t.Fatalf("status=%v body=%s", got["status"], rw.Body.String())
 	}
+	requestID, _ := got["request_id"].(string)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		info, ok := s.API().GetRequestInfoForTUI(requestID)
+		if ok && (info.Status == "SUCCEEDED" || info.Status == "FAILED" || info.Status == "TIMED_OUT" || info.Status == "KILLED") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("request %s did not finish", requestID)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	// Ensure DB file exists (not in-memory).
 	if _, err := os.Stat(dbPath); err != nil {
