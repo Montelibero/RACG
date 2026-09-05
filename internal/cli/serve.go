@@ -18,13 +18,21 @@ import (
 type ServeCmd struct {
 	stdout io.Writer
 	stderr io.Writer
+	runUI  func(context.Context, tui.ServeUIConfig) error
 }
 
 func NewServeCmd(stdout, stderr io.Writer) *ServeCmd {
-	return &ServeCmd{stdout: stdout, stderr: stderr}
+	return &ServeCmd{stdout: stdout, stderr: stderr, runUI: tui.RunServeUI}
 }
 
 func (c *ServeCmd) Run(args []string) int {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return c.run(ctx, args)
+}
+
+// run keeps the interactive composition testable without a terminal or process-wide signals.
+func (c *ServeCmd) run(parent context.Context, args []string) int {
 	cfg := config.Defaults()
 
 	fs := flag.NewFlagSet("racg serve", flag.ContinueOnError)
@@ -63,7 +71,7 @@ func (c *ServeCmd) Run(args []string) int {
 		return 1
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := context.WithCancel(parent)
 	defer stop()
 
 	ready := make(chan struct{})
@@ -94,7 +102,7 @@ func (c *ServeCmd) Run(args []string) int {
 	hostname, _ := os.Hostname()
 
 	// Built-in TUI (tview): pairing page + dashboard + jobs.
-	_ = tui.RunServeUI(ctx, tui.ServeUIConfig{
+	_ = c.runUI(ctx, tui.ServeUIConfig{
 		Version:  version.Version,
 		Listen:   s.Addr(),
 		DBPath:   cfg.DBPath,
