@@ -245,3 +245,14 @@ Verification: full tests, race tests, vet, Linux amd64/arm64 static builds and r
 - This workstation is Pop!_OS 24.04, unprivileged UID 1000. GCC and the GL/X11/Xcursor/Xrandr/Xinerama/Xi development interfaces are available. `pkg-config` reports the Xxf86vm development interface missing; `libxxf86vm-dev` is not installed.
 - A read-only `apt-get -s install libxxf86vm-dev` simulation proposes installing only that package, without upgrades or removals. Installing it is a system-wide environment change requiring user direction; no package installation has been performed.
 - Latest preserved architecture snapshot: `.codespaces/execution-claim-map.qbvAZ6/belief_map.sexp` (109 files, 270 edges, 710 entities).
+
+### Linux desktop offline inspection preview
+
+- User installed `libxxf86vm-dev`; pkg-config now resolves all checked GL/X11/Xxf86vm/Wayland interfaces.
+- Added `apps/approver` as an isolated module with Fyne 2.8.1, compatible with Go 1.22.2. Root go.mod/go.sum and static server dependency graph remain unchanged.
+- The development window verifies a signed request file against a separately trusted server profile before displaying it. Identity fields are quoted, invisible Unicode formatting/control characters are escaped, and verification failure clears stale content.
+- Preview help and project-facing documentation explicitly state: no network, signing, approval or execution; no keys/profiles saved. This is not the completed desktop client. Password-protected signing keys, timed unlock, live service transport and notifications remain unfinished.
+- Native binary built successfully and `--help` ran. A demo window was launched with generated public-profile/signed-request fixtures under `/tmp/racg-preview-fixture-4163871496`; no private key was saved and no requested operation executed.
+- Computer-use recognized the process/window, but this Linux provider exposes no screenshots and the Fyne content was absent from the accessibility tree. Actual visual/click verification therefore requires a user observation; it has not been claimed as passed.
+- Root race tests, CLI help checks, vet and static amd64/arm64 server builds passed. Preview verification/model tests, headless widget tests (`go test -tags ci ./...`) and desktop vet passed. Native window integration still needs visual confirmation.
+- Codespaces snapshot: `.codespaces/desktop-preview-map.qE1zOH/belief_map.sexp` (113 files, 276 edges, 722 entities), earlier maps/cache retained.

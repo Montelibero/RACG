@@ -9,6 +9,10 @@ Use RACG when command execution must go through a human-approved gateway instead
 
 ## Core Workflow
 
+The separate desktop development preview (`apps/approver/`,
+`racg-approver --help`) only inspects offline signed request files. It cannot
+approve, connect or execute; do not direct pending interactive requests there.
+
 On HTTP 500 `DECISION_PERSISTENCE_FAILED`, retain `error.request_id`: automatic approval failed, but the request exists and remains pending. Ask the operator to fix server storage and review that request in TUI, then resume with `racg request wait <id>`; do not resubmit.
 
 If a manual decision cannot be persisted, the server leaves the request pending without applying new rules or dispatching execution. Ask the operator to resolve the storage error shown in TUI; do not resubmit the operation as a workaround.

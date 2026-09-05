@@ -32,6 +32,8 @@ func TestRootHelpIncludesFileAndConfigExamples(t *testing.T) {
 
 	got := out.String()
 	for _, want := range []string{
+		"racg-approver --help",
+		"preview cannot approve",
 		"racg file read /path/file.txt",
 		"racg file patch /path/file.txt --diff-file /tmp/change.patch",
 		"racg file upload ./local.bin /srv/remote.bin",
