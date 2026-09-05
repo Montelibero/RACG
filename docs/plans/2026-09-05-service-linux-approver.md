@@ -201,3 +201,12 @@ Verification: full tests, race tests, vet, Linux amd64/arm64 static builds and r
 - An automatic-approval storage failure returns HTTP 500 `DECISION_PERSISTENCE_FAILED` with the already-created request ID. It remains pending for operator recovery, without execution. Help and all applicable documentation explain that clients should not resubmit it.
 - Tests inject a SQLite decision-write failure through the real HTTP submission path, verify persisted/live pending state and no execution, then recover storage and deny the same request. Concurrent manual/automatic decisions dispatch once, and a later matching pass is inert.
 - Full race tests and vet passed. Latest preserved graph: `.codespaces/auto-decision-map.8TTXMP/belief_map.sexp` (98 files, 236 edges, 666 entities).
+
+### Isolated service authority state
+
+- Added `internal/authority`, independent of HTTP and the interactive SQLite schema. It pins database identity to the server public key, manages trusted device enrollment/rotation/revocation, and stores server-signed immutable request envelopes with authority-generated IDs and challenges.
+- `Consume` reads the stored envelope, verifies the server signature and current enrolled device key, verifies decision binding/expiry and atomically records the first single-shot decision. It returns stored operation bytes only after commit; replay and conflicting decisions are rejected after reopening the file.
+- This stage accepts only the agreed initial `ALLOW_ONCE`/`DENY` slice. Reusable grants remain protocol primitives, not executable permissions in the authority.
+- Tests cover command/display mutation, unknown/revoked/rotated/wrong keys, cross-request decisions, expiry, conflicting decisions, database rollback, actual database reopen and server identity mismatch.
+- No live service or execution entry point is connected. Composition must still enforce private root-owned database/key/socket storage and single-process ownership, authenticate agent identity before request admission, freeze all staged bytes, implement durable execution state and clock rollback handling, and never replay uncertain executions.
+- Full race tests and vet passed. Latest graph: `.codespaces/authority-map.4Z5Vcu/belief_map.sexp` (100 files, 238 edges, 676 entities); prior snapshots retained.
