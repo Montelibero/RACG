@@ -48,6 +48,7 @@ func New(ctx context.Context, db *sql.DB, serverID string, key ed25519.PrivateKe
 		"CREATE TABLE IF NOT EXISTS authority_agents (client_id TEXT PRIMARY KEY, public_key BLOB NOT NULL, revoked INTEGER NOT NULL DEFAULT 0)",
 		"CREATE TABLE IF NOT EXISTS authority_submissions (client_id TEXT NOT NULL, nonce BLOB NOT NULL, digest BLOB NOT NULL, request_id TEXT NOT NULL UNIQUE, PRIMARY KEY(client_id,nonce))",
 		"CREATE TABLE IF NOT EXISTS authority_requests (request_id TEXT PRIMARY KEY, envelope BLOB NOT NULL, status TEXT NOT NULL, signed_decision BLOB, consumed_at TEXT)",
+		"CREATE TABLE IF NOT EXISTS authority_executions (request_id TEXT PRIMARY KEY, started_at TEXT NOT NULL, finished_at TEXT, result BLOB)",
 	} {
 		if _, err := tx.ExecContext(ctx, statement); err != nil {
 			return nil, err

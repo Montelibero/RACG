@@ -228,3 +228,12 @@ Verification: full tests, race tests, vet, Linux amd64/arm64 static builds and r
 - Both found and not-found outcomes carry a server signature bound to a fresh lookup challenge and sender-chosen lookup expiry. The caller verifies the pinned server key, request owner, envelope signature and response binding; broker-supplied status is not trusted.
 - A not-found response is a point-in-time snapshot, not permission to blindly create a new submission while the original delivery could still be in flight. Reuse the original signed submission when still valid, or resolve uncertainty explicitly.
 - Tests cover expired-delivery recovery, authenticated absent results, other-agent isolation, revoked/expired lookup credentials, forged status and stale-response replay. Full race tests and vet passed.
+
+### Durable service execution claim
+
+- Added an injected trusted execution boundary: it receives only the stored signed request after a durable single-use execution claim. It does not accept broker-supplied command bytes.
+- Before dispatch, the authority re-verifies the stored decision, current approver key/revocation and validity deadline. Pending, denied, expired, revoked and already-claimed requests do not invoke the backend.
+- Request status and execution-start record commit before the callback; terminal status and result commit together afterward, even when the command context has been cancelled.
+- Startup recovery under exclusive process ownership marks interrupted `EXECUTING` requests `UNCERTAIN`. They are not rerun: a crash may have occurred before or after external side effects. Completion-storage failures also leave the claim consumed.
+- Tests cover concurrent/late duplicate dispatch, frozen backend input, pre-dispatch storage failure, revoked/expired approval, cancellation result persistence, completion rollback and uncertain startup recovery. Full race tests and vet passed.
+- This remains an internal injected boundary, not a deployed root executor. Real operation admission, immutable file staging, private state/IPC ownership, service wiring, clock rollback handling and desktop UX remain unfinished.
