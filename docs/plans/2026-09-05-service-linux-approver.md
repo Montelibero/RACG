@@ -221,3 +221,10 @@ Verification: full tests, race tests, vet, Linux amd64/arm64 static builds and r
 - Tests cover permanent enrollment across reopen, concurrent retries, nonce/content changes, all signed field tampering, expiry, revocation, rotation, separate agent/approver authority, signature domain separation and database rollback.
 - Still internal only: trusted SSH CLI enrollment, key-file protection, operation/file admission, broker transport and execution composition remain to be wired. A delivery-expired message needs authenticated inspection/recovery rather than blind creation of another request.
 - Full race tests and vet passed. Latest preserved graph: `.codespaces/agent-admission-map.g1OSA6/belief_map.sexp` (104 files, 244 edges, 690 entities).
+
+### Authenticated submission recovery
+
+- Added agent-signed read-only lookup by the original submission nonce, scoped to the currently enrolled agent. Recovery works after submission delivery expiry without creating another operation.
+- Both found and not-found outcomes carry a server signature bound to a fresh lookup challenge and sender-chosen lookup expiry. The caller verifies the pinned server key, request owner, envelope signature and response binding; broker-supplied status is not trusted.
+- A not-found response is a point-in-time snapshot, not permission to blindly create a new submission while the original delivery could still be in flight. Reuse the original signed submission when still valid, or resolve uncertainty explicitly.
+- Tests cover expired-delivery recovery, authenticated absent results, other-agent isolation, revoked/expired lookup credentials, forged status and stale-response replay. Full race tests and vet passed.
