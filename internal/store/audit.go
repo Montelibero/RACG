@@ -187,6 +187,10 @@ func (s *Store) UpdateRequestStatus(ctx context.Context, requestID string, statu
 }
 
 func (s *Store) InsertDecision(ctx context.Context, d Decision) error {
+	return insertDecision(ctx, s.db, d)
+}
+
+func insertDecision(ctx context.Context, q sqlExecer, d Decision) error {
 	if d.RequestID == "" {
 		return fmt.Errorf("request ID required")
 	}
@@ -205,7 +209,7 @@ func (s *Store) InsertDecision(ctx context.Context, d Decision) error {
 		ruleID = sql.NullString{String: d.RuleID, Valid: true}
 	}
 
-	_, err := s.db.ExecContext(ctx,
+	_, err := q.ExecContext(ctx,
 		`INSERT INTO decisions(request_id, decision, decision_source, decided_at, rule_id)
 		 VALUES(?,          ?,        ?,              ?,         ?)`,
 		d.RequestID,

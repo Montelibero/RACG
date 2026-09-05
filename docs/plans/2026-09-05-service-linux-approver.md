@@ -184,3 +184,12 @@ Verification: full tests, race tests, vet, Linux amd64/arm64 static builds and r
 - Full tests, race tests, vet and Linux amd64/arm64 static builds passed with Go 1.22.2. No public command or protocol behavior changed.
 - Latest graph: `.codespaces/local-policy-map.4C2eHP/belief_map.sexp` (93 Go files, 180 edges, 654 entities). Earlier graphs and pre-build cache are retained. Graph inspection confirms the new policy has no HTTP dependency.
 - Next extraction: authoritative request state and transactional decision persistence. Existing interactive persistence errors are still ignored in parts of the legacy lifecycle; this behavior must not be inherited by the new service authority.
+
+### Atomic manual decision persistence
+
+- Added `store.CommitPendingDecision`: conditional pending-state transition, decision audit and permanent rules commit together, using the existing schema. Duplicate/conflicting decisions cannot overwrite a consumed request, including after reopening the database.
+- Local TUI decisions now return persistence failures before changing live request state, installing rules, publishing decision events or dispatching execution. The existing TUI error display presents the failure. No-store in-process test compositions remain supported.
+- Tests inject decision-insert and second-rule-insert failures and cancelled contexts, verify full rollback, race allow against deny, reopen the database to check replay rejection, and ensure all four manual actions have no live effects with a closed store.
+- Help, README, quickstart, OpenAPI and client skill describe the storage-failure behavior. Full tests/race checks, vet and Linux amd64/arm64 builds passed.
+- Graph: `.codespaces/decision-tx-map.r3g4l0/belief_map.sexp` (96 files, 212 edges, 664 entities), with prior cache preserved.
+- Automatic rule approval and other lifecycle persistence paths still need migration; the new transaction is not yet a service-mode authority.

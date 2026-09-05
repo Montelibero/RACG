@@ -2,7 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "RACG",
-    "version": "0.4.0"
+    "version": "0.4.0",
+    "description": "Manual decisions are local to the server TUI and require a successful audit transaction before execution or rule installation. A storage error leaves the request pending; the operator must resolve it before retrying."
   },
   "components": {
     "securitySchemes": {

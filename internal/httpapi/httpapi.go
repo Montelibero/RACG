@@ -1572,17 +1572,27 @@ func (a *API) decideInternalWithRules(ctx context.Context, requestID string, dec
 		DecidedAt:      now,
 	}
 
+	// Persist before publishing a decision, installing live rules or dispatching.
+	if a.st != nil {
+		var persistentRules []rules.Rule
+		ruleID := ""
+		if len(plan.Rules) > 0 {
+			ruleID = plan.Rules[0].ID
+		}
+		if decision == "ALLOW_ALWAYS" {
+			persistentRules = plan.Rules
+		}
+		if err := a.st.CommitPendingDecision(ctx, store.Decision{
+			RequestID: requestID, Decision: decision, DecisionSource: "tui",
+			DecidedAt: decidedAt, RuleID: ruleID,
+		}, persistentRules); err != nil {
+			a.reqsMu.Unlock()
+			return fmt.Errorf("persist decision: %w", err)
+		}
+	}
+
 	switch decision {
 	case "DENY":
-		if a.st != nil {
-			_ = a.st.UpdateRequestStatus(ctx, requestID, "DENIED")
-			_ = a.st.InsertDecision(ctx, store.Decision{
-				RequestID:      requestID,
-				Decision:       "DENY",
-				DecisionSource: "tui",
-				DecidedAt:      decidedAt,
-			})
-		}
 		rec.Status = "DENIED"
 		rec.Decision = dec
 		a.reqs[requestID] = rec
@@ -1604,26 +1614,6 @@ func (a *API) decideInternalWithRules(ctx context.Context, requestID string, dec
 
 	case "ALLOW_ONCE", "ALLOW_SESSION", "ALLOW_ALWAYS":
 		createdRules := plan.Rules
-
-		if a.st != nil {
-			ruleID := ""
-			if len(createdRules) > 0 {
-				ruleID = createdRules[0].ID
-			}
-			_ = a.st.UpdateRequestStatus(ctx, requestID, "APPROVED")
-			_ = a.st.InsertDecision(ctx, store.Decision{
-				RequestID:      requestID,
-				Decision:       decision,
-				DecisionSource: "tui",
-				DecidedAt:      decidedAt,
-				RuleID:         ruleID,
-			})
-			if decision == "ALLOW_ALWAYS" {
-				for _, createdRule := range createdRules {
-					_ = a.st.InsertAlwaysRule(ctx, createdRule, decidedAt)
-				}
-			}
-		}
 
 		rec.Status = "APPROVED"
 		rec.Decision = dec

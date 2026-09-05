@@ -241,6 +241,10 @@ func (s *Store) EndSession(ctx context.Context, id string, endedAt time.Time) er
 }
 
 func (s *Store) InsertAlwaysRule(ctx context.Context, r rules.Rule, createdAt time.Time) error {
+	return insertAlwaysRule(ctx, s.db, r, createdAt)
+}
+
+func insertAlwaysRule(ctx context.Context, q sqlExecer, r rules.Rule, createdAt time.Time) error {
 	if r.ID == "" {
 		return fmt.Errorf("rule ID required")
 	}
@@ -272,7 +276,7 @@ func (s *Store) InsertAlwaysRule(ctx context.Context, r rules.Rule, createdAt ti
 		}
 	}
 
-	_, err := s.db.ExecContext(ctx,
+	_, err := q.ExecContext(ctx,
 		`INSERT INTO rules(rule_id, source, op_type, cmd_argv_prefix_json, cmd_stdin_sha256, path_exact, path_prefix, path_glob, enabled, created_at, disabled_at)
 		 VALUES(?,      ?,      ?,       ?,                    ?,                ?,          ?,           ?,         1,       ?,          NULL)`,
 		r.ID,

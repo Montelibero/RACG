@@ -20,6 +20,8 @@ Security upgrade: older server builds accepted decisions from agent tokens. Upda
 
 ## Local run
 
+Manual TUI decisions are applied only after the status, decision audit and any permanent rules are saved in one transaction. A storage error is shown in TUI and leaves the request pending, without execution or new active rules. Resolve the storage problem before retrying the decision.
+
 ```bash
 racg serve -listen-addr 127.0.0.1 -port 8777
 ```

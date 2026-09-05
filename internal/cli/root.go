@@ -104,6 +104,7 @@ approval:
   Manual approval and denial are local to the server TUI.
   Agent tokens cannot approve or deny requests over HTTP (403 REMOTE_DECISION_DISABLED).
   Existing authorized rules may still auto-approve matching requests.
+  Manual decisions are applied only after their audit transaction is saved.
 
 quick start:
   sudo racg serve -listen-addr 127.0.0.1 -port 8777

@@ -43,6 +43,7 @@ func (c *ServeCmd) run(parent context.Context, args []string) int {
 		fmt.Fprintln(c.stderr, "Manual approval and denial are local to the server TUI.")
 		fmt.Fprintln(c.stderr, "Agent tokens cannot approve or deny requests over HTTP (403 REMOTE_DECISION_DISABLED).")
 		fmt.Fprintln(c.stderr, "Existing authorized rules may still auto-approve matching requests.")
+		fmt.Fprintln(c.stderr, "Manual decisions are applied only after their audit transaction is saved; a storage error leaves the request pending.")
 		fs.PrintDefaults()
 	}
 
