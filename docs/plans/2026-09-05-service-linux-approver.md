@@ -237,3 +237,11 @@ Verification: full tests, race tests, vet, Linux amd64/arm64 static builds and r
 - Startup recovery under exclusive process ownership marks interrupted `EXECUTING` requests `UNCERTAIN`. They are not rerun: a crash may have occurred before or after external side effects. Completion-storage failures also leave the claim consumed.
 - Tests cover concurrent/late duplicate dispatch, frozen backend input, pre-dispatch storage failure, revoked/expired approval, cancellation result persistence, completion rollback and uncertain startup recovery. Full race tests and vet passed.
 - This remains an internal injected boundary, not a deployed root executor. Real operation admission, immutable file staging, private state/IPC ownership, service wiring, clock rollback handling and desktop UX remain unfinished.
+
+### Desktop build feasibility checkpoint
+
+- Evaluated Fyne as a Go-native desktop candidate with Linux system-tray support, keeping GUI dependencies outside the existing server build. It is not yet added as a dependency or selected irrevocably.
+- Official setup reference: https://docs.fyne.io/started/quick/ ; tray lifecycle reference: https://docs.fyne.io/explore/systray/ .
+- This workstation is Pop!_OS 24.04, unprivileged UID 1000. GCC and the GL/X11/Xcursor/Xrandr/Xinerama/Xi development interfaces are available. `pkg-config` reports the Xxf86vm development interface missing; `libxxf86vm-dev` is not installed.
+- A read-only `apt-get -s install libxxf86vm-dev` simulation proposes installing only that package, without upgrades or removals. Installing it is a system-wide environment change requiring user direction; no package installation has been performed.
+- Latest preserved architecture snapshot: `.codespaces/execution-claim-map.qbvAZ6/belief_map.sexp` (109 files, 270 edges, 710 entities).
