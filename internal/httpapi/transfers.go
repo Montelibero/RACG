@@ -13,11 +13,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/itolstov/racg/internal/auth"
+	"github.com/itolstov/racg/internal/executor"
 	"github.com/itolstov/racg/internal/rules"
 )
 
@@ -319,69 +319,17 @@ func (a *API) executeFileUpload(startedAt time.Time, c auth.Claims, op rules.Op)
 		return transferErrorResult(startedAt, errors.New("staged upload metadata mismatch"))
 	}
 
-	mode := os.FileMode(0o644)
-	var uid, gid = -1, -1
-	if info, statErr := os.Stat(p.Path); statErr == nil {
-		if !info.Mode().IsRegular() {
-			return transferErrorResult(startedAt, errors.New("upload target is not a regular file"))
-		}
-		mode = info.Mode().Perm()
-		if st, ok := info.Sys().(*syscall.Stat_t); ok {
-			uid, gid = int(st.Uid), int(st.Gid)
-		}
-	} else if !errors.Is(statErr, os.ErrNotExist) {
-		return transferErrorResult(startedAt, statErr)
-	}
-	if p.Mode != "" {
-		mode, err = parseFileMode(p.Mode)
-		if err != nil {
-			return transferErrorResult(startedAt, err)
-		}
-	}
-
 	src, err := os.Open(a.uploadDataPath(p.UploadID))
 	if err != nil {
 		return transferErrorResult(startedAt, err)
 	}
 	defer src.Close()
-	dir := filepath.Dir(p.Path)
-	tmp, err := os.CreateTemp(dir, ".racg-upload-*")
-	if err != nil {
-		return transferErrorResult(startedAt, err)
+	res := executor.UploadFile(executor.UploadSpec{Path: p.Path, Size: p.Size, SHA256: p.SHA256, Mode: p.Mode}, src)
+	if res.Status == "SUCCEEDED" {
+		_ = os.Remove(a.uploadDataPath(p.UploadID))
+		_ = os.Remove(a.uploadMetaPath(p.UploadID))
 	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-	if err := tmp.Chmod(mode); err != nil {
-		_ = tmp.Close()
-		return transferErrorResult(startedAt, err)
-	}
-	if uid >= 0 {
-		if err := tmp.Chown(uid, gid); err != nil {
-			_ = tmp.Close()
-			return transferErrorResult(startedAt, err)
-		}
-	}
-	h := sha256.New()
-	n, copyErr := io.Copy(io.MultiWriter(tmp, h), src)
-	if copyErr == nil {
-		copyErr = tmp.Sync()
-	}
-	if closeErr := tmp.Close(); copyErr == nil {
-		copyErr = closeErr
-	}
-	if copyErr != nil {
-		return transferErrorResult(startedAt, copyErr)
-	}
-	gotHash := hex.EncodeToString(h.Sum(nil))
-	if n != p.Size || gotHash != p.SHA256 {
-		return transferErrorResult(startedAt, errors.New("staged upload checksum mismatch"))
-	}
-	if err := os.Rename(tmpPath, p.Path); err != nil {
-		return transferErrorResult(startedAt, err)
-	}
-	_ = os.Remove(a.uploadDataPath(p.UploadID))
-	_ = os.Remove(a.uploadMetaPath(p.UploadID))
-	return transferSuccessResult(startedAt, fmt.Sprintf("uploaded %d bytes\nsha256: %s", n, gotHash))
+	return fileExecutionRecord(startedAt, time.Now().UTC(), res)
 }
 
 func (a *API) executeFileDownload(startedAt time.Time, requestID string, op rules.Op) *resultRecord {
@@ -392,54 +340,15 @@ func (a *API) executeFileDownload(startedAt time.Time, requestID string, op rule
 	if err := json.Unmarshal(op.Payload, &p); err != nil {
 		return transferErrorResult(startedAt, err)
 	}
-	src, err := os.Open(p.Path)
-	if err != nil {
-		return transferErrorResult(startedAt, err)
+	meta, res := executor.DownloadFile(p.Path, a.downloadDataPath(requestID), a.maxTransferBytes())
+	if res.Status != "SUCCEEDED" {
+		return fileExecutionRecord(startedAt, time.Now().UTC(), res)
 	}
-	defer src.Close()
-	info, err := src.Stat()
-	if err != nil {
-		return transferErrorResult(startedAt, err)
-	}
-	if !info.Mode().IsRegular() {
-		return transferErrorResult(startedAt, errors.New("download source is not a regular file"))
-	}
-	if info.Size() > a.maxTransferBytes() {
-		return transferErrorResult(startedAt, fmt.Errorf("file exceeds maximum transfer size of %d bytes", a.maxTransferBytes()))
-	}
-	if err := os.MkdirAll(a.transferDir(), 0o700); err != nil {
-		return transferErrorResult(startedAt, err)
-	}
-	tmp, err := os.CreateTemp(a.transferDir(), ".racg-download-*")
-	if err != nil {
-		return transferErrorResult(startedAt, err)
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-	_ = tmp.Chmod(0o600)
-	h := sha256.New()
-	n, copyErr := io.Copy(io.MultiWriter(tmp, h), io.LimitReader(src, a.maxTransferBytes()+1))
-	if copyErr == nil {
-		copyErr = tmp.Sync()
-	}
-	if closeErr := tmp.Close(); copyErr == nil {
-		copyErr = closeErr
-	}
-	if copyErr != nil {
-		return transferErrorResult(startedAt, copyErr)
-	}
-	if n > a.maxTransferBytes() {
-		return transferErrorResult(startedAt, fmt.Errorf("file exceeds maximum transfer size of %d bytes", a.maxTransferBytes()))
-	}
-	if err := os.Rename(tmpPath, a.downloadDataPath(requestID)); err != nil {
-		return transferErrorResult(startedAt, err)
-	}
-	meta := downloadArtifact{Size: n, SHA256: hex.EncodeToString(h.Sum(nil)), Mode: fmt.Sprintf("%04o", info.Mode().Perm()), Name: filepath.Base(p.Path)}
 	if err := writeJSONFileAtomic(a.downloadMetaPath(requestID), meta, 0o600); err != nil {
 		_ = os.Remove(a.downloadDataPath(requestID))
 		return transferErrorResult(startedAt, err)
 	}
-	return transferSuccessResult(startedAt, fmt.Sprintf("download ready: %d bytes\nsha256: %s", n, meta.SHA256))
+	return fileExecutionRecord(startedAt, time.Now().UTC(), res)
 }
 
 func (a *API) handleRequestFile(w http.ResponseWriter, r *http.Request, c auth.Claims, requestID string) {
@@ -482,11 +391,7 @@ func (a *API) handleRequestFile(w http.ResponseWriter, r *http.Request, c auth.C
 }
 
 func parseFileMode(s string) (os.FileMode, error) {
-	n, err := strconv.ParseUint(strings.TrimSpace(s), 8, 9)
-	if err != nil || n > 0o777 {
-		return 0, fmt.Errorf("invalid file mode %q; use octal permissions such as 0644", s)
-	}
-	return os.FileMode(n), nil
+	return executor.ParseFileMode(s)
 }
 
 func validTransferID(id string) bool {

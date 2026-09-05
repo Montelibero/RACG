@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -16,12 +15,12 @@ import (
 	"net/http"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/itolstov/racg/internal/application"
 	"github.com/itolstov/racg/internal/auth"
 	"github.com/itolstov/racg/internal/config"
 	"github.com/itolstov/racg/internal/configedit"
@@ -40,6 +39,8 @@ import (
 var openapiFS embed.FS
 
 type Option func(*API)
+
+var _ application.InteractiveBackend = (*API)(nil)
 
 func WithPairing(p *auth.Pairing) Option {
 	return func(a *API) { a.pairing = p }
@@ -110,72 +111,14 @@ type requestRecord struct {
 	CreatedAt string `json:"created_at,omitempty"`
 }
 
-// TUIRequest is a summarized view used by the built-in TUI.
-type TUIRequest struct {
-	ID        string
-	Status    string
-	Summary   string
-	Details   string
-	SessionID string
-	ClientID  string
-	RiskFlags []string
-	CreatedAt string
-}
-
-type ManualRuleInput struct {
-	Source    string
-	SessionID string
-	OpType    string
-	Match     string
-	Pattern   string
-}
-
-type TUIRuleSession struct {
-	ID        string
-	ClientID  string
-	StartedAt time.Time
-}
-
-type TUIRequestInfo struct {
-	ID        string
-	Status    string
-	Summary   string
-	Details   string
-	SessionID string
-	ClientID  string
-	RiskFlags []string
-	CreatedAt string
-
-	Decision *decisionRecord
-	Result   *resultRecord
-}
-
-type RuleScopeCandidate struct {
-	OpType  string
-	Segment string
-	Pattern string
-}
-
-type decisionRecord struct {
-	Decision       string `json:"decision"`
-	DecisionSource string `json:"decision_source"`
-	DecidedAt      string `json:"decided_at"`
-	RuleID         string `json:"rule_id,omitempty"`
-}
-
-type resultRecord struct {
-	StartedAt       string `json:"started_at"`
-	FinishedAt      string `json:"finished_at"`
-	DurationMs      int64  `json:"duration_ms"`
-	ExitCode        int    `json:"exit_code"`
-	Status          string `json:"status"`
-	Stdout          string `json:"stdout"`
-	Stderr          string `json:"stderr"`
-	StdoutTruncated bool   `json:"stdout_truncated"`
-	StderrTruncated bool   `json:"stderr_truncated"`
-	StdoutSHA256    string `json:"stdout_sha256"`
-	StderrSHA256    string `json:"stderr_sha256"`
-}
+// Compatibility aliases keep existing API callers and wire records unchanged.
+type TUIRequest = application.RequestSummary
+type TUIRequestInfo = application.RequestInfo
+type TUIRuleSession = application.RuleSession
+type ManualRuleInput = application.ManualRuleInput
+type RuleScopeCandidate = application.RuleScopeCandidate
+type decisionRecord = application.DecisionRecord
+type resultRecord = application.ResultRecord
 
 type liveOutput struct {
 	combined  []byte
@@ -1526,53 +1469,9 @@ func (a *API) executeApprovedRequest(requestID string, c auth.Claims, op rules.O
 			maxBytes = a.cfg.MaxOutputBytes
 		}
 
-		f, err := os.Open(payload.Path)
-		if err != nil {
-			finishedAt = time.Now().UTC()
-			rr = &resultRecord{
-				StartedAt:    startedAt.Format(time.RFC3339Nano),
-				FinishedAt:   finishedAt.Format(time.RFC3339Nano),
-				DurationMs:   finishedAt.Sub(startedAt).Milliseconds(),
-				ExitCode:     -1,
-				Status:       "FAILED",
-				Stderr:       err.Error(),
-				StdoutSHA256: sha256Hex(nil),
-				StderrSHA256: sha256Hex([]byte(err.Error())),
-			}
-			break
-		}
-		defer f.Close()
-
-		out, outHash, outTrunc, err := captureLimited(f, maxBytes)
-		if err != nil {
-			finishedAt = time.Now().UTC()
-			rr = &resultRecord{
-				StartedAt:    startedAt.Format(time.RFC3339Nano),
-				FinishedAt:   finishedAt.Format(time.RFC3339Nano),
-				DurationMs:   finishedAt.Sub(startedAt).Milliseconds(),
-				ExitCode:     -1,
-				Status:       "FAILED",
-				Stderr:       err.Error(),
-				StdoutSHA256: sha256Hex(nil),
-				StderrSHA256: sha256Hex([]byte(err.Error())),
-			}
-			break
-		}
-
+		res := executor.ReadFile(payload.Path, maxBytes)
 		finishedAt = time.Now().UTC()
-		rr = &resultRecord{
-			StartedAt:       startedAt.Format(time.RFC3339Nano),
-			FinishedAt:      finishedAt.Format(time.RFC3339Nano),
-			DurationMs:      finishedAt.Sub(startedAt).Milliseconds(),
-			ExitCode:        0,
-			Status:          "SUCCEEDED",
-			Stdout:          out,
-			Stderr:          "",
-			StdoutTruncated: outTrunc,
-			StderrTruncated: false,
-			StdoutSHA256:    outHash,
-			StderrSHA256:    sha256Hex(nil),
-		}
+		rr = fileExecutionRecord(startedAt, finishedAt, res)
 	case "fs.upload":
 		rr = a.executeFileUpload(startedAt, c, op)
 		finishedAt = time.Now().UTC()
@@ -1586,36 +1485,9 @@ func (a *API) executeApprovedRequest(requestID string, c auth.Claims, op rules.O
 		}
 		_ = json.Unmarshal(op.Payload, &payload)
 
-		perr := applyUnifiedPatchToFile(payload.Path, payload.Diff)
+		res := executor.PatchFile(payload.Path, payload.Diff)
 		finishedAt = time.Now().UTC()
-		if perr != nil {
-			rr = &resultRecord{
-				StartedAt:    startedAt.Format(time.RFC3339Nano),
-				FinishedAt:   finishedAt.Format(time.RFC3339Nano),
-				DurationMs:   finishedAt.Sub(startedAt).Milliseconds(),
-				ExitCode:     -1,
-				Status:       "FAILED",
-				Stderr:       perr.Error(),
-				StdoutSHA256: sha256Hex(nil),
-				StderrSHA256: sha256Hex([]byte(perr.Error())),
-			}
-			break
-		}
-
-		out := "patched"
-		rr = &resultRecord{
-			StartedAt:       startedAt.Format(time.RFC3339Nano),
-			FinishedAt:      finishedAt.Format(time.RFC3339Nano),
-			DurationMs:      finishedAt.Sub(startedAt).Milliseconds(),
-			ExitCode:        0,
-			Status:          "SUCCEEDED",
-			Stdout:          out,
-			Stderr:          "",
-			StdoutTruncated: false,
-			StderrTruncated: false,
-			StdoutSHA256:    sha256Hex([]byte(out)),
-			StderrSHA256:    sha256Hex(nil),
-		}
+		rr = fileExecutionRecord(startedAt, finishedAt, res)
 	case "conf.set":
 		var payload struct {
 			Path      string `json:"path"`
@@ -1632,7 +1504,7 @@ func (a *API) executeApprovedRequest(requestID string, c auth.Claims, op rules.O
 		if payload.Backup != nil {
 			backup = *payload.Backup
 		}
-		res, cerr := configedit.Set(configedit.ConfigSet{
+		res := executor.SetConfig(configedit.ConfigSet{
 			Path:      payload.Path,
 			Format:    payload.Format,
 			Key:       payload.Key,
@@ -1643,33 +1515,7 @@ func (a *API) executeApprovedRequest(requestID string, c auth.Claims, op rules.O
 			Create:    payload.Create,
 		})
 		finishedAt = time.Now().UTC()
-		if cerr != nil {
-			rr = &resultRecord{
-				StartedAt:    startedAt.Format(time.RFC3339Nano),
-				FinishedAt:   finishedAt.Format(time.RFC3339Nano),
-				DurationMs:   finishedAt.Sub(startedAt).Milliseconds(),
-				ExitCode:     -1,
-				Status:       "FAILED",
-				Stderr:       cerr.Error(),
-				StdoutSHA256: sha256Hex(nil),
-				StderrSHA256: sha256Hex([]byte(cerr.Error())),
-			}
-			break
-		}
-		out := formatConfigSetResult(res)
-		rr = &resultRecord{
-			StartedAt:       startedAt.Format(time.RFC3339Nano),
-			FinishedAt:      finishedAt.Format(time.RFC3339Nano),
-			DurationMs:      finishedAt.Sub(startedAt).Milliseconds(),
-			ExitCode:        0,
-			Status:          "SUCCEEDED",
-			Stdout:          out,
-			Stderr:          "",
-			StdoutTruncated: false,
-			StderrTruncated: false,
-			StdoutSHA256:    sha256Hex([]byte(out)),
-			StderrSHA256:    sha256Hex(nil),
-		}
+		rr = fileExecutionRecord(startedAt, finishedAt, res)
 	default:
 		finishedAt = time.Now().UTC()
 		rr = &resultRecord{
@@ -1732,6 +1578,19 @@ func (a *API) executeApprovedRequest(requestID string, c auth.Claims, op rules.O
 			"exit_code": rr.ExitCode,
 		},
 	})
+}
+
+// fileExecutionRecord preserves request-level timing while translating backend output.
+func fileExecutionRecord(startedAt, finishedAt time.Time, res executor.Result) *resultRecord {
+	return &resultRecord{
+		StartedAt:  startedAt.Format(time.RFC3339Nano),
+		FinishedAt: finishedAt.Format(time.RFC3339Nano),
+		DurationMs: finishedAt.Sub(startedAt).Milliseconds(),
+		ExitCode:   res.ExitCode, Status: res.Status,
+		Stdout: res.Stdout, Stderr: res.Stderr,
+		StdoutTruncated: res.StdoutTruncated, StderrTruncated: res.StderrTruncated,
+		StdoutSHA256: res.StdoutSHA256, StderrSHA256: res.StderrSHA256,
+	}
 }
 
 func (a *API) handleDecision(w http.ResponseWriter, r *http.Request, c auth.Claims, requestID string) {
@@ -2276,25 +2135,6 @@ func tuiDetailsWithRules(rec requestRecord, engine *rules.Engine) string {
 	}
 }
 
-func formatConfigSetResult(res configedit.Result) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "path: %s\n", res.Path)
-	fmt.Fprintf(&b, "format: %s\n", res.Format)
-	fmt.Fprintf(&b, "key: %s\n", res.Key)
-	if res.Created {
-		fmt.Fprintln(&b, "created: true")
-	} else {
-		fmt.Fprintln(&b, "created: false")
-	}
-	fmt.Fprintf(&b, "file_created: %t\n", res.FileCreated)
-	fmt.Fprintf(&b, "old: %s\n", res.OldValue)
-	fmt.Fprintf(&b, "new: %s\n", res.NewValue)
-	if res.BackupPath != "" {
-		fmt.Fprintf(&b, "backup_path: %s\n", res.BackupPath)
-	}
-	return strings.TrimRight(b.String(), "\n")
-}
-
 func commandAnalysisPreview(explain rules.Explanation) string {
 	if len(explain.Segments) == 0 {
 		return ""
@@ -2628,187 +2468,6 @@ func decodeJSON(r io.Reader, dst any) error {
 func sha256Hex(b []byte) string {
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
-}
-
-func captureLimited(r io.Reader, maxBytes int) (text string, hashHex string, truncated bool, err error) {
-	if maxBytes <= 0 {
-		maxBytes = 1
-	}
-	h := sha256.New()
-	var buf bytes.Buffer
-
-	tmp := make([]byte, 32*1024)
-	for {
-		n, rerr := r.Read(tmp)
-		if n > 0 {
-			_, _ = h.Write(tmp[:n])
-
-			remain := maxBytes - buf.Len()
-			if remain > 0 {
-				if n <= remain {
-					_, _ = buf.Write(tmp[:n])
-				} else {
-					_, _ = buf.Write(tmp[:remain])
-					truncated = true
-				}
-			} else {
-				truncated = true
-			}
-		}
-		if rerr != nil {
-			if errors.Is(rerr, io.EOF) {
-				break
-			}
-			return "", "", false, rerr
-		}
-	}
-
-	return buf.String(), hex.EncodeToString(h.Sum(nil)), truncated, nil
-}
-
-func applyUnifiedPatchToFile(path string, diff string) error {
-	if strings.TrimSpace(path) == "" {
-		return fmt.Errorf("path required")
-	}
-	if strings.TrimSpace(diff) == "" {
-		return fmt.Errorf("diff required")
-	}
-
-	origBytes, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	orig := string(origBytes)
-
-	next, err := applyUnifiedPatchText(orig, diff)
-	if err != nil {
-		return err
-	}
-
-	mode := os.FileMode(0o644)
-	if st, err := os.Stat(path); err == nil {
-		mode = st.Mode().Perm()
-	}
-	return os.WriteFile(path, []byte(next), mode)
-}
-
-func applyUnifiedPatchText(original string, diff string) (string, error) {
-	endsWithNewline := strings.HasSuffix(original, "\n")
-	origBody := strings.TrimSuffix(original, "\n")
-	var origLines []string
-	if origBody == "" {
-		origLines = []string{}
-	} else {
-		origLines = strings.Split(origBody, "\n")
-	}
-
-	diff = strings.ReplaceAll(diff, "\r\n", "\n")
-	patchLines := strings.Split(diff, "\n")
-
-	out := make([]string, 0, len(origLines)+16)
-	cur := 0
-	i := 0
-	resultEndsWithNewline := false
-	hasOutput := false
-	var lastHunkLine byte
-	for i < len(patchLines) {
-		line := patchLines[i]
-		if strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "diff ") || strings.HasPrefix(line, "index ") {
-			i++
-			continue
-		}
-		if strings.HasPrefix(line, "@@") {
-			oldStart, err := parseUnifiedHunkOldStart(line)
-			if err != nil {
-				return "", err
-			}
-			target := oldStart - 1
-			if oldStart == 0 {
-				target = 0
-			}
-			if target < cur || target > len(origLines) {
-				return "", fmt.Errorf("hunk out of range")
-			}
-			out = append(out, origLines[cur:target]...)
-			if target > cur {
-				hasOutput = true
-				resultEndsWithNewline = target < len(origLines) || endsWithNewline
-				lastHunkLine = 0
-			}
-			cur = target
-			i++
-
-			for i < len(patchLines) && !strings.HasPrefix(patchLines[i], "@@") {
-				hl := patchLines[i]
-				if hl == "" {
-					// Trailing newline in diff; ignore.
-					i++
-					continue
-				}
-				switch hl[0] {
-				case ' ':
-					want := hl[1:]
-					if cur >= len(origLines) || origLines[cur] != want {
-						return "", fmt.Errorf("hunk context mismatch")
-					}
-					out = append(out, want)
-					cur++
-					hasOutput = true
-					resultEndsWithNewline = true
-					lastHunkLine = ' '
-				case '-':
-					want := hl[1:]
-					if cur >= len(origLines) || origLines[cur] != want {
-						return "", fmt.Errorf("hunk delete mismatch")
-					}
-					cur++
-					lastHunkLine = '-'
-				case '+':
-					out = append(out, hl[1:])
-					hasOutput = true
-					resultEndsWithNewline = true
-					lastHunkLine = '+'
-				case '\\':
-					if lastHunkLine == '+' || lastHunkLine == ' ' {
-						resultEndsWithNewline = false
-					}
-				default:
-					return "", fmt.Errorf("invalid patch line")
-				}
-				i++
-			}
-			continue
-		}
-		i++
-	}
-
-	remaining := origLines[cur:]
-	out = append(out, remaining...)
-	if len(remaining) > 0 {
-		hasOutput = true
-		resultEndsWithNewline = endsWithNewline
-	}
-	res := strings.Join(out, "\n")
-	if hasOutput && resultEndsWithNewline {
-		res += "\n"
-	}
-	return res, nil
-}
-
-func parseUnifiedHunkOldStart(header string) (int, error) {
-	// Expect: @@ -oldStart,oldCount +newStart,newCount @@
-	fields := strings.Fields(header)
-	if len(fields) < 3 {
-		return 0, fmt.Errorf("invalid hunk header")
-	}
-	rng := fields[1] // "-1,3"
-	rng = strings.TrimPrefix(rng, "-")
-	parts := strings.SplitN(rng, ",", 2)
-	n, err := strconv.Atoi(parts[0])
-	if err != nil {
-		return 0, fmt.Errorf("invalid hunk range")
-	}
-	return n, nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

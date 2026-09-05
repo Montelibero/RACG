@@ -13,7 +13,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
-	"github.com/itolstov/racg/internal/httpapi"
+	"github.com/itolstov/racg/internal/application"
 	"github.com/itolstov/racg/internal/outputfilter"
 	"github.com/itolstov/racg/internal/rules"
 	"github.com/itolstov/racg/internal/store"
@@ -25,8 +25,8 @@ type ServeUIConfig struct {
 	DBPath   string
 	Profile  string
 	Hostname string
-	API      *httpapi.API
-	Store    *store.Store
+	API      application.InteractiveBackend
+	Store    application.HistoryReader
 	ExitFunc func()
 }
 
@@ -123,8 +123,8 @@ func RunServeUI(ctx context.Context, cfg ServeUIConfig) error {
 }
 
 type uiState struct {
-	api   *httpapi.API
-	store *store.Store
+	api   application.InteractiveBackend
+	store application.HistoryReader
 	app   *tview.Application
 
 	mu sync.Mutex
@@ -182,7 +182,7 @@ type uiState struct {
 	overlayClose func()
 }
 
-func newUIState(api *httpapi.API, st *store.Store) *uiState {
+func newUIState(api application.InteractiveBackend, st application.HistoryReader) *uiState {
 	s := &uiState{api: api, store: st, follow: true, page: "pairing", showAllJobs: true, activeMainTab: "server", pairingAutoSwitch: true, jobMode: "combined", serverUpdate: serverUpdateStatus{Phase: updateChecking}}
 	if api != nil {
 		s.decisionRunner = api.DecideForTUI
@@ -627,7 +627,7 @@ func jobFollowLabel(follow bool) string {
 	return "Follow: off"
 }
 
-func jobHeaderText(info httpapi.TUIRequestInfo, follow bool) string {
+func jobHeaderText(info application.RequestInfo, follow bool) string {
 	exitCode := ""
 	if info.Result != nil {
 		exitCode = fmt.Sprintf("  exit_code=%d  duration_ms=%d", info.Result.ExitCode, info.Result.DurationMs)
@@ -1167,7 +1167,7 @@ func (s *uiState) refreshJobs() {
 	s.jobListSig = sig
 }
 
-func jobListSignature(showAll bool, items []httpapi.TUIRequest) string {
+func jobListSignature(showAll bool, items []application.RequestSummary) string {
 	var b strings.Builder
 	if showAll {
 		b.WriteString("all")
@@ -1761,7 +1761,7 @@ func (s *uiState) openRuleScopeOverlay(app *tview.Application, pages *tview.Page
 	}
 }
 
-func jobViewText(mode string, info httpapi.TUIRequestInfo, combined string, liveTruncated bool) string {
+func jobViewText(mode string, info application.RequestInfo, combined string, liveTruncated bool) string {
 	if mode == "" {
 		mode = "combined"
 	}
@@ -1806,7 +1806,7 @@ func jobViewText(mode string, info httpapi.TUIRequestInfo, combined string, live
 	}
 }
 
-func ruleScopeHelpText(candidates []httpapi.RuleScopeCandidate) string {
+func ruleScopeHelpText(candidates []application.RuleScopeCandidate) string {
 	if len(candidates) > 0 {
 		const wildcardHelp = " Edit the path; * creates a glob, while a leading = keeps it literal."
 		switch candidates[0].OpType {
@@ -2011,7 +2011,7 @@ func manualRuleMatchOptions(opType string) []string {
 	return []string{"exact", "prefix", "glob"}
 }
 
-func manualRuleSessionLabel(sess httpapi.TUIRuleSession) string {
+func manualRuleSessionLabel(sess application.RuleSession) string {
 	clientID := strings.TrimSpace(sess.ClientID)
 	if clientID == "" {
 		clientID = "unknown-client"
@@ -2089,7 +2089,7 @@ func (s *uiState) openManualRuleOverlay(app *tview.Application, pages *tview.Pag
 		}
 	}
 	save := func() {
-		input := httpapi.ManualRuleInput{
+		input := application.ManualRuleInput{
 			Source: source, SessionID: selectedSessionID, OpType: selectedOp,
 			Match: selectedMatch, Pattern: scopeInput.GetText(),
 		}
@@ -2420,7 +2420,7 @@ func buildHistoryPage(app *tview.Application, pages *tview.Pages, s *uiState, cf
 	return root
 }
 
-func renderSessionHistoryText(st *store.Store, sess store.Session) string {
+func renderSessionHistoryText(st application.HistoryReader, sess store.Session) string {
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("session_id: %s\n", sess.ID))
 	b.WriteString(fmt.Sprintf("started_at: %s\n", sess.StartedAt.UTC().Format(time.RFC3339)))
