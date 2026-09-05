@@ -174,3 +174,13 @@ Root/serve help, README, quickstart, OpenAPI and the repository client skill doc
 Progress is committed locally by completed task; publication still requires an explicit user request.
 
 Verification: full tests, race tests, vet, Linux amd64/arm64 static builds and root/serve help checks passed with Go 1.22.2. Latest preserved graph snapshot: `.codespaces/decision-fix-map.qZp0RR/belief_map.sexp` (90 Go files, 170 edges, 645 entities), with the prior incremental cache copied alongside it.
+
+### Shared local decision policy
+
+- Extracted the existing exact-rule construction, risk flags and dangerous-rule checks into `application/local_policy.go`, preserving their behavior. HTTP compatibility wrappers delegate to the shared implementation.
+- Added `PlanLocalDecision`: prepares a trusted local decision and reusable rules without HTTP, SQLite, queue mutation, events or execution. Existing interactive decisions now use this policy. Caller-owned command/path overrides are copied so later UI input mutation cannot silently change a prepared rule.
+- This is not service authorization: the plan must never be trusted when supplied by a broker. Signature/device verification, durable decision consumption and authoritative request storage remain separate, unfinished work.
+- Tests cover all existing actions, invalid actions, dangerous operations and broad rules, the existing dangerous-always option, exact path rules, one-shot decisions ignoring reusable scopes, preserved no-rule fallback and owned input data. Existing integration tests retain local approval, execution, rule persistence and the HTTP decision prohibition.
+- Full tests, race tests, vet and Linux amd64/arm64 static builds passed with Go 1.22.2. No public command or protocol behavior changed.
+- Latest graph: `.codespaces/local-policy-map.4C2eHP/belief_map.sexp` (93 Go files, 180 edges, 654 entities). Earlier graphs and pre-build cache are retained. Graph inspection confirms the new policy has no HTTP dependency.
+- Next extraction: authoritative request state and transactional decision persistence. Existing interactive persistence errors are still ignored in parts of the legacy lifecycle; this behavior must not be inherited by the new service authority.
