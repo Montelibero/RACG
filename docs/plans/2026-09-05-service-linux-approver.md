@@ -9,6 +9,7 @@ Status: file execution extracted; shared UI contracts and signed protocol primit
 - Direct connectivity through existing Tailscale; no relay or Telegram dependency in the first release.
 - Preserve standalone `racg serve`: manual SSH launch, existing TUI, pairing, rules, profiles, transfers, results and shutdown behavior. No service installation, device enrollment or Tailscale requirement for this mode.
 - Keep the agent CLI and operation semantics shared across both modes.
+- Service agents are registered once through trusted SSH administration with a permanent key until explicit revocation/rotation. Service restart requires no new pairing. This credential authorizes request submission, never approval. The user confirmed this onboarding model; interactive pairing remains unchanged.
 - Desktop: multiple servers, background connection, sound, notifications, request details, decisions and results. Tray support must be optional.
 - Telegram notifications are a later stage. They do not grant execution authority.
 - No arbitrary new request, server or device caps. Protocol safety requirements must be explained and distinguished from product policy.
@@ -210,3 +211,13 @@ Verification: full tests, race tests, vet, Linux amd64/arm64 static builds and r
 - Tests cover command/display mutation, unknown/revoked/rotated/wrong keys, cross-request decisions, expiry, conflicting decisions, database rollback, actual database reopen and server identity mismatch.
 - No live service or execution entry point is connected. Composition must still enforce private root-owned database/key/socket storage and single-process ownership, authenticate agent identity before request admission, freeze all staged bytes, implement durable execution state and clock rollback handling, and never replay uncertain executions.
 - Full race tests and vet passed. Latest graph: `.codespaces/authority-map.4Z5Vcu/belief_map.sexp` (100 files, 238 edges, 676 entities); prior snapshots retained.
+
+### Persistent agent credentials and authenticated admission
+
+- Added a separate authority-owned agent registry with trusted enrollment, rotation and revocation. No agent entry grants approver permissions, even when an agent tries an approver's device ID.
+- Added domain-separated Ed25519 submission signatures binding server identity, agent identity, exact operation bytes, a fresh retry nonce and sender-chosen delivery expiry. The agent key has no automatic expiry; delivery expiry applies only to an individual message.
+- Authority admission verifies the current registered key and revocation itself, rather than trusting a broker-provided identity. Service requests have no broker-supplied session label.
+- A submission nonce and the resulting pending request are committed in one transaction. Identical retries return the same signed envelope, including after database reopen; changed content under the same nonce is rejected. Failed storage leaves no orphan request.
+- Tests cover permanent enrollment across reopen, concurrent retries, nonce/content changes, all signed field tampering, expiry, revocation, rotation, separate agent/approver authority, signature domain separation and database rollback.
+- Still internal only: trusted SSH CLI enrollment, key-file protection, operation/file admission, broker transport and execution composition remain to be wired. A delivery-expired message needs authenticated inspection/recovery rather than blind creation of another request.
+- Full race tests and vet passed. Latest preserved graph: `.codespaces/agent-admission-map.g1OSA6/belief_map.sexp` (104 files, 244 edges, 690 entities).
