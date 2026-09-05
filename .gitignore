@@ -2,3 +2,7 @@
 racg.db
 .belief_map.sexp
 .belief_map_cache.json
+belief_map.sexp
+.belief-map/
+.codespaces/
+.codespaces-cache/
