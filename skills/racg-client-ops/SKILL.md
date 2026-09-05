@@ -9,6 +9,8 @@ Use RACG when command execution must go through a human-approved gateway instead
 
 ## Core Workflow
 
+On HTTP 500 `DECISION_PERSISTENCE_FAILED`, retain `error.request_id`: automatic approval failed, but the request exists and remains pending. Ask the operator to fix server storage and review that request in TUI, then resume with `racg request wait <id>`; do not resubmit.
+
 If a manual decision cannot be persisted, the server leaves the request pending without applying new rules or dispatching execution. Ask the operator to resolve the storage error shown in TUI; do not resubmit the operation as a workaround.
 
 Manual approval and denial are local to the server TUI. Agent tokens cannot approve or deny requests over HTTP: the legacy `POST /v1/requests/{id}/decision` endpoint returns `403 REMOTE_DECISION_DISABLED`. Do not retry it or attempt self-approval; submit and wait for the operator. Existing authorized rules may still auto-approve matching requests. Signed remote approval is not yet available. This protection requires an updated, restarted server, not just an updated client.

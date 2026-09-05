@@ -105,6 +105,7 @@ approval:
   Agent tokens cannot approve or deny requests over HTTP (403 REMOTE_DECISION_DISABLED).
   Existing authorized rules may still auto-approve matching requests.
   Manual decisions are applied only after their audit transaction is saved.
+  DECISION_PERSISTENCE_FAILED leaves an existing request pending: review its ID in TUI, do not resubmit.
 
 quick start:
   sudo racg serve -listen-addr 127.0.0.1 -port 8777

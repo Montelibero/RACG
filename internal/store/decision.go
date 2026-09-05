@@ -25,7 +25,7 @@ func (s *Store) CommitPendingDecision(ctx context.Context, d Decision, persisten
 	switch d.Decision {
 	case "DENY":
 		status = "DENIED"
-	case "ALLOW_ONCE", "ALLOW_SESSION", "ALLOW_ALWAYS":
+	case "ALLOW_ONCE", "ALLOW_SESSION", "ALLOW_ALWAYS", "ALLOW_RULE":
 	default:
 		return fmt.Errorf("unsupported decision %q", d.Decision)
 	}

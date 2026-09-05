@@ -44,6 +44,7 @@ func (c *ServeCmd) run(parent context.Context, args []string) int {
 		fmt.Fprintln(c.stderr, "Agent tokens cannot approve or deny requests over HTTP (403 REMOTE_DECISION_DISABLED).")
 		fmt.Fprintln(c.stderr, "Existing authorized rules may still auto-approve matching requests.")
 		fmt.Fprintln(c.stderr, "Manual decisions are applied only after their audit transaction is saved; a storage error leaves the request pending.")
+		fmt.Fprintln(c.stderr, "DECISION_PERSISTENCE_FAILED on automatic approval leaves an existing request pending: review its ID in TUI, do not resubmit.")
 		fs.PrintDefaults()
 	}
 

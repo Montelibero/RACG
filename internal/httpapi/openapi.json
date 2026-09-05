@@ -388,12 +388,14 @@
     "/v1/requests": {
       "post": {
         "summary": "Create approval request",
+        "description": "If automatic approval cannot be persisted, returns HTTP 500 DECISION_PERSISTENCE_FAILED with error.request_id. The existing request remains pending. Resolve server storage and review that ID in TUI; do not resubmit.",
         "security": [{ "bearerAuth": [] }],
         "requestBody": {
           "required": true,
           "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateRequestRequest" } } }
         },
         "responses": {
+          "500": { "description": "DECISION_PERSISTENCE_FAILED: existing request remains pending; error.request_id identifies it. Other internal persistence failures may occur before request creation.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
           "200": {
             "description": "request",
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateRequestResponse" } } }

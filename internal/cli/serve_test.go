@@ -59,7 +59,7 @@ func TestApprovalBoundaryHelp(t *testing.T) {
 		t.Fatalf("help exit=%d", code)
 	}
 	for _, help := range []string{usage(), stderr.String()} {
-		for _, want := range []string{"local to the server TUI", "403 REMOTE_DECISION_DISABLED", "rules may still auto-approve", "audit transaction is saved"} {
+		for _, want := range []string{"local to the server TUI", "403 REMOTE_DECISION_DISABLED", "rules may still auto-approve", "audit transaction is saved", "DECISION_PERSISTENCE_FAILED"} {
 			if !strings.Contains(help, want) {
 				t.Fatalf("help missing %q: %s", want, help)
 			}

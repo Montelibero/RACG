@@ -20,6 +20,8 @@ Security upgrade: older server builds accepted decisions from agent tokens. Upda
 
 ## Local run
 
+Automatic rule approval also requires a committed audit decision. If it cannot be saved, request creation returns HTTP 500 `DECISION_PERSISTENCE_FAILED` with the existing request ID. The request remains pending: resolve the server storage problem and review that ID in TUI; do not resubmit the operation.
+
 Manual TUI decisions are applied only after the status, decision audit and any permanent rules are saved in one transaction. A storage error is shown in TUI and leaves the request pending, without execution or new active rules. Resolve the storage problem before retrying the decision.
 
 ```bash

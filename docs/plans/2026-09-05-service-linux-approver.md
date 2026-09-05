@@ -193,3 +193,11 @@ Verification: full tests, race tests, vet, Linux amd64/arm64 static builds and r
 - Help, README, quickstart, OpenAPI and client skill describe the storage-failure behavior. Full tests/race checks, vet and Linux amd64/arm64 builds passed.
 - Graph: `.codespaces/decision-tx-map.r3g4l0/belief_map.sexp` (96 files, 212 edges, 664 entities), with prior cache preserved.
 - Automatic rule approval and other lifecycle persistence paths still need migration; the new transaction is not yet a service-mode authority.
+
+### Atomic automatic approvals
+
+- Rule approvals now use the same pending-decision transaction. The local adapter resolves operation, identity and matching rules from stored state and serializes with manual TUI decisions. It never overwrites a non-pending request or dispatches it again.
+- Requests become visible in the live queue only after initial persistence succeeds.
+- An automatic-approval storage failure returns HTTP 500 `DECISION_PERSISTENCE_FAILED` with the already-created request ID. It remains pending for operator recovery, without execution. Help and all applicable documentation explain that clients should not resubmit it.
+- Tests inject a SQLite decision-write failure through the real HTTP submission path, verify persisted/live pending state and no execution, then recover storage and deny the same request. Concurrent manual/automatic decisions dispatch once, and a later matching pass is inert.
+- Full race tests and vet passed. Latest preserved graph: `.codespaces/auto-decision-map.8TTXMP/belief_map.sexp` (98 files, 236 edges, 666 entities).

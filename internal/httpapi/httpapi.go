@@ -1117,10 +1117,6 @@ func (a *API) handleRequests(w http.ResponseWriter, r *http.Request, c auth.Clai
 	}
 	respStatus := rec.Status
 
-	a.reqsMu.Lock()
-	a.reqs[id] = rec
-	a.reqsMu.Unlock()
-
 	if a.st != nil {
 		rf, _ := json.Marshal(rec.RiskFlags)
 		if err := a.st.InsertRequest(r.Context(), store.Request{
@@ -1141,6 +1137,10 @@ func (a *API) handleRequests(w http.ResponseWriter, r *http.Request, c auth.Clai
 		}
 	}
 
+	a.reqsMu.Lock()
+	a.reqs[id] = rec
+	a.reqsMu.Unlock()
+
 	a.hub.Publish(events.Event{
 		Type:      "request.created",
 		RequestID: id,
@@ -1151,48 +1151,11 @@ func (a *API) handleRequests(w http.ResponseWriter, r *http.Request, c auth.Clai
 		},
 	})
 
-	// Auto-approve via rules (MVP).
-	if m, ok := a.rules.Match(c.SessionID, req.Op); ok {
-		decidedAt := time.Now().UTC()
-		dec := &decisionRecord{
-			Decision:       "ALLOW_RULE",
-			DecisionSource: "rule",
-			DecidedAt:      decidedAt.Format(time.RFC3339Nano),
-			RuleID:         m.RuleID,
-		}
-		a.reqsMu.Lock()
-		rec2 := a.reqs[id]
-		rec2.Status = "APPROVED"
-		rec2.Decision = dec
-		a.reqs[id] = rec2
-		a.reqsMu.Unlock()
-
-		if a.st != nil {
-			_ = a.st.UpdateRequestStatus(r.Context(), id, "APPROVED")
-			_ = a.st.InsertDecision(r.Context(), store.Decision{
-				RequestID:      id,
-				Decision:       "ALLOW_RULE",
-				DecisionSource: "rule",
-				DecidedAt:      decidedAt,
-				RuleID:         m.RuleID,
-			})
-		}
-
-		respStatus = "APPROVED"
-		a.hub.Publish(events.Event{
-			Type:      "request.decision",
-			RequestID: id,
-			SessionID: c.SessionID,
-			ClientID:  c.ClientID,
-			Data: map[string]any{
-				"decision":        dec.Decision,
-				"decision_source": dec.DecisionSource,
-				"rule_id":         m.RuleID,
-				"status":          "APPROVED",
-			},
-		})
-		// Execute asynchronously.
-		go a.executeApprovedRequest(id, c, req.Op)
+	// Automatic and local TUI decisions share the same pending-state lock.
+	respStatus, err := a.approveByRule(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "DECISION_PERSISTENCE_FAILED", "request remains pending; resolve server storage error and review this request in the TUI: "+err.Error(), id)
+		return
 	}
 
 	resp := map[string]any{"request_id": id, "status": respStatus}

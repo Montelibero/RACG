@@ -25,6 +25,8 @@ Use the skill when an agent should operate through RACG instead of direct shell 
 
 ## 1. Connect
 
+HTTP 500 `DECISION_PERSISTENCE_FAILED` means automatic approval could not be saved, but the request already exists and remains pending. Retain `error.request_id`, ask the operator to fix server storage and review that ID in TUI, and use `racg request wait <id>`. Do not resubmit.
+
 Manual TUI decisions require a successful audit transaction. If the server cannot save a decision, the request remains pending and no new permission or execution is applied. The operator must resolve the storage error before retrying; do not resubmit the operation to work around it.
 
 Inputs needed from the human:
