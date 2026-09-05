@@ -53,6 +53,20 @@ func TestServeReturnsWhenListenPortIsAlreadyInUse(t *testing.T) {
 	}
 }
 
+func TestApprovalBoundaryHelp(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := NewServeCmd(&stdout, &stderr).Run([]string{"--help"}); code != 2 {
+		t.Fatalf("help exit=%d", code)
+	}
+	for _, help := range []string{usage(), stderr.String()} {
+		for _, want := range []string{"local to the server TUI", "403 REMOTE_DECISION_DISABLED", "rules may still auto-approve"} {
+			if !strings.Contains(help, want) {
+				t.Fatalf("help missing %q: %s", want, help)
+			}
+		}
+	}
+}
+
 func TestServeInteractiveLifecycle(t *testing.T) {
 	for _, exit := range []string{"ui-return", "ui-exit", "context-cancel"} {
 		t.Run(exit, func(t *testing.T) {

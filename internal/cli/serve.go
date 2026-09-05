@@ -37,6 +37,14 @@ func (c *ServeCmd) run(parent context.Context, args []string) int {
 
 	fs := flag.NewFlagSet("racg serve", flag.ContinueOnError)
 	fs.SetOutput(c.stderr)
+	fs.Usage = func() {
+		fmt.Fprintln(c.stderr, "usage: racg serve [flags]")
+		fmt.Fprintln(c.stderr, "Start the standalone server and local TUI; no installed service is required.")
+		fmt.Fprintln(c.stderr, "Manual approval and denial are local to the server TUI.")
+		fmt.Fprintln(c.stderr, "Agent tokens cannot approve or deny requests over HTTP (403 REMOTE_DECISION_DISABLED).")
+		fmt.Fprintln(c.stderr, "Existing authorized rules may still auto-approve matching requests.")
+		fs.PrintDefaults()
+	}
 
 	configPath := fs.String("config", "", "path to config.toml")
 	profile := fs.String("profile", "", "server profile name; uses a separate persisted DB/rules file")

@@ -2,6 +2,8 @@
 
 This file is for an automation agent that works with a running `racg serve`.
 
+Manual approval and denial are local to the server TUI. Agent tokens cannot approve or deny requests over HTTP: `POST /v1/requests/{id}/decision` returns `403 REMOTE_DECISION_DISABLED`. Submit requests and wait for the operator; existing authorized rules may still auto-approve matching requests. Signed remote approval is not yet available. Older server binaries must be updated and restarted to enforce this boundary; updating the client alone is insufficient.
+
 Prefer the `racg` client commands over raw HTTP. They handle saved auth, request creation, waiting, live output, final logs, and cancel/kill with compact human-readable output.
 
 ## Agent Skill
@@ -389,7 +391,7 @@ Useful endpoints:
 - `POST /v1/requests`
 - `GET /v1/requests`
 - `GET /v1/requests/{id}`
-- `POST /v1/requests/{id}/decision`
+- `POST /v1/requests/{id}/decision` — disabled; returns `403 REMOTE_DECISION_DISABLED` for authenticated clients. Use the server TUI for manual approval/denial.
 - `POST /v1/requests/{id}/kill`
 - `GET /v1/requests/{id}/logs/live`
 - `GET /v1/requests/{id}/logs/stdout`

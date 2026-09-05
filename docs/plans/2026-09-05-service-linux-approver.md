@@ -1,6 +1,6 @@
 # RACG service mode and Linux approver
 
-Status: file execution extracted; shared UI contracts and signed protocol primitives added. Service mode and desktop approver are not implemented. Paused for a legacy API authorization compatibility decision (see below). Baseline inspected: `a1fda41`.
+Status: file execution extracted; shared UI contracts and signed protocol primitives added. Service mode and desktop approver are not implemented. User authorized closing the legacy HTTP decision endpoint; it now rejects agent decisions while local TUI decisions remain available. Baseline inspected: `a1fda41`.
 
 ## Agreed scope
 
@@ -159,7 +159,7 @@ Fresh graph: `.codespaces/verified-map.UKga2P/belief_map.sexp` (79 Go files, 145
 - Full race tests (including all packages), vet and static Linux amd64/arm64 builds passed on Go 1.22.2.
 - Latest graph: `.codespaces/core-approval-map.XwZ1iJ/belief_map.sexp` (90 Go files, 170 edges, 643 entities); prior maps and a pre-build incremental cache snapshot are retained.
 
-### Decision required: existing client token can approve its own requests
+### Resolved: legacy client token self-approval
 
 The baseline public endpoint `POST /v1/requests/{id}/decision` calls `handleDecision` under the same bearer authentication used by the agent. There is no distinct approver role. This behavior exists at baseline HEAD `a1fda41` and is documented in OpenAPI; it was not introduced by this refactor.
 
@@ -167,4 +167,10 @@ A local diagnostic using the public handlers, no TUI decision and no preloaded r
 
 Recommended compatibility decision: preserve manual `racg serve` and its local TUI, but stop accepting approval decisions authenticated only by an agent token. Remove/disable the legacy HTTP decision path or replace its authorization with a distinct trusted approver mechanism. Update help, quickstart, OpenAPI and affected tests in the same task. Ordinary agent submission/wait/result workflows and local TUI approval should remain available.
 
-This changes an existing public API and conflicts with an unqualified interpretation of preserving all legacy behavior. User direction is needed before choosing that compatibility boundary. No fix to this endpoint has been applied yet. Earlier conversational assurances that a stolen client token could only enqueue work were incorrect.
+The user explicitly authorized closing this endpoint. Authenticated POST requests now return `403 REMOTE_DECISION_DISABLED` without invoking decision logic, parsing approval bodies or creating rules. The old HTTP decision handler is removed. Regression tests cover all four actions with the requesting client's token and a different client's token, unchanged pending state, no decision/rule persistence, authentication and method errors, and retained local TUI denial. Existing execution, audit and automatic-rule tests now make manual decisions through the trusted local TUI interface.
+
+Root/serve help, README, quickstart, OpenAPI and the repository client skill document the boundary. Earlier conversational assurances that a stolen client token could only enqueue work were incorrect. Previously deployed server binaries remain affected until replaced and restarted. No deployed server was changed.
+
+Progress is committed locally by completed task; publication still requires an explicit user request.
+
+Verification: full tests, race tests, vet, Linux amd64/arm64 static builds and root/serve help checks passed with Go 1.22.2. Latest preserved graph snapshot: `.codespaces/decision-fix-map.qZp0RR/belief_map.sexp` (90 Go files, 170 edges, 645 entities), with the prior incremental cache copied alongside it.

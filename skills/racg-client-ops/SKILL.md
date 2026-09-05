@@ -9,6 +9,8 @@ Use RACG when command execution must go through a human-approved gateway instead
 
 ## Core Workflow
 
+Manual approval and denial are local to the server TUI. Agent tokens cannot approve or deny requests over HTTP: the legacy `POST /v1/requests/{id}/decision` endpoint returns `403 REMOTE_DECISION_DISABLED`. Do not retry it or attempt self-approval; submit and wait for the operator. Existing authorized rules may still auto-approve matching requests. Signed remote approval is not yet available. This protection requires an updated, restarted server, not just an updated client.
+
 1. Resolve server auth:
    - If the user provides a pairing code, run `racg login --host <url> --pairing-code <code>`.
    - Treat a client/server version warning from `racg login` as a recommendation, not a login failure. Ask the user before updating either side.

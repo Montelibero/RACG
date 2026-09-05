@@ -21,6 +21,12 @@ func TestOpenAPIDocumentCoversCoreEndpoints(t *testing.T) {
 		t.Fatalf("missing paths")
 	}
 
+	decision := paths["/v1/requests/{request_id}/decision"].(map[string]any)["post"].(map[string]any)
+	responses := decision["responses"].(map[string]any)
+	if decision["deprecated"] != true || responses["403"] == nil || responses["200"] != nil {
+		t.Fatalf("legacy decision endpoint must be documented as disabled: %v", decision)
+	}
+
 	wantPaths := []string{
 		"/healthz",
 		"/openapi.json",

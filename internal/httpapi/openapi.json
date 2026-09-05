@@ -449,22 +449,16 @@
     },
     "/v1/requests/{request_id}/decision": {
       "post": {
-        "summary": "Decide (approve/deny) request",
+        "summary": "Disabled legacy decision endpoint",
+        "description": "Manual approval and denial are local to the server TUI. Agent tokens never grant decision authority. Authenticated POST requests return 403 REMOTE_DECISION_DISABLED without changing request state or rules. Signed remote approval is not yet available.",
+        "deprecated": true,
         "security": [{ "bearerAuth": [] }],
         "parameters": [
           { "name": "request_id", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
-        "requestBody": {
-          "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DecisionRequest" } } }
-        },
         "responses": {
-          "200": { "description": "ok", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OKResponse" } } } },
-          "400": { "description": "bad request", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
           "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
-          "403": { "description": "forbidden", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
-          "404": { "description": "not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
-          "409": { "description": "conflict", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+          "403": { "description": "REMOTE_DECISION_DISABLED: approve or deny in the server TUI", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
         }
       }
     },

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
@@ -734,14 +735,8 @@ func TestDecisionDeny(t *testing.T) {
 	}
 	_ = json.Unmarshal(createRw.Body.Bytes(), &created)
 
-	decBody := []byte(`{"decision":"DENY"}`)
-	decReq := httptest.NewRequest(http.MethodPost, "http://example/v1/requests/"+created.RequestID+"/decision", bytes.NewReader(decBody))
-	decReq.Header.Set("Authorization", "Bearer "+openResp.SessionToken)
-	decReq.Header.Set("Content-Type", "application/json")
-	decRw := httptest.NewRecorder()
-	api.Handler().ServeHTTP(decRw, decReq)
-	if decRw.Code != 200 {
-		t.Fatalf("dec status=%d body=%s", decRw.Code, decRw.Body.String())
+	if err := api.DecideForTUI(created.RequestID, "DENY"); err != nil {
+		t.Fatal(err)
 	}
 
 	getReq := httptest.NewRequest(http.MethodGet, "http://example/v1/requests/"+created.RequestID, nil)
@@ -755,6 +750,101 @@ func TestDecisionDeny(t *testing.T) {
 	_ = json.Unmarshal(getRw.Body.Bytes(), &rec)
 	if rec["status"] != "DENIED" {
 		t.Fatalf("status=%v", rec["status"])
+	}
+}
+
+func TestAgentTokenCannotDecideRequests(t *testing.T) {
+	ctx := context.Background()
+
+	cfg := config.Defaults()
+	clk := auth.NewFakeClock(time.Unix(1000, 0).UTC())
+	pair := auth.NewPairing(6, 3*time.Minute, clk)
+	tm := auth.NewTokenManager(clk)
+
+	st, err := store.Open("file::memory:?cache=shared")
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer st.Close()
+	if err := st.Migrate(ctx); err != nil {
+		t.Fatalf("store.Migrate: %v", err)
+	}
+
+	api := New(cfg, WithPairing(pair), WithTokenManager(tm), WithStore(st))
+
+	open := []byte(`{"client_id":"codex-home","pairing_code":"` + pair.Code() + `"}`)
+	rwOpen := httptest.NewRecorder()
+	api.Handler().ServeHTTP(rwOpen, httptest.NewRequest(http.MethodPost, "http://example/v1/session/open", bytes.NewReader(open)))
+	if rwOpen.Code != 200 {
+		t.Fatalf("open status=%d body=%s", rwOpen.Code, rwOpen.Body.String())
+	}
+	var openResp struct {
+		SessionToken string `json:"session_token"`
+	}
+	_ = json.Unmarshal(rwOpen.Body.Bytes(), &openResp)
+
+	createBody := []byte(`{"op":{"type":"cmd.run","payload":{"argv":["/bin/echo","hi"]}}}`)
+	createReq := httptest.NewRequest(http.MethodPost, "http://example/v1/requests", bytes.NewReader(createBody))
+	createReq.Header.Set("Authorization", "Bearer "+openResp.SessionToken)
+	createReq.Header.Set("Content-Type", "application/json")
+	createRw := httptest.NewRecorder()
+	api.Handler().ServeHTTP(createRw, createReq)
+	if createRw.Code != 200 {
+		t.Fatalf("create status=%d body=%s", createRw.Code, createRw.Body.String())
+	}
+	var created struct {
+		RequestID string `json:"request_id"`
+	}
+	_ = json.Unmarshal(createRw.Body.Bytes(), &created)
+
+	otherToken, _ := tm.Issue("other-session", "other-client", time.Hour)
+	for _, token := range []string{openResp.SessionToken, otherToken} {
+		for _, decision := range []string{"ALLOW_ONCE", "ALLOW_SESSION", "ALLOW_ALWAYS", "DENY"} {
+			req := httptest.NewRequest(http.MethodPost, "/v1/requests/"+created.RequestID+"/decision", strings.NewReader(`{"decision":"`+decision+`"}`))
+			req.Header.Set("Authorization", "Bearer "+token)
+			rw := httptest.NewRecorder()
+			api.Handler().ServeHTTP(rw, req)
+			if rw.Code != http.StatusForbidden || !strings.Contains(rw.Body.String(), "REMOTE_DECISION_DISABLED") {
+				t.Fatalf("%s: status=%d body=%s", decision, rw.Code, rw.Body.String())
+			}
+			info, ok := api.GetRequestInfoForTUI(created.RequestID)
+			if !ok || info.Status != "PENDING_APPROVAL" || info.Decision != nil || info.Result != nil {
+				t.Fatalf("remote decision changed request: %+v", info)
+			}
+			if _, err := st.GetDecision(ctx, created.RequestID); err != sql.ErrNoRows {
+				t.Fatalf("persisted decision: %v", err)
+			}
+			storedRules, err := st.ListRules(ctx, 100)
+			if err != nil || len(storedRules) != 0 || len(api.ListSessionRulesForTUI()) != 0 {
+				t.Fatalf("remote decision created rules: %v %v", storedRules, err)
+			}
+		}
+	}
+	for _, tc := range []struct {
+		method, token, body string
+		want                int
+	}{
+		{http.MethodPost, "", `{"decision":"ALLOW_ONCE"}`, http.StatusUnauthorized},
+		{http.MethodPost, "invalid", `{"decision":"ALLOW_ONCE"}`, http.StatusUnauthorized},
+		{http.MethodGet, openResp.SessionToken, "", http.StatusMethodNotAllowed},
+		{http.MethodPost, openResp.SessionToken, "malformed", http.StatusForbidden},
+	} {
+		req := httptest.NewRequest(tc.method, "/v1/requests/"+created.RequestID+"/decision", strings.NewReader(tc.body))
+		if tc.token != "" {
+			req.Header.Set("Authorization", "Bearer "+tc.token)
+		}
+		rw := httptest.NewRecorder()
+		api.Handler().ServeHTTP(rw, req)
+		if rw.Code != tc.want {
+			t.Fatalf("status=%d want=%d body=%s", rw.Code, tc.want, rw.Body.String())
+		}
+	}
+	if err := api.DecideForTUI(created.RequestID, "DENY"); err != nil {
+		t.Fatal(err)
+	}
+	info, _ := api.GetRequestInfoForTUI(created.RequestID)
+	if info.Status != "DENIED" {
+		t.Fatalf("local TUI decision failed: %+v", info)
 	}
 }
 
@@ -802,14 +892,8 @@ func TestDecisionPersistsDecisionInSQLite(t *testing.T) {
 	}
 	_ = json.Unmarshal(createRw.Body.Bytes(), &created)
 
-	decBody := []byte(`{"decision":"ALLOW_ONCE"}`)
-	decReq := httptest.NewRequest(http.MethodPost, "http://example/v1/requests/"+created.RequestID+"/decision", bytes.NewReader(decBody))
-	decReq.Header.Set("Authorization", "Bearer "+openResp.SessionToken)
-	decReq.Header.Set("Content-Type", "application/json")
-	decRw := httptest.NewRecorder()
-	api.Handler().ServeHTTP(decRw, decReq)
-	if decRw.Code != 200 {
-		t.Fatalf("dec status=%d body=%s", decRw.Code, decRw.Body.String())
+	if err := api.DecideForTUI(created.RequestID, "ALLOW_ONCE"); err != nil {
+		t.Fatal(err)
 	}
 
 	gotDec, err := st.GetDecision(ctx, created.RequestID)
@@ -1121,14 +1205,8 @@ func TestFSReadExecution(t *testing.T) {
 	}
 	_ = json.Unmarshal(createRw.Body.Bytes(), &created)
 
-	decBody := []byte(`{"decision":"ALLOW_ONCE"}`)
-	decReq := httptest.NewRequest(http.MethodPost, "http://example/v1/requests/"+created.RequestID+"/decision", bytes.NewReader(decBody))
-	decReq.Header.Set("Authorization", "Bearer "+openResp.SessionToken)
-	decReq.Header.Set("Content-Type", "application/json")
-	decRw := httptest.NewRecorder()
-	api.Handler().ServeHTTP(decRw, decReq)
-	if decRw.Code != 200 {
-		t.Fatalf("dec status=%d body=%s", decRw.Code, decRw.Body.String())
+	if err := api.DecideForTUI(created.RequestID, "ALLOW_ONCE"); err != nil {
+		t.Fatal(err)
 	}
 
 	deadline := time.Now().Add(500 * time.Millisecond)
@@ -1195,14 +1273,8 @@ func TestRequestLogsEndpointsRedactByDefaultAndReturnRawWhenRequested(t *testing
 	}
 	_ = json.Unmarshal(createRw.Body.Bytes(), &created)
 
-	decideBody := []byte(`{"decision":"ALLOW_ONCE"}`)
-	decideReq := httptest.NewRequest(http.MethodPost, "http://example/v1/requests/"+created.RequestID+"/decision", bytes.NewReader(decideBody))
-	decideReq.Header.Set("Authorization", "Bearer "+openResp.SessionToken)
-	decideReq.Header.Set("Content-Type", "application/json")
-	decideRw := httptest.NewRecorder()
-	api.Handler().ServeHTTP(decideRw, decideReq)
-	if decideRw.Code != 200 {
-		t.Fatalf("decision status=%d body=%s", decideRw.Code, decideRw.Body.String())
+	if err := api.DecideForTUI(created.RequestID, "ALLOW_ONCE"); err != nil {
+		t.Fatal(err)
 	}
 
 	deadline := time.Now().Add(500 * time.Millisecond)
@@ -1328,14 +1400,8 @@ func TestFSPatchUnifiedExecution(t *testing.T) {
 	}
 	_ = json.Unmarshal(createRw.Body.Bytes(), &created)
 
-	decBody := []byte(`{"decision":"ALLOW_ONCE"}`)
-	decReq := httptest.NewRequest(http.MethodPost, "http://example/v1/requests/"+created.RequestID+"/decision", bytes.NewReader(decBody))
-	decReq.Header.Set("Authorization", "Bearer "+openResp.SessionToken)
-	decReq.Header.Set("Content-Type", "application/json")
-	decRw := httptest.NewRecorder()
-	api.Handler().ServeHTTP(decRw, decReq)
-	if decRw.Code != 200 {
-		t.Fatalf("dec status=%d body=%s", decRw.Code, decRw.Body.String())
+	if err := api.DecideForTUI(created.RequestID, "ALLOW_ONCE"); err != nil {
+		t.Fatal(err)
 	}
 
 	deadline := time.Now().Add(500 * time.Millisecond)
@@ -1426,13 +1492,8 @@ func TestConfSetExecutionUpdatesConfigWithBackup(t *testing.T) {
 	}
 	_ = json.Unmarshal(createRw.Body.Bytes(), &created)
 
-	decReq := httptest.NewRequest(http.MethodPost, "http://example/v1/requests/"+created.RequestID+"/decision", bytes.NewReader([]byte(`{"decision":"ALLOW_ONCE"}`)))
-	decReq.Header.Set("Authorization", "Bearer "+openResp.SessionToken)
-	decReq.Header.Set("Content-Type", "application/json")
-	decRw := httptest.NewRecorder()
-	api.Handler().ServeHTTP(decRw, decReq)
-	if decRw.Code != 200 {
-		t.Fatalf("dec status=%d body=%s", decRw.Code, decRw.Body.String())
+	if err := api.DecideForTUI(created.RequestID, "ALLOW_ONCE"); err != nil {
+		t.Fatal(err)
 	}
 
 	rec := waitRequestTerminalForTest(t, api, openResp.SessionToken, created.RequestID)
@@ -1550,14 +1611,8 @@ func TestAllowAlwaysCreatesPatchRuleAndAutoApprovesNext(t *testing.T) {
 	}
 	_ = json.Unmarshal(createRw1.Body.Bytes(), &created1)
 
-	decBody := []byte(`{"decision":"ALLOW_ALWAYS"}`)
-	decReq := httptest.NewRequest(http.MethodPost, "http://example/v1/requests/"+created1.RequestID+"/decision", bytes.NewReader(decBody))
-	decReq.Header.Set("Authorization", "Bearer "+openResp.SessionToken)
-	decReq.Header.Set("Content-Type", "application/json")
-	decRw := httptest.NewRecorder()
-	api.Handler().ServeHTTP(decRw, decReq)
-	if decRw.Code != 200 {
-		t.Fatalf("dec status=%d body=%s", decRw.Code, decRw.Body.String())
+	if err := api.DecideForTUI(created1.RequestID, "ALLOW_ALWAYS"); err != nil {
+		t.Fatal(err)
 	}
 	waitRequestTerminalForTest(t, api, openResp.SessionToken, created1.RequestID)
 

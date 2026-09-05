@@ -100,6 +100,11 @@ commands:
   sessions   inspect persisted audit sessions
   update     update racg from GitHub Releases
 
+approval:
+  Manual approval and denial are local to the server TUI.
+  Agent tokens cannot approve or deny requests over HTTP (403 REMOTE_DECISION_DISABLED).
+  Existing authorized rules may still auto-approve matching requests.
+
 quick start:
   sudo racg serve -listen-addr 127.0.0.1 -port 8777
   sudo racg serve --profile docker -listen-addr 127.0.0.1 -port 8777

@@ -1593,33 +1593,6 @@ func fileExecutionRecord(startedAt, finishedAt time.Time, res executor.Result) *
 	}
 }
 
-func (a *API) handleDecision(w http.ResponseWriter, r *http.Request, c auth.Claims, requestID string) {
-	var req struct {
-		Decision string `json:"decision"`
-	}
-	if err := decodeJSON(r.Body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "BAD_REQUEST", err.Error(), requestID)
-		return
-	}
-
-	if err := a.decideInternal(r.Context(), requestID, req.Decision, c); err != nil {
-		switch err.Error() {
-		case "REQUEST_NOT_FOUND":
-			writeError(w, http.StatusNotFound, "REQUEST_NOT_FOUND", "request not found", requestID)
-		case "REQUEST_NOT_PENDING":
-			writeError(w, http.StatusConflict, "REQUEST_NOT_PENDING", "request is not pending approval", requestID)
-		case "ALLOW_ALWAYS_NOT_PERMITTED":
-			writeError(w, http.StatusForbidden, "ALLOW_ALWAYS_NOT_PERMITTED", "allow always not permitted for dangerous requests", requestID)
-		case "BAD_REQUEST":
-			writeError(w, http.StatusBadRequest, "BAD_REQUEST", "bad request", requestID)
-		default:
-			writeError(w, http.StatusInternalServerError, "INTERNAL", err.Error(), requestID)
-		}
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
 func (a *API) decideInternal(ctx context.Context, requestID string, decision string, c auth.Claims) error {
 	return a.decideInternalWithRules(ctx, requestID, decision, c, nil)
 }
@@ -2287,7 +2260,9 @@ func (a *API) handleRequestByID(w http.ResponseWriter, r *http.Request, c auth.C
 			writeError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "", "")
 			return
 		}
-		a.handleDecision(w, r, c, id)
+		// Agent bearer tokens confer no decision authority. Keep a rejecting
+		// tombstone for legacy callers; trusted local TUI decisions are separate.
+		writeError(w, http.StatusForbidden, "REMOTE_DECISION_DISABLED", "HTTP decisions are disabled; approve or deny in the server TUI", id)
 		return
 	}
 
