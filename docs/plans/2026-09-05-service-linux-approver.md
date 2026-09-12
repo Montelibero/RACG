@@ -1,6 +1,6 @@
 # RACG service mode and Linux approver
 
-Status: file execution extracted; shared UI contracts, signed protocol primitives, an offline signing preview, an internal authenticated decision-receipt boundary and authenticated decision recovery added. Service mode and the networked desktop approver are not implemented. User authorized closing the legacy HTTP decision endpoint; it now rejects agent decisions while local TUI decisions remain available. Baseline inspected: `a1fda41`.
+Status: file execution extracted; shared UI contracts, signed protocol primitives, an offline signing preview, internal authenticated decision delivery/recovery boundaries and a narrow broker authority transport added. Service mode and the networked desktop approver are not implemented. User authorized closing the legacy HTTP decision endpoint; it now rejects agent decisions while local TUI decisions remain available. Baseline inspected: `a1fda41`.
 
 ## Agreed scope
 
@@ -253,6 +253,14 @@ Verification: full tests, race tests, vet, Linux amd64/arm64 static builds and r
 - The response is a snapshot only. Recovery does not submit another decision, consume a pending request, claim execution or rerun an uncertain/finished job. Tests cover lost-receipt recovery, authenticated absence, another enrolled device, impersonation, revocation, expiry and request-digest mismatch.
 - This remains an internal boundary. Broker transport, service composition, trusted enrollment CLI and desktop UX remain unfinished.
 - Codespaces snapshot: `.codespaces/decision-recovery-map.1789245997/belief_map.sexp` (121 files, 306 edges, 765 entities), earlier maps/cache retained.
+
+### Broker authority transport boundary
+
+- Added `internal/broker` with a versioned, sequential-JSON connection for the only four broker-accessible authority operations: signed agent submission, agent submission lookup, signed decision submission and device decision lookup. The current transport is an injectable stream (tested with an in-memory pipe); there is still no listener, daemon, socket path or deployment.
+- The broker `Authority` interface intentionally has no signing, enrollment, revocation, rules or execution methods. The authority independently authenticates agent/device signatures, verifies pinned server/request identity and durably consumes decisions; broker routing fields and status cannot authorize work.
+- The broker-side client holds no authority signing key. Its round-trip test verifies a server-signed frozen request, rejects broker modification, obtains an authority-signed decision receipt, executes once through the trusted authority in the test composition, recovers the terminal state through device/agent lookup, and confirms an `authority.execute` method is unknown.
+- This is a composition boundary only. Privileged service binaries, Unix-socket ownership/authentication, operation admission, immutable transfer staging, pending-request events, agent result transport, packaging and deployment remain unfinished.
+- Codespaces snapshot: `.codespaces/broker-boundary-map.1789248020/belief_map.sexp` (125 files, 337 edges, 780 entities), earlier maps/cache retained.
 
 ### Desktop build feasibility checkpoint
 
