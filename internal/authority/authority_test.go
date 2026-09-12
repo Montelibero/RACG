@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/itolstov/racg/internal/approval"
+	"github.com/itolstov/racg/internal/executor"
 	_ "modernc.org/sqlite"
 )
 
@@ -219,6 +220,139 @@ func TestSubmitDecisionRejectsInvalidChallengeBeforeConsumption(t *testing.T) {
 	}
 	if _, status, err := a.Request(context.Background(), r.Request.RequestID); err != nil || status != "PENDING_APPROVAL" {
 		t.Fatalf("status=%s err=%v", status, err)
+	}
+}
+
+func TestDecisionLookupRecoversLostReceiptWithoutExecution(t *testing.T) {
+	a, db, server, key, r := authorityFixture(t)
+	ctx := context.Background()
+	q, err := approval.NewDecisionLookup("server", "desktop", r.Request, time.Unix(1300, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	signedLookup, err := approval.SignDecisionLookup(q, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := a.LookupDecision(ctx, signedLookup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := approval.VerifyDecisionLookupResult(q, pending, server.Public().(ed25519.PublicKey), time.Unix(1000, 0)); err != nil {
+		t.Fatal(err)
+	}
+	if !pending.Result.Found || pending.Result.Status != "PENDING_APPROVAL" || pending.Result.DecisionAction != "" {
+		t.Fatalf("pending=%+v", pending.Result)
+	}
+	decision := signedDecision(t, r.Request, key, "ALLOW_ONCE")
+	// Deliberately discard the receipt to model delivery loss after commit.
+	if _, err := a.SubmitDecision(ctx, r.Request.RequestID, decision, make([]byte, 32)); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := a.LookupDecision(ctx, signedLookup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := approval.VerifyDecisionLookupResult(q, recovered, server.Public().(ed25519.PublicKey), time.Unix(1000, 0)); err != nil {
+		t.Fatal(err)
+	}
+	if !recovered.Result.Found || recovered.Result.Status != "AUTHORIZED" || recovered.Result.DecisionAction != "ALLOW_ONCE" || recovered.Result.DecisionDeviceID != "desktop" {
+		t.Fatalf("recovered=%+v", recovered.Result)
+	}
+	if _, err := a.Execute(ctx, r.Request.RequestID, func(context.Context, approval.Request) executor.Result {
+		return executor.Result{Status: "SUCCEEDED"}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	completed, err := a.LookupDecision(ctx, signedLookup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.Result.Status != "SUCCEEDED" || completed.Result.DecisionAction != "ALLOW_ONCE" {
+		t.Fatalf("completed=%+v", completed.Result)
+	}
+	if _, err := a.SubmitDecision(ctx, r.Request.RequestID, decision, make([]byte, 32)); err == nil {
+		t.Fatal("recovery lookup repeated decision")
+	}
+	var executions int
+	if err := db.QueryRow("SELECT count(*) FROM authority_executions").Scan(&executions); err != nil {
+		t.Fatal(err)
+	}
+	if executions != 1 {
+		t.Fatalf("executions=%d", executions)
+	}
+}
+
+func TestDecisionLookupNotFoundIsAuthenticatedAndIsolated(t *testing.T) {
+	a, _, server, _, _ := authorityFixture(t)
+	ctx := context.Background()
+	pub, other, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.EnrollTrusted(ctx, "other", pub); err != nil {
+		t.Fatal(err)
+	}
+	req, err := approval.NewRequest("server", "missing", "agent", "session", []byte(`{"type":"cmd.run"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	q, err := approval.NewDecisionLookup("server", "other", req, time.Unix(1100, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	signed, err := approval.SignDecisionLookup(q, other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := a.LookupDecision(ctx, signed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := approval.VerifyDecisionLookupResult(q, result, server.Public().(ed25519.PublicKey), time.Unix(1000, 0)); err != nil {
+		t.Fatal(err)
+	}
+	if result.Result.Found || result.Result.Request != nil || result.Result.Status != "" {
+		t.Fatalf("unknown result=%+v", result.Result)
+	}
+	signed.Lookup.DeviceID = "desktop"
+	if _, err := a.LookupDecision(ctx, signed); err == nil {
+		t.Fatal("impersonated lookup accepted")
+	}
+}
+
+func TestDecisionLookupRejectsRevokedExpiredOrWrongDigest(t *testing.T) {
+	a, _, _, key, r := authorityFixture(t)
+	ctx := context.Background()
+	q, err := approval.NewDecisionLookup("server", "desktop", r.Request, time.Unix(1100, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	signed, err := approval.SignDecisionLookup(q, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.now = func() time.Time { return time.Unix(1100, 0) }
+	if _, err := a.LookupDecision(ctx, signed); err == nil {
+		t.Fatal("expired lookup accepted")
+	}
+	a.now = func() time.Time { return time.Unix(1000, 0) }
+	if err := a.RevokeTrusted(ctx, "desktop"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.LookupDecision(ctx, signed); err == nil {
+		t.Fatal("revoked device lookup accepted")
+	}
+	if err := a.EnrollTrusted(ctx, "desktop", key.Public().(ed25519.PublicKey)); err != nil {
+		t.Fatal(err)
+	}
+	q.RequestSHA256 = strings.Repeat("0", 64)
+	tampered, err := approval.SignDecisionLookup(q, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.LookupDecision(ctx, tampered); err == nil {
+		t.Fatal("wrong request digest accepted")
 	}
 }
 
