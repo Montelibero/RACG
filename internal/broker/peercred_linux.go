@@ -8,7 +8,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func verifyUnixPeer(conn net.Conn, expected PeerCredentials) error {
+// VerifyUnixPeer requires the exact peer UID and primary GID before protocol
+// processing. Exported for trusted local admin transport in internal/service.
+func VerifyUnixPeer(conn net.Conn, expected PeerCredentials) error {
 	unixConn, ok := conn.(*net.UnixConn)
 	if !ok {
 		return errors.New("authority transport is not a Unix connection")

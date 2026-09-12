@@ -1,6 +1,6 @@
 # RACG service mode and Linux approver
 
-Status: file execution extracted; shared UI contracts, signed protocol primitives, an offline signing preview, internal authenticated decision delivery/recovery boundaries, peer-verified Unix transport and privileged service composition/config added. Service mode and the networked desktop approver are not implemented. User authorized closing the legacy HTTP decision endpoint; it now rejects agent decisions while local TUI decisions remain available. Baseline inspected: `a1fda41`.
+Status: file execution extracted; shared UI contracts, signed protocol primitives, an offline signing preview, internal authenticated decision delivery/recovery boundaries, peer-verified Unix transport, privileged service composition/config and trusted key/admin boundaries added. Service mode and the networked desktop approver are not implemented. User authorized closing the legacy HTTP decision endpoint; it now rejects agent decisions while local TUI decisions remain available. Baseline inspected: `a1fda41`.
 
 ## Agreed scope
 
@@ -278,6 +278,15 @@ Verification: full tests, race tests, vet, Linux amd64/arm64 static builds and r
 - Tests cover defaults, TOML parsing, shared/nested-state rejection, socket-in-state rejection, unsafe/symlinked state, duplicate-process lock rejection, broker connection, authority admission rejection, socket cleanup and restart after lock release. Full race tests, vet and Linux amd64/arm64 builds passed.
 - This remains internal, with no CLI command or deployment artifact. Real operation admission, immutable staging, execution backend wiring, trusted key/enrollment administration, service binaries, events/results and packaging remain unfinished.
 - Codespaces snapshot: `.codespaces/service-composition-map.1789250229/belief_map.sexp` (133 files, 356 edges, 823 entities), earlier maps/cache retained.
+
+### Trusted keys and local administration
+
+- Authority signing identity is generated as standard Ed25519/PKCS#8/PEM and stored under privileged authority state as mode `0600`. Loading rejects symlinks/non-regular files and unsafe modes; creation writes bytes durably to a temporary file and atomically publishes them. This is unattended server identity storage, not the desktop user key's passphrase-protected age format.
+- Added a separate trusted admin Unix socket (mode `0600`, exact admin UID/GID via `SO_PEERCRED`) with a narrow registry protocol: list/rotate/revoke devices and list/rotate/revoke agents. It has no decision, execution or server-signing methods and no bearer token.
+- Added authority administrative listings and explicit rotate methods. Credential rotation is re-enrollment: pending signatures from the old key fail; consumed decisions and running jobs remain their recorded state. Revocation prevents new decisions and lookups.
+- The authority process now serves broker and trusted-admin listeners together and normalizes context cancellation. Tests cover persistent identity, mode/PEM rejection, admin enrollment, signed submission/decision/execution through broker transport, rotation rejection of old device keys, revocation registry state and both peer boundaries.
+- This remains internal with no CLI command, service installer or deployment artifact. A separate server-identity key-rotation/migration design, operation admission, immutable staging, execution backend wiring, desktop transport, packaging and deployment remain unfinished.
+- Codespaces snapshot: `.codespaces/admin-trust-map.1789253064/belief_map.sexp` (137 files, 385 edges, 858 entities), earlier maps/cache retained.
 
 ### Desktop build feasibility checkpoint
 

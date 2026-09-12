@@ -18,11 +18,13 @@ import (
 // AuthorityService owns the privileged database, signing key and listening
 // socket within one process. Close is safe after a failed Open.
 type AuthorityService struct {
-	listener  *broker.AuthorityUnixListener
-	peer      broker.PeerCredentials
-	authority *authority.Authority
-	db        *sql.DB
-	lock      *os.File
+	listener      *broker.AuthorityUnixListener
+	adminListener *broker.AuthorityUnixListener
+	peer          broker.PeerCredentials
+	adminPeer     broker.PeerCredentials
+	authority     *authority.Authority
+	db            *sql.DB
+	lock          *os.File
 }
 
 func OpenAuthority(ctx context.Context, config AuthorityConfig, signingKey ed25519.PrivateKey) (*AuthorityService, error) {
@@ -35,6 +37,14 @@ func OpenAuthority(ctx context.Context, config AuthorityConfig, signingKey ed255
 	lock, err := acquireStateLock(config.LockPath())
 	if err != nil {
 		return nil, err
+	}
+	if len(signingKey) == 0 {
+		signingKey, err = LoadOrCreateAuthoritySigningKey(config.PrivateKeyPath())
+		if err != nil {
+			service := &AuthorityService{lock: lock}
+			service.Close()
+			return nil, err
+		}
 	}
 	service := &AuthorityService{lock: lock}
 	db, err := sql.Open("sqlite", config.DatabasePath())
@@ -58,6 +68,15 @@ func OpenAuthority(ctx context.Context, config AuthorityConfig, signingKey ed255
 		return nil, err
 	}
 	service.peer = broker.PeerCredentials{UID: config.BrokerUID, GID: config.BrokerGID}
+	service.adminListener, err = broker.ListenAdminUnix(config.AdminSocket, broker.PeerCredentials{
+		UID: config.AdminUID,
+		GID: config.AdminGID,
+	})
+	if err != nil {
+		service.Close()
+		return nil, err
+	}
+	service.adminPeer = broker.PeerCredentials{UID: config.AdminUID, GID: config.AdminGID}
 	return service, nil
 }
 
@@ -71,17 +90,42 @@ func (s *AuthorityService) Authority() *authority.Authority {
 }
 
 func (s *AuthorityService) Run(ctx context.Context) error {
-	if s == nil || s.listener == nil || s.authority == nil {
+	if s == nil || s.listener == nil || s.adminListener == nil || s.authority == nil {
 		return errors.New("authority service is not open")
 	}
-	err := broker.ServeAuthorityUnix(ctx, s.listener, broker.PeerCredentials{
-		UID: s.peer.UID,
-		GID: s.peer.GID,
-	}, s.authority)
-	if errors.Is(err, context.Canceled) {
+	results := make(chan error, 2)
+	go func() {
+		results <- broker.ServeAuthorityUnix(ctx, s.listener, s.peer, s.authority)
+	}()
+	go func() {
+		results <- ServeAdminUnix(ctx, s.adminListener, s.adminPeer, s.authority)
+	}()
+	var first error
+	for i := 0; i < 2; i++ {
+		err := <-results
+		if first == nil {
+			first = err
+		}
+		if first != nil {
+			s.closeListeners()
+		}
+	}
+	if errors.Is(first, context.Canceled) {
 		return nil
 	}
-	return err
+	return first
+}
+
+func (s *AuthorityService) closeListeners() {
+	if s == nil {
+		return
+	}
+	if s.listener != nil {
+		_ = s.listener.Close()
+	}
+	if s.adminListener != nil {
+		_ = s.adminListener.Close()
+	}
 }
 
 func (s *AuthorityService) Close() error {
@@ -94,6 +138,12 @@ func (s *AuthorityService) Close() error {
 			closeErr = err
 		}
 		s.listener = nil
+	}
+	if s.adminListener != nil {
+		if err := s.adminListener.Close(); err != nil && closeErr == nil {
+			closeErr = err
+		}
+		s.adminListener = nil
 	}
 	if s.db != nil {
 		if err := s.db.Close(); err != nil && closeErr == nil {

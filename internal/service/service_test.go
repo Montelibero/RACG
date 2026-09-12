@@ -26,8 +26,11 @@ func TestAuthorityServiceExclusiveOwnershipAndBrokerConnection(t *testing.T) {
 	config.Authority.ServerID = "server"
 	config.Authority.StateDir = filepath.Join(root, "authority")
 	config.Authority.SocketPath = filepath.Join(root, "authority.sock")
+	config.Authority.AdminSocket = filepath.Join(root, "authority-admin.sock")
 	config.Authority.BrokerUID = os.Getuid()
 	config.Authority.BrokerGID = os.Getgid()
+	config.Authority.AdminUID = os.Getuid()
+	config.Authority.AdminGID = os.Getgid()
 	config.Broker.StateDir = filepath.Join(root, "broker")
 	config.Broker.SocketPath = config.Authority.SocketPath
 	config.Broker.AuthorityUID = os.Getuid()
@@ -35,17 +38,13 @@ func TestAuthorityServiceExclusiveOwnershipAndBrokerConnection(t *testing.T) {
 	if err := config.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	_, signingKey, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	service, err := OpenAuthority(ctx, config.Authority, signingKey)
+	service, err := OpenAuthority(ctx, config.Authority, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := OpenAuthority(ctx, config.Authority, signingKey); err == nil || !strings.Contains(err.Error(), "already in use") {
+	if _, err := OpenAuthority(ctx, config.Authority, nil); err == nil || !strings.Contains(err.Error(), "already in use") {
 		t.Fatalf("second authority error=%v", err)
 	}
 	serverDone := make(chan error, 1)
@@ -54,6 +53,14 @@ func TestAuthorityServiceExclusiveOwnershipAndBrokerConnection(t *testing.T) {
 	client, closeBroker, err := ConnectBroker(ctx, config.Broker)
 	if err != nil {
 		t.Fatal(err)
+	}
+	admin, closeAdmin, err := ConnectAdmin(ctx, config.Authority)
+	if err != nil {
+		t.Fatal(err)
+	}
+	devices, err := admin.ListDevices(ctx)
+	if err != nil || len(devices) != 0 {
+		t.Fatalf("devices=%+v err=%v", devices, err)
 	}
 	_, key, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -70,6 +77,7 @@ func TestAuthorityServiceExclusiveOwnershipAndBrokerConnection(t *testing.T) {
 	if _, err := client.SubmitAgent(ctx, signed); err == nil || !strings.Contains(err.Error(), "agent is not enrolled") {
 		t.Fatalf("authority response=%v", err)
 	}
+	closeAdmin()
 	closeBroker()
 	cancel()
 	select {
@@ -86,7 +94,7 @@ func TestAuthorityServiceExclusiveOwnershipAndBrokerConnection(t *testing.T) {
 	if _, err := os.Lstat(config.Authority.SocketPath); !os.IsNotExist(err) {
 		t.Fatalf("socket cleanup=%v", err)
 	}
-	reopened, err := OpenAuthority(context.Background(), config.Authority, signingKey)
+	reopened, err := OpenAuthority(context.Background(), config.Authority, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

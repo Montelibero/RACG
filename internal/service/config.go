@@ -18,14 +18,18 @@ const (
 	DefaultAuthorityStateDir = "/var/lib/racg-authority"
 	DefaultBrokerStateDir    = "/var/lib/racg-broker"
 	DefaultAuthoritySocket   = "/run/racg/authority.sock"
+	DefaultAdminSocket       = "/run/racg/authority-admin.sock"
 )
 
 type AuthorityConfig struct {
-	ServerID   string
-	StateDir   string
-	SocketPath string
-	BrokerUID  int
-	BrokerGID  int
+	ServerID    string
+	StateDir    string
+	SocketPath  string
+	AdminSocket string
+	BrokerUID   int
+	BrokerGID   int
+	AdminUID    int
+	AdminGID    int
 }
 
 type BrokerConfig struct {
@@ -42,8 +46,9 @@ type Config struct {
 
 func DefaultAuthorityConfig() AuthorityConfig {
 	return AuthorityConfig{
-		StateDir:   DefaultAuthorityStateDir,
-		SocketPath: DefaultAuthoritySocket,
+		StateDir:    DefaultAuthorityStateDir,
+		SocketPath:  DefaultAuthoritySocket,
+		AdminSocket: DefaultAdminSocket,
 	}
 }
 
@@ -62,6 +67,10 @@ func (c AuthorityConfig) LockPath() string {
 	return filepath.Join(c.StateDir, "authority.lock")
 }
 
+func (c AuthorityConfig) PrivateKeyPath() string {
+	return filepath.Join(c.StateDir, "authority.key")
+}
+
 func (c AuthorityConfig) Validate() error {
 	if c.ServerID == "" {
 		return errors.New("authority server ID required")
@@ -74,6 +83,15 @@ func (c AuthorityConfig) Validate() error {
 	}
 	if c.BrokerUID < 0 || c.BrokerGID < 0 {
 		return errors.New("authority broker UID and GID required")
+	}
+	if err := validateSocketPath(c.AdminSocket); err != nil {
+		return fmt.Errorf("authority admin socket: %w", err)
+	}
+	if c.AdminUID < 0 || c.AdminGID < 0 {
+		return errors.New("authority admin UID and GID required")
+	}
+	if c.SocketPath == c.AdminSocket {
+		return errors.New("broker and admin sockets must be separate")
 	}
 	return nil
 }
@@ -106,6 +124,9 @@ func (c Config) Validate() error {
 	}
 	if pathsOverlap(c.Authority.SocketPath, c.Authority.StateDir) || pathsOverlap(c.Authority.SocketPath, c.Broker.StateDir) {
 		return errors.New("authority socket must not be inside a state directory")
+	}
+	if pathsOverlap(c.Authority.AdminSocket, c.Authority.StateDir) || pathsOverlap(c.Authority.AdminSocket, c.Broker.StateDir) {
+		return errors.New("admin socket must not be inside a state directory")
 	}
 	return nil
 }
@@ -192,6 +213,7 @@ func applyServiceTOML(config *Config, lineNo int, key, value string) error {
 		"authority_server_id":     &config.Authority.ServerID,
 		"authority_state_dir":     &config.Authority.StateDir,
 		"authority_socket":        &config.Authority.SocketPath,
+		"authority_admin_socket":  &config.Authority.AdminSocket,
 		"broker_state_dir":        &config.Broker.StateDir,
 		"broker_authority_socket": &config.Broker.SocketPath,
 	}
@@ -206,6 +228,8 @@ func applyServiceTOML(config *Config, lineNo int, key, value string) error {
 	intTargets := map[string]*int{
 		"authority_broker_uid": &config.Authority.BrokerUID,
 		"authority_broker_gid": &config.Authority.BrokerGID,
+		"authority_admin_uid":  &config.Authority.AdminUID,
+		"authority_admin_gid":  &config.Authority.AdminGID,
 		"broker_authority_uid": &config.Broker.AuthorityUID,
 		"broker_authority_gid": &config.Broker.AuthorityGID,
 	}
