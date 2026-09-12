@@ -1,6 +1,6 @@
 # RACG service mode and Linux approver
 
-Status: file execution extracted; shared UI contracts, signed protocol primitives, an offline signing preview, internal authenticated decision delivery/recovery boundaries and a narrow broker authority transport added. Service mode and the networked desktop approver are not implemented. User authorized closing the legacy HTTP decision endpoint; it now rejects agent decisions while local TUI decisions remain available. Baseline inspected: `a1fda41`.
+Status: file execution extracted; shared UI contracts, signed protocol primitives, an offline signing preview, internal authenticated decision delivery/recovery boundaries, a narrow broker authority transport and peer-verified Unix transport added. Service mode and the networked desktop approver are not implemented. User authorized closing the legacy HTTP decision endpoint; it now rejects agent decisions while local TUI decisions remain available. Baseline inspected: `a1fda41`.
 
 ## Agreed scope
 
@@ -261,6 +261,14 @@ Verification: full tests, race tests, vet, Linux amd64/arm64 static builds and r
 - The broker-side client holds no authority signing key. Its round-trip test verifies a server-signed frozen request, rejects broker modification, obtains an authority-signed decision receipt, executes once through the trusted authority in the test composition, recovers the terminal state through device/agent lookup, and confirms an `authority.execute` method is unknown.
 - This is a composition boundary only. Privileged service binaries, Unix-socket ownership/authentication, operation admission, immutable transfer staging, pending-request events, agent result transport, packaging and deployment remain unfinished.
 - Codespaces snapshot: `.codespaces/broker-boundary-map.1789248020/belief_map.sexp` (125 files, 337 edges, 780 entities), earlier maps/cache retained.
+
+### Peer-verified Unix transport
+
+- Added a Linux Unix-socket authority listener and broker dialer. The listener binds under an unguessable transient name, applies mode `0660` and the configured broker group, then atomically publishes the configured socket path before accepting traffic. Closing removes the published path.
+- Both ends require exact peer UID/GID through Linux `SO_PEERCRED` before protocol bytes are exchanged. The broker dialer also rejects a non-socket or world-writable socket path. Parent-directory ownership remains a composition-root responsibility; the listener does not mutate a directory hierarchy.
+- The listener tracks accepted connections and closes from context cancellation. Tests cover socket permissions, atomic publication/cleanup, wrong peer identity, world-writable rejection, authenticated protocol flow and shutdown.
+- This remains internal: service binaries/configuration, privilege separation, trusted enrollment CLI, operation admission, immutable staging, event/result transports, packaging and deployment remain unfinished.
+- Codespaces snapshot: `.codespaces/unix-transport-map.1789249323/belief_map.sexp` (129 files, 341 edges, 794 entities), earlier maps/cache retained.
 
 ### Desktop build feasibility checkpoint
 
