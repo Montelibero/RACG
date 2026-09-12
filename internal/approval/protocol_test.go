@@ -3,6 +3,7 @@ package approval
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"strings"
 	"testing"
 	"time"
 )
@@ -144,5 +145,71 @@ func TestRequestsHaveFreshChallengesAndOwnOperationBytes(t *testing.T) {
 	op[0] = 'x'
 	if a.Operation[0] != '{' {
 		t.Fatal("request aliases caller-owned operation")
+	}
+}
+
+func TestDecisionReceiptBindsDecisionChallengeAndAuthority(t *testing.T) {
+	serverPub, serverKey, _ := ed25519.GenerateKey(rand.Reader)
+	devicePub, deviceKey, _ := ed25519.GenerateKey(rand.Reader)
+	now := time.Now().UTC()
+	req, err := NewRequest("server", "request", "client", "session", []byte(`{"type":"cmd.run"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decision, err := SignDecision(req, "device", "ALLOW_ONCE", nil, now.Add(time.Minute), deviceKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	challenge := make([]byte, 32)
+	for i := range challenge {
+		challenge[i] = byte(i)
+	}
+	receipt, err := SignDecisionReceipt(req, decision, challenge, serverKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyDecisionReceipt(req, decision, receipt, challenge, devicePub, serverPub, now); err != nil {
+		t.Fatal(err)
+	}
+	if receipt.Receipt.Status != "AUTHORIZED" {
+		t.Fatalf("status=%s", receipt.Receipt.Status)
+	}
+	for _, attack := range []string{"version", "challenge", "server", "request", "digest", "device", "action", "status", "signature"} {
+		t.Run(attack, func(t *testing.T) {
+			changed := receipt
+			switch attack {
+			case "version":
+				changed.Receipt.Version++
+			case "challenge":
+				changed.Receipt.Challenge[0] ^= 1
+			case "server":
+				changed.Receipt.ServerID = "other"
+			case "request":
+				changed.Receipt.RequestID = "other"
+			case "digest":
+				changed.Receipt.RequestSHA256 = strings.Repeat("0", 64)
+			case "device":
+				changed.Receipt.DeviceID = "other"
+			case "action":
+				changed.Receipt.Action = "DENY"
+			case "status":
+				changed.Receipt.Status = "DENIED"
+			case "signature":
+				changed.Signature[0] ^= 1
+			}
+			if err := VerifyDecisionReceipt(req, decision, changed, challenge, devicePub, serverPub, now); err == nil {
+				t.Fatal("invalid receipt accepted")
+			}
+		})
+	}
+	if deny, err := SignDecision(req, "device", "DENY", nil, now.Add(time.Minute), deviceKey); err != nil {
+		t.Fatal(err)
+	} else if receipt, err := SignDecisionReceipt(req, deny, challenge, serverKey); err != nil {
+		t.Fatal(err)
+	} else if receipt.Receipt.Status != "DENIED" {
+		t.Fatalf("deny status=%s", receipt.Receipt.Status)
+	}
+	if _, err := SignDecisionReceipt(req, decision, challenge[:31], serverKey); err == nil {
+		t.Fatal("short challenge accepted")
 	}
 }

@@ -3,6 +3,7 @@
 package approval
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -52,6 +53,121 @@ type Decision struct {
 type SignedDecision struct {
 	Decision  Decision `json:"decision"`
 	Signature []byte   `json:"signature"`
+}
+
+// DecisionReceipt is the authority's authenticated acknowledgement that a
+// signed decision was durably consumed. Challenge is chosen by the delivery
+// caller so a fresh authority signature cannot be replayed as another response.
+type DecisionReceipt struct {
+	Version       int    `json:"version"`
+	ServerID      string `json:"server_id"`
+	RequestID     string `json:"request_id"`
+	RequestSHA256 string `json:"request_sha256"`
+	DeviceID      string `json:"device_id"`
+	Action        string `json:"action"`
+	Status        string `json:"status"`
+	Challenge     []byte `json:"challenge"`
+}
+
+type SignedDecisionReceipt struct {
+	Receipt   DecisionReceipt `json:"receipt"`
+	Signature []byte          `json:"signature"`
+}
+
+func decisionReceiptStatus(action string) (string, error) {
+	switch action {
+	case "ALLOW_ONCE":
+		return "AUTHORIZED", nil
+	case "DENY":
+		return "DENIED", nil
+	default:
+		return "", errors.New("decision does not have a receipt status")
+	}
+}
+
+func SignDecisionReceipt(request Request, decision SignedDecision, challenge []byte, key ed25519.PrivateKey) (SignedDecisionReceipt, error) {
+	if err := validateRequest(request); err != nil {
+		return SignedDecisionReceipt{}, err
+	}
+	if err := validateDecision(decision.Decision); err != nil {
+		return SignedDecisionReceipt{}, err
+	}
+	if len(challenge) != 32 {
+		return SignedDecisionReceipt{}, errors.New("invalid decision receipt challenge")
+	}
+	if len(key) != ed25519.PrivateKeySize {
+		return SignedDecisionReceipt{}, errors.New("invalid authority signing key")
+	}
+	digest, err := RequestDigest(request)
+	if err != nil {
+		return SignedDecisionReceipt{}, err
+	}
+	status, err := decisionReceiptStatus(decision.Decision.Action)
+	if err != nil {
+		return SignedDecisionReceipt{}, err
+	}
+	receipt := DecisionReceipt{
+		Version:       Version,
+		ServerID:      request.ServerID,
+		RequestID:     request.RequestID,
+		RequestSHA256: digest,
+		DeviceID:      decision.Decision.DeviceID,
+		Action:        decision.Decision.Action,
+		Status:        status,
+		Challenge:     append([]byte(nil), challenge...),
+	}
+	data, err := message("decision-receipt", receipt)
+	if err != nil {
+		return SignedDecisionReceipt{}, err
+	}
+	return SignedDecisionReceipt{Receipt: receipt, Signature: ed25519.Sign(key, data)}, nil
+}
+
+// VerifyDecisionReceipt checks both the original device decision and the
+// authority's response. The authority signature authenticates durable
+// acceptance; it does not mean execution started or finished.
+func VerifyDecisionReceipt(request Request, decision SignedDecision, signed SignedDecisionReceipt, challenge []byte, deviceKey, serverKey ed25519.PublicKey, now time.Time) error {
+	if err := validateRequest(request); err != nil {
+		return err
+	}
+	if err := validateDecision(decision.Decision); err != nil {
+		return err
+	}
+	if err := VerifyDecision(request, decision, decision.Decision.DeviceID, deviceKey, now); err != nil {
+		return err
+	}
+	digest, err := RequestDigest(request)
+	if err != nil {
+		return err
+	}
+	status, err := decisionReceiptStatus(decision.Decision.Action)
+	if err != nil {
+		return err
+	}
+	receipt := signed.Receipt
+	switch {
+	case receipt.Version != Version:
+		err = errors.New("unsupported decision receipt version")
+	case len(challenge) != 32 || !bytes.Equal(receipt.Challenge, challenge):
+		err = errors.New("decision receipt challenge mismatch")
+	case receipt.ServerID != request.ServerID || receipt.RequestID != request.RequestID:
+		err = errors.New("decision receipt identity mismatch")
+	case receipt.RequestSHA256 != digest:
+		err = errors.New("decision receipt request digest mismatch")
+	case receipt.DeviceID != decision.Decision.DeviceID || receipt.Action != decision.Decision.Action || receipt.Status != status:
+		err = errors.New("decision receipt decision mismatch")
+	}
+	if err != nil {
+		return err
+	}
+	data, err := message("decision-receipt", receipt)
+	if err != nil {
+		return err
+	}
+	if len(serverKey) != ed25519.PublicKeySize || !ed25519.Verify(serverKey, data, signed.Signature) {
+		return errors.New("invalid authority receipt signature")
+	}
+	return nil
 }
 
 func NewRequest(serverID, requestID, clientID, sessionID string, operation []byte) (Request, error) {

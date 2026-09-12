@@ -178,6 +178,50 @@ func TestAuthorityFailedCommitCanBeRetried(t *testing.T) {
 	}
 }
 
+func TestSubmitDecisionReturnsAuthenticatedReceipt(t *testing.T) {
+	for _, action := range []string{"ALLOW_ONCE", "DENY"} {
+		t.Run(action, func(t *testing.T) {
+			a, _, server, key, r := authorityFixture(t)
+			ctx := context.Background()
+			decision := signedDecision(t, r.Request, key, action)
+			challenge := make([]byte, 32)
+			for i := range challenge {
+				challenge[i] = byte(9 - i)
+			}
+			receipt, err := a.SubmitDecision(ctx, r.Request.RequestID, decision, challenge)
+			if err != nil {
+				t.Fatal(err)
+			}
+			devicePub := key.Public().(ed25519.PublicKey)
+			serverPub := server.Public().(ed25519.PublicKey)
+			if err := approval.VerifyDecisionReceipt(r.Request, decision, receipt, challenge, devicePub, serverPub, time.Unix(1000, 0)); err != nil {
+				t.Fatal(err)
+			}
+			want := "AUTHORIZED"
+			if action == "DENY" {
+				want = "DENIED"
+			}
+			if receipt.Receipt.Status != want {
+				t.Fatalf("status=%s want=%s", receipt.Receipt.Status, want)
+			}
+			if _, err := a.SubmitDecision(ctx, r.Request.RequestID, decision, challenge); err == nil {
+				t.Fatal("replayed decision accepted")
+			}
+		})
+	}
+}
+
+func TestSubmitDecisionRejectsInvalidChallengeBeforeConsumption(t *testing.T) {
+	a, _, _, key, r := authorityFixture(t)
+	decision := signedDecision(t, r.Request, key, "ALLOW_ONCE")
+	if _, err := a.SubmitDecision(context.Background(), r.Request.RequestID, decision, make([]byte, 31)); err == nil {
+		t.Fatal("short challenge accepted")
+	}
+	if _, status, err := a.Request(context.Background(), r.Request.RequestID); err != nil || status != "PENDING_APPROVAL" {
+		t.Fatalf("status=%s err=%v", status, err)
+	}
+}
+
 func TestAuthorityConflictingDecisions(t *testing.T) {
 	a, _, _, key, r := authorityFixture(t)
 	results := make(chan error, 2)

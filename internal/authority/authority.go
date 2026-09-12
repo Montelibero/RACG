@@ -146,6 +146,21 @@ func (a *Authority) Request(ctx context.Context, id string) (approval.SignedRequ
 	return signed, status, nil
 }
 
+// SubmitDecision is the local composition boundary for a transport adapter;
+// it is not a network listener. It durably consumes the first valid decision
+// and returns an authority-signed receipt. A returned receipt means the
+// decision was stored, not that execution started or completed.
+func (a *Authority) SubmitDecision(ctx context.Context, id string, decision approval.SignedDecision, challenge []byte) (approval.SignedDecisionReceipt, error) {
+	if len(challenge) != 32 {
+		return approval.SignedDecisionReceipt{}, errors.New("invalid decision receipt challenge")
+	}
+	request, err := a.Consume(ctx, id, decision)
+	if err != nil {
+		return approval.SignedDecisionReceipt{}, err
+	}
+	return approval.SignDecisionReceipt(request, decision, challenge, a.key)
+}
+
 // Consume verifies an enrolled, currently non-revoked device against the
 // authority's stored bytes, then durably consumes that request. Only the first
 // single-shot decision succeeds, including across restarts.

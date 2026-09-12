@@ -1,6 +1,6 @@
 # RACG service mode and Linux approver
 
-Status: file execution extracted; shared UI contracts, signed protocol primitives and an offline signing preview added. Service mode and the networked desktop approver are not implemented. User authorized closing the legacy HTTP decision endpoint; it now rejects agent decisions while local TUI decisions remain available. Baseline inspected: `a1fda41`.
+Status: file execution extracted; shared UI contracts, signed protocol primitives, an offline signing preview and an internal authenticated decision-receipt boundary added. Service mode and the networked desktop approver are not implemented. User authorized closing the legacy HTTP decision endpoint; it now rejects agent decisions while local TUI decisions remain available. Baseline inspected: `a1fda41`.
 
 ## Agreed scope
 
@@ -237,6 +237,14 @@ Verification: full tests, race tests, vet, Linux amd64/arm64 static builds and r
 - Startup recovery under exclusive process ownership marks interrupted `EXECUTING` requests `UNCERTAIN`. They are not rerun: a crash may have occurred before or after external side effects. Completion-storage failures also leave the claim consumed.
 - Tests cover concurrent/late duplicate dispatch, frozen backend input, pre-dispatch storage failure, revoked/expired approval, cancellation result persistence, completion rollback and uncertain startup recovery. Full race tests and vet passed.
 - This remains an internal injected boundary, not a deployed root executor. Real operation admission, immutable file staging, private state/IPC ownership, service wiring, clock rollback handling and desktop UX remain unfinished.
+
+### Authenticated decision receipt
+
+- Added an authority-signed `DecisionReceipt` that acknowledges durable consumption of an `ALLOW_ONCE` or `DENY` decision. The receipt binds the authority identity, request identity/digest, device identity, action, terminal decision status and a caller-fresh challenge.
+- Added `Authority.SubmitDecision` as the local composition boundary for a future transport adapter. It is not a network listener. Receipt acceptance means the decision was durably stored; execution remains a separate durable claim and callback.
+- `VerifyDecisionReceipt` independently verifies the original device decision and the authority response. Tests cover both actions, replay rejection, invalid challenges without consumption, request/device/action/status/digest/challenge/signature binding and authority signature failure.
+- This remains an internal boundary. Broker transport, authenticated delivery recovery, service composition, trusted enrollment CLI and desktop UX remain unfinished.
+- Codespaces snapshot: `.codespaces/decision-receipt-map.1789240177/belief_map.sexp` (118 files, 288 edges, 748 entities), earlier maps/cache retained.
 
 ### Desktop build feasibility checkpoint
 
