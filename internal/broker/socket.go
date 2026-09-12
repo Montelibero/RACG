@@ -20,11 +20,6 @@ type PeerCredentials struct {
 	GID int
 }
 
-type UnixSocketConfig struct {
-	Path string
-	Peer PeerCredentials
-}
-
 // AuthorityUnixListener removes the final socket name even though the bound
 // socket is atomically renamed from a private temporary name after permissions
 // and ownership have been applied.
@@ -35,6 +30,9 @@ type AuthorityUnixListener struct {
 
 func (l *AuthorityUnixListener) Close() error {
 	err := l.UnixListener.Close()
+	if errors.Is(err, net.ErrClosed) {
+		err = nil
+	}
 	removeErr := os.Remove(l.path)
 	if err != nil {
 		return err

@@ -1,6 +1,6 @@
 # RACG service mode and Linux approver
 
-Status: file execution extracted; shared UI contracts, signed protocol primitives, an offline signing preview, internal authenticated decision delivery/recovery boundaries, a narrow broker authority transport and peer-verified Unix transport added. Service mode and the networked desktop approver are not implemented. User authorized closing the legacy HTTP decision endpoint; it now rejects agent decisions while local TUI decisions remain available. Baseline inspected: `a1fda41`.
+Status: file execution extracted; shared UI contracts, signed protocol primitives, an offline signing preview, internal authenticated decision delivery/recovery boundaries, peer-verified Unix transport and privileged service composition/config added. Service mode and the networked desktop approver are not implemented. User authorized closing the legacy HTTP decision endpoint; it now rejects agent decisions while local TUI decisions remain available. Baseline inspected: `a1fda41`.
 
 ## Agreed scope
 
@@ -269,6 +269,15 @@ Verification: full tests, race tests, vet, Linux amd64/arm64 static builds and r
 - The listener tracks accepted connections and closes from context cancellation. Tests cover socket permissions, atomic publication/cleanup, wrong peer identity, world-writable rejection, authenticated protocol flow and shutdown.
 - This remains internal: service binaries/configuration, privilege separation, trusted enrollment CLI, operation admission, immutable staging, event/result transports, packaging and deployment remain unfinished.
 - Codespaces snapshot: `.codespaces/unix-transport-map.1789249323/belief_map.sexp` (129 files, 341 edges, 794 entities), earlier maps/cache retained.
+
+### Service composition and configuration
+
+- Added an internal service composition/config layer with deliberately separate defaults for privileged authority state (`/var/lib/racg-authority`) and unprivileged broker state (`/var/lib/racg-broker`), plus one authority socket under `/run/racg`. Authority state owns only its derived database and exclusive lock files; it does not share interactive `racg serve` state.
+- Authority service startup validates canonical paths and exact broker UID/GID, prepares a symlink-safe private state directory, acquires a nonblocking exclusive state lock, opens the authority database, and creates the peer-verified listener before returning. Broker startup prepares its own private state and dials the exact authority UID/GID.
+- Added explicit service TOML keys and validation that authority/broker state directories remain separate in either direction (including nesting), the socket is outside either state tree, and socket paths agree. Context cancellation closes the listener and returns normally; close removes the socket, closes SQLite and releases the lock.
+- Tests cover defaults, TOML parsing, shared/nested-state rejection, socket-in-state rejection, unsafe/symlinked state, duplicate-process lock rejection, broker connection, authority admission rejection, socket cleanup and restart after lock release. Full race tests, vet and Linux amd64/arm64 builds passed.
+- This remains internal, with no CLI command or deployment artifact. Real operation admission, immutable staging, execution backend wiring, trusted key/enrollment administration, service binaries, events/results and packaging remain unfinished.
+- Codespaces snapshot: `.codespaces/service-composition-map.1789250229/belief_map.sexp` (133 files, 356 edges, 823 entities), earlier maps/cache retained.
 
 ### Desktop build feasibility checkpoint
 
