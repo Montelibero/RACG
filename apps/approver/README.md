@@ -26,8 +26,21 @@ Verification authenticates the exact signed operation bytes; it does not prove
 that the operation is safe, fresh or still pending. Control/formatting characters
 are escaped in the display. Invalid signatures clear the preview.
 
-No signing keys are loaded and no approvals, network connections or executions
-are performed. Nothing is saved. Timed key unlocking, service connectivity,
-notifications and approval actions remain unfinished.
+Signing-key management is local. `Create encrypted key` makes an Ed25519 device
+key and stores it in an age v1 passphrase-encrypted file (scrypt) with mode
+0600; creation refuses to overwrite an existing file. `Unlock key` keeps the
+private key only in process memory, and `Lock now` or the configured auto-lock
+prevents further signatures. Go cannot guarantee that every transient copy of
+key material is erased from memory.
+
+After verifying a request, `Allow once` and `Deny` create a signed protocol
+envelope in the Decision tab. The operator must copy it explicitly. Envelopes
+are not sent anywhere and are not approvals until a future service connection
+delivers them to the authority, which separately checks device enrollment,
+revocation, validity and pending state. The key unlock timer is independent
+from decision validity and future grants.
+
+No network connections or executions are performed, and no server profile or
+request is saved. Service connectivity and notifications remain unfinished.
 
 Linux graphics build requirements: https://docs.fyne.io/started/quick/

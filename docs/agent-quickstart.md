@@ -2,9 +2,10 @@
 
 This file is for an automation agent that works with a running `racg serve`.
 
-The separate `apps/approver/` desktop development preview is offline inspection
-only (`racg-approver --help`). It cannot approve or connect to this server;
-continue using the server TUI for decisions.
+The separate `apps/approver/` desktop development preview can inspect offline
+requests and create an offline signed decision (`racg-approver --help`). It
+cannot send an approval or connect to this server; continue using the server
+TUI for decisions.
 
 Manual approval and denial are local to the server TUI. Agent tokens cannot approve or deny requests over HTTP: `POST /v1/requests/{id}/decision` returns `403 REMOTE_DECISION_DISABLED`. Submit requests and wait for the operator; existing authorized rules may still auto-approve matching requests. Signed remote approval is not yet available. Older server binaries must be updated and restarted to enforce this boundary; updating the client alone is insufficient.
 

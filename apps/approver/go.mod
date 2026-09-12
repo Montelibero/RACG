@@ -3,6 +3,7 @@ module github.com/itolstov/racg/apps/approver
 go 1.22.2
 
 require (
+	filippo.io/age v1.2.1
 	fyne.io/fyne/v2 v2.8.1
 	github.com/itolstov/racg v0.0.0
 )
@@ -37,6 +38,7 @@ require (
 	github.com/srwiley/rasterx v0.0.0-20220730225603-2ab79fcdd4ef // indirect
 	github.com/stretchr/testify v1.11.1 // indirect
 	github.com/yuin/goldmark v1.8.2 // indirect
+	golang.org/x/crypto v0.33.0 // indirect
 	golang.org/x/image v0.24.0 // indirect
 	golang.org/x/net v0.35.0 // indirect
 	golang.org/x/sys v0.30.0 // indirect

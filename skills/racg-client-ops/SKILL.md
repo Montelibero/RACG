@@ -10,8 +10,9 @@ Use RACG when command execution must go through a human-approved gateway instead
 ## Core Workflow
 
 The separate desktop development preview (`apps/approver/`,
-`racg-approver --help`) only inspects offline signed request files. It cannot
-approve, connect or execute; do not direct pending interactive requests there.
+`racg-approver --help`) inspects offline signed request files and can create an
+offline Allow once/Deny envelope. It cannot send an approval, connect or
+execute; do not direct pending interactive requests there.
 
 On HTTP 500 `DECISION_PERSISTENCE_FAILED`, retain `error.request_id`: automatic approval failed, but the request exists and remains pending. Ask the operator to fix server storage and review that request in TUI, then resume with `racg request wait <id>`; do not resubmit.
 

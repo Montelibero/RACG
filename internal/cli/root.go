@@ -101,8 +101,8 @@ commands:
   update     update racg from GitHub Releases
 
 approval:
-  Separate offline desktop preview: apps/approver (racg-approver --help).
-  The preview cannot approve, connect to a service or execute operations.
+  Separate offline desktop signing preview: apps/approver (racg-approver --help).
+  The preview cannot send approvals, connect to a service or execute operations.
   Manual approval and denial are local to the server TUI.
   Agent tokens cannot approve or deny requests over HTTP (403 REMOTE_DECISION_DISABLED).
   Existing authorized rules may still auto-approve matching requests.

@@ -1,6 +1,6 @@
 # RACG service mode and Linux approver
 
-Status: file execution extracted; shared UI contracts and signed protocol primitives added. Service mode and desktop approver are not implemented. User authorized closing the legacy HTTP decision endpoint; it now rejects agent decisions while local TUI decisions remain available. Baseline inspected: `a1fda41`.
+Status: file execution extracted; shared UI contracts, signed protocol primitives and an offline signing preview added. Service mode and the networked desktop approver are not implemented. User authorized closing the legacy HTTP decision endpoint; it now rejects agent decisions while local TUI decisions remain available. Baseline inspected: `a1fda41`.
 
 ## Agreed scope
 
@@ -256,3 +256,11 @@ Verification: full tests, race tests, vet, Linux amd64/arm64 static builds and r
 - Computer-use recognized the process/window, but this Linux provider exposes no screenshots and the Fyne content was absent from the accessibility tree. Actual visual/click verification therefore requires a user observation; it has not been claimed as passed.
 - Root race tests, CLI help checks, vet and static amd64/arm64 server builds passed. Preview verification/model tests, headless widget tests (`go test -tags ci ./...`) and desktop vet passed. Native window integration still needs visual confirmation.
 - Codespaces snapshot: `.codespaces/desktop-preview-map.qE1zOH/belief_map.sexp` (113 files, 276 edges, 722 entities), earlier maps/cache retained.
+
+### Offline signing preview
+
+- Added local Ed25519 device-key creation and unlocking in `apps/approver` using the age v1 passphrase format (scrypt through `filippo.io/age v1.2.1`). Key files are mode 0600, written atomically, and never overwritten by creation.
+- Added `Lock now`, optional duration-based auto-lock and explicit help text that locking blocks new signatures but does not revoke envelopes already sent. Key locking and decision validity are independent. Go cannot guarantee erasure of every transient key copy.
+- After pinned-server verification, the preview can sign only `ALLOW_ONCE` or `DENY` over the exact stored request digest and display the envelope for explicit copy. It still has no transport, broker, notification or execution path; the authority independently checks enrollment, revocation, expiry and pending state before consuming a decision.
+- Tests cover key round-trip, file mode, wrong passphrase, overwrite protection, locking, decision verification and device mismatch; widget tests exercise create, verify, invalid validity, signing and lock. Full root tests and race tests, vet, native/app headless checks and static Linux amd64/arm64 server builds passed.
+- Codespaces snapshot: `.codespaces/offline-signing-map.1789231938/belief_map.sexp` (118 files, 288 edges, 740 entities), earlier maps/cache retained.
