@@ -1,6 +1,6 @@
 # RACG service mode and Linux approver
 
-Status: file execution extracted; shared UI contracts, signed protocol primitives, an offline signing preview, internal authenticated decision delivery/recovery boundaries, peer-verified Unix transport, trusted key/admin boundaries, authority operation admission/staging, stored-operation execution and authenticated result/download delivery added. Service mode and the networked desktop approver are not implemented. User authorized closing the legacy HTTP decision endpoint; it now rejects agent decisions while local TUI decisions remain available. Baseline inspected: `a1fda41`.
+Status: file execution extracted; shared UI contracts, signed protocol primitives, an offline signing preview, internal authenticated delivery/recovery, peer-verified Unix transport, trusted key/admin boundaries, operation admission/staging, stored execution/result delivery and reusable service grants added. Service mode and the networked desktop approver are not implemented. User authorized closing the legacy HTTP decision endpoint; it now rejects agent decisions while local TUI decisions remain available. Baseline inspected: `a1fda41`.
 
 ## Agreed scope
 
@@ -316,6 +316,16 @@ Verification: full tests, race tests, vet, Linux amd64/arm64 static builds and r
 - Tests cover broker-decision dispatch through service composition, agent lookup after terminal execution, direct execution result/download delivery, result integrity, execution config parsing and graceful worker accounting. Full race tests, vet and Linux amd64/arm64 builds passed.
 - Still remaining: live events/cancel transport, reusable grants/rules, service binaries/installer, desktop transport/notifications and packaging.
 - Codespaces snapshot: `.codespaces/result-delivery-map.1789264785/belief_map.sexp` (143 files, 475 edges, 902 entities), earlier maps/cache retained.
+
+### Reusable service grants and rules
+
+- Added canonical, agent-scoped `GrantScope` records for `ALLOW_UNTIL` and `ALLOW_ALWAYS`. A scope wraps the existing interactive `rules.Rule` matcher and the exact enrolled agent; a grant is never authority for every client. Unknown scope fields, wrong agents, ambiguous path rules, empty command segments and unsupported operations are rejected.
+- A reusable decision now durably creates a grant in the same transaction that consumes the pending request and marks it `AUTHORIZED`. New submissions call authority-side matching before freezing: a matching active grant creates an authorized request linked to that grant; nonmatching or expired operations remain pending. Grants are keyed to one agent and require the enrolling approver device to remain active.
+- `claimExecution` rechecks grant linkage, agent ownership, revocation and expiry immediately before trusted dispatch. Explicit admin transport can list and revoke grants; revocation prevents new matches and pending dispatch but does not rewind already-terminal jobs.
+- The service execution supervisor dispatches `ALLOW_ONCE`, grant-created `AUTHORIZED` submissions and `ALLOW_UNTIL`/`ALLOW_ALWAYS` decisions exactly once per process, with shutdown-tracked workers. Crashes remain `UNCERTAIN` and never rerun.
+- Tests cover matching/nonmatching/foreign-agent submissions, permanent grants, expiry, device revocation, canonical-scope rejection, session-action rejection, admin listing/revocation and full service auto-execution. Full race tests, vet and Linux amd64/arm64 builds passed.
+- Still remaining: desktop scope-builder UX, explicit import of legacy unsigned rules, live cancel/events, service binaries/installer and packaging.
+- Codespaces snapshot: `.codespaces/service-grants-map.1789267545/belief_map.sexp` (146 files, 521 edges, 921 entities), earlier maps/cache retained.
 
 ### Desktop build feasibility checkpoint
 

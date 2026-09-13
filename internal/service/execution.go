@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 
 	"github.com/itolstov/racg/internal/approval"
 	"github.com/itolstov/racg/internal/authority"
@@ -12,8 +13,10 @@ import (
 // execution dispatch inside the privileged process. It is not an execution API.
 type executionSupervisor struct {
 	*authority.Authority
-	options authority.OperationExecutionOptions
-	workers sync.WaitGroup
+	options    authority.OperationExecutionOptions
+	workers    sync.WaitGroup
+	dispatched sync.Map
+	lastError  atomic.Value
 }
 
 func newExecutionSupervisor(authority *authority.Authority, options authority.OperationExecutionOptions) *executionSupervisor {
@@ -27,8 +30,33 @@ func (s *executionSupervisor) SubmitDecision(ctx context.Context, requestID stri
 	if err != nil {
 		return receipt, err
 	}
-	if decision.Decision.Action != "ALLOW_ONCE" {
+	if decision.Decision.Action == "DENY" {
 		return receipt, nil
+	}
+	s.dispatch(ctx, requestID)
+	return receipt, nil
+}
+
+// Submit checks whether authority-side durable grants auto-authorized the
+// newly frozen request before returning it to the broker.
+func (s *executionSupervisor) Submit(ctx context.Context, signed approval.SignedSubmission) (approval.SignedRequest, error) {
+	request, err := s.Authority.Submit(ctx, signed)
+	if err != nil {
+		return request, err
+	}
+	_, status, statusErr := s.Authority.Request(ctx, request.Request.RequestID)
+	if statusErr != nil {
+		return request, statusErr
+	}
+	if status == "AUTHORIZED" {
+		s.dispatch(ctx, request.Request.RequestID)
+	}
+	return request, nil
+}
+
+func (s *executionSupervisor) dispatch(ctx context.Context, requestID string) {
+	if _, loaded := s.dispatched.LoadOrStore(requestID, struct{}{}); loaded {
+		return
 	}
 	// A graceful authority shutdown waits for bounded terminal work instead of
 	// manufacturing an uncertain outcome. Crashes still become UNCERTAIN and
@@ -37,9 +65,17 @@ func (s *executionSupervisor) SubmitDecision(ctx context.Context, requestID stri
 	s.workers.Add(1)
 	go func() {
 		defer s.workers.Done()
-		_, _ = s.Authority.ExecuteStored(detached, requestID, s.options)
+		if _, err := s.Authority.ExecuteStored(detached, requestID, s.options); err != nil {
+			s.lastError.Store(err)
+		}
 	}()
-	return receipt, nil
+}
+
+func (s *executionSupervisor) executionError() error {
+	if err := s.lastError.Load(); err != nil {
+		return err.(error)
+	}
+	return nil
 }
 
 func (s *executionSupervisor) Close() error {

@@ -95,6 +95,11 @@ func (a *Authority) Submit(ctx context.Context, signed approval.SignedSubmission
 	if err != nil {
 		return approval.SignedRequest{}, err
 	}
+	grant, grantErr := a.activeGrantForOperation(tx, s.ClientID, admittedOperation)
+	authorized := grantErr == nil
+	if grantErr != nil && !errors.Is(grantErr, sql.ErrNoRows) {
+		return approval.SignedRequest{}, grantErr
+	}
 	request, err := approval.NewRequest(a.serverID, uuid.NewString(), s.ClientID, "", admittedOperation)
 	if err != nil {
 		return approval.SignedRequest{}, err
@@ -107,7 +112,11 @@ func (a *Authority) Submit(ctx context.Context, signed approval.SignedSubmission
 	if err != nil {
 		return approval.SignedRequest{}, err
 	}
-	if _, err := tx.ExecContext(ctx, "INSERT INTO authority_requests(request_id,envelope,status) VALUES(?,?,'PENDING_APPROVAL')", request.RequestID, data); err != nil {
+	status := "PENDING_APPROVAL"
+	if authorized {
+		status = "AUTHORIZED"
+	}
+	if _, err := tx.ExecContext(ctx, "INSERT INTO authority_requests(request_id,envelope,status) VALUES(?,?,?)", request.RequestID, data, status); err != nil {
 		return approval.SignedRequest{}, err
 	}
 	if _, err := tx.ExecContext(ctx, "INSERT INTO authority_submissions(client_id,nonce,digest,request_id) VALUES(?,?,?,?)", s.ClientID, s.Nonce, digest[:], request.RequestID); err != nil {
@@ -115,6 +124,11 @@ func (a *Authority) Submit(ctx context.Context, signed approval.SignedSubmission
 	}
 	if err := claimStagedUploads(tx, s.ClientID, request.RequestID, stagedUploads); err != nil {
 		return approval.SignedRequest{}, err
+	}
+	if authorized {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO authority_grant_requests(request_id,grant_id) VALUES(?,?)", request.RequestID, grant.ID); err != nil {
+			return approval.SignedRequest{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return approval.SignedRequest{}, err

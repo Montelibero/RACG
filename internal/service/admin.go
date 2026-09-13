@@ -22,6 +22,8 @@ const (
 	AdminMethodListAgents   = "v1/admin.list-agents"
 	AdminMethodRotateAgent  = "v1/admin.rotate-agent"
 	AdminMethodRevokeAgent  = "v1/admin.revoke-agent"
+	AdminMethodListGrants   = "v1/admin.list-grants"
+	AdminMethodRevokeGrant  = "v1/admin.revoke-grant"
 )
 
 type AdminRequest struct {
@@ -47,6 +49,10 @@ type AdminCredentialsResult struct {
 	Credentials []authority.TrustedCredential `json:"credentials"`
 }
 
+type AdminGrantsResult struct {
+	Grants []authority.TrustedGrant `json:"grants"`
+}
+
 type AdminResult struct {
 	OK bool `json:"ok"`
 }
@@ -60,6 +66,8 @@ type AdminAuthority interface {
 	ListAgentsTrusted(context.Context) ([]authority.TrustedCredential, error)
 	RotateAgentTrusted(context.Context, string, ed25519.PublicKey) error
 	RevokeAgentTrusted(context.Context, string) error
+	ListGrantsTrusted(context.Context) ([]authority.TrustedGrant, error)
+	RevokeGrantTrusted(context.Context, string) error
 }
 
 // AdminClient talks to the authority's peer-authenticated local admin socket.
@@ -111,6 +119,16 @@ func (c *AdminClient) RotateAgent(ctx context.Context, clientID string, key ed25
 func (c *AdminClient) RevokeAgent(ctx context.Context, clientID string) error {
 	var result AdminResult
 	return c.call(ctx, AdminMethodRevokeAgent, AdminCredentialParams{ID: clientID}, &result)
+}
+
+func (c *AdminClient) ListGrants(ctx context.Context) ([]authority.TrustedGrant, error) {
+	var result AdminGrantsResult
+	return result.Grants, c.call(ctx, AdminMethodListGrants, nil, &result)
+}
+
+func (c *AdminClient) RevokeGrant(ctx context.Context, grantID string) error {
+	var result AdminResult
+	return c.call(ctx, AdminMethodRevokeGrant, AdminCredentialParams{ID: grantID}, &result)
 }
 
 func (c *AdminClient) call(ctx context.Context, method string, params, result any) error {
@@ -220,6 +238,9 @@ func handleAdmin(ctx context.Context, backend AdminAuthority, request AdminReque
 	case AdminMethodListAgents:
 		credentials, err := backend.ListAgentsTrusted(ctx)
 		return AdminCredentialsResult{Credentials: credentials}, err
+	case AdminMethodListGrants:
+		grants, err := backend.ListGrantsTrusted(ctx)
+		return AdminGrantsResult{Grants: grants}, err
 	}
 	var params AdminCredentialParams
 	if len(request.Params) == 0 || json.Unmarshal(request.Params, &params) != nil || params.ID == "" {
@@ -234,6 +255,8 @@ func handleAdmin(ctx context.Context, backend AdminAuthority, request AdminReque
 		return AdminResult{OK: true}, backend.RotateAgentTrusted(ctx, params.ID, ed25519.PublicKey(params.PublicKey))
 	case AdminMethodRevokeAgent:
 		return AdminResult{OK: true}, backend.RevokeAgentTrusted(ctx, params.ID)
+	case AdminMethodRevokeGrant:
+		return AdminResult{OK: true}, backend.RevokeGrantTrusted(ctx, params.ID)
 	default:
 		return nil, errors.New("unknown admin method")
 	}

@@ -78,6 +78,8 @@ func decisionReceiptStatus(action string) (string, error) {
 	switch action {
 	case "ALLOW_ONCE":
 		return "AUTHORIZED", nil
+	case "ALLOW_UNTIL", "ALLOW_ALWAYS":
+		return "GRANTED", nil
 	case "DENY":
 		return "DENIED", nil
 	default:

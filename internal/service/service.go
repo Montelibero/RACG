@@ -2,12 +2,11 @@ package service
 
 import (
 	"context"
+	"crypto/ed25519"
 	"database/sql"
 	"errors"
 	"fmt"
 	"os"
-
-	"crypto/ed25519"
 
 	"github.com/itolstov/racg/internal/authority"
 	"github.com/itolstov/racg/internal/broker"
@@ -97,8 +96,17 @@ func (s *AuthorityService) Authority() *authority.Authority {
 	return s.authority
 }
 
+// PublicKey exposes the pinned authority identity to trusted composition for
+// local clients; the signing key never leaves the service.
+func (s *AuthorityService) PublicKey() ed25519.PublicKey {
+	if s == nil || s.authority == nil {
+		return nil
+	}
+	return s.authority.PublicKey()
+}
+
 func (s *AuthorityService) Run(ctx context.Context) error {
-	if s == nil || s.listener == nil || s.adminListener == nil || s.authority == nil {
+	if s == nil || s.listener == nil || s.adminListener == nil || s.executions == nil {
 		return errors.New("authority service is not open")
 	}
 	results := make(chan error, 2)

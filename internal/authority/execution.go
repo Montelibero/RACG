@@ -3,6 +3,7 @@ package authority
 import (
 	"context"
 	"crypto/ed25519"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -76,18 +77,17 @@ func (a *Authority) claimExecution(ctx context.Context, id string) (approval.Req
 	defer tx.Rollback()
 	var envelope, decisionData []byte
 	var status string
-	if err := tx.QueryRowContext(ctx, "SELECT envelope,status,signed_decision FROM authority_requests WHERE request_id=?", id).Scan(&envelope, &status, &decisionData); err != nil {
+	var grantID sql.NullString
+	if err := tx.QueryRowContext(ctx,
+		"SELECT r.envelope,r.status,r.signed_decision,g.grant_id FROM authority_requests r LEFT JOIN authority_grant_requests g ON g.request_id=r.request_id WHERE r.request_id=?", id).
+		Scan(&envelope, &status, &decisionData, &grantID); err != nil {
 		return approval.Request{}, err
 	}
 	if status != "AUTHORIZED" {
 		return approval.Request{}, errors.New("request is not awaiting authorized execution")
 	}
 	var request approval.SignedRequest
-	var decision approval.SignedDecision
 	if err := json.Unmarshal(envelope, &request); err != nil {
-		return approval.Request{}, err
-	}
-	if err := json.Unmarshal(decisionData, &decision); err != nil {
 		return approval.Request{}, err
 	}
 	if request.Request.RequestID != id {
@@ -96,20 +96,33 @@ func (a *Authority) claimExecution(ctx context.Context, id string) (approval.Req
 	if err := approval.VerifyRequest(request, a.serverID, a.key.Public().(ed25519.PublicKey)); err != nil {
 		return approval.Request{}, err
 	}
-	if decision.Decision.Action != "ALLOW_ONCE" {
-		return approval.Request{}, errors.New("decision does not authorize one-shot execution")
-	}
-	var key []byte
-	var revoked int
-	if err := tx.QueryRowContext(ctx, "SELECT public_key,revoked FROM authority_devices WHERE device_id=?", decision.Decision.DeviceID).Scan(&key, &revoked); err != nil {
-		return approval.Request{}, err
-	}
-	if revoked != 0 {
-		return approval.Request{}, errors.New("approver revoked before dispatch")
-	}
 	now := a.now().UTC()
-	if err := approval.VerifyDecision(request.Request, decision, decision.Decision.DeviceID, ed25519.PublicKey(key), now); err != nil {
-		return approval.Request{}, err
+	if grantID.Valid {
+		if status != "AUTHORIZED" {
+			return approval.Request{}, errors.New("grant-authorized request is not awaiting execution")
+		}
+		if _, err := a.grantForExecution(ctx, tx, id, request.Request.ClientID, now); err != nil {
+			return approval.Request{}, err
+		}
+	} else {
+		var decision approval.SignedDecision
+		if err := json.Unmarshal(decisionData, &decision); err != nil {
+			return approval.Request{}, err
+		}
+		if decision.Decision.Action != "ALLOW_ONCE" {
+			return approval.Request{}, errors.New("decision does not authorize one-shot execution")
+		}
+		var key []byte
+		var revoked int
+		if err := tx.QueryRowContext(ctx, "SELECT public_key,revoked FROM authority_devices WHERE device_id=?", decision.Decision.DeviceID).Scan(&key, &revoked); err != nil {
+			return approval.Request{}, err
+		}
+		if revoked != 0 {
+			return approval.Request{}, errors.New("approver revoked before dispatch")
+		}
+		if err := approval.VerifyDecision(request.Request, decision, decision.Decision.DeviceID, ed25519.PublicKey(key), now); err != nil {
+			return approval.Request{}, err
+		}
 	}
 	result, err := tx.ExecContext(ctx, "UPDATE authority_requests SET status='EXECUTING' WHERE request_id=? AND status='AUTHORIZED'", id)
 	if err != nil {

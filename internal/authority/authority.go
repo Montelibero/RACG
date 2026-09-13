@@ -51,6 +51,8 @@ func New(ctx context.Context, db *sql.DB, serverID string, key ed25519.PrivateKe
 		"CREATE TABLE IF NOT EXISTS authority_executions (request_id TEXT PRIMARY KEY, started_at TEXT NOT NULL, finished_at TEXT, result BLOB)",
 		"CREATE TABLE IF NOT EXISTS authority_staged_uploads (client_id TEXT NOT NULL, upload_id TEXT NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL, data BLOB NOT NULL, valid_until TEXT NOT NULL, claimed_request_id TEXT, PRIMARY KEY(client_id,upload_id))",
 		"CREATE TABLE IF NOT EXISTS authority_download_artifacts (request_id TEXT PRIMARY KEY, name TEXT NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL, mode TEXT NOT NULL, data BLOB NOT NULL)",
+		"CREATE TABLE IF NOT EXISTS authority_grants (grant_id TEXT PRIMARY KEY, device_id TEXT NOT NULL, client_id TEXT NOT NULL, canonical_scope BLOB NOT NULL, rule BLOB NOT NULL, expires_at TEXT, revoked INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)",
+		"CREATE TABLE IF NOT EXISTS authority_grant_requests (request_id TEXT PRIMARY KEY, grant_id TEXT NOT NULL)",
 	} {
 		if _, err := tx.ExecContext(ctx, statement); err != nil {
 			return nil, err
@@ -148,6 +150,14 @@ func (a *Authority) Request(ctx context.Context, id string) (approval.SignedRequ
 	return signed, status, nil
 }
 
+// PublicKey returns the pinned authority identity for trusted local clients.
+func (a *Authority) PublicKey() ed25519.PublicKey {
+	if a == nil {
+		return nil
+	}
+	return a.key.Public().(ed25519.PublicKey)
+}
+
 // SubmitDecision is the local composition boundary for a transport adapter;
 // it is not a network listener. It durably consumes the first valid decision
 // and returns an authority-signed receipt. A returned receipt means the
@@ -175,8 +185,10 @@ func (a *Authority) SubmitDecision(ctx context.Context, id string, decision appr
 func (a *Authority) Consume(ctx context.Context, id string, decision approval.SignedDecision) (approval.Request, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if decision.Decision.Action != "ALLOW_ONCE" && decision.Decision.Action != "DENY" {
-		return approval.Request{}, errors.New("service authority currently accepts only single-shot decisions")
+	switch decision.Decision.Action {
+	case "DENY", "ALLOW_ONCE", "ALLOW_UNTIL", "ALLOW_ALWAYS":
+	default:
+		return approval.Request{}, errors.New("unsupported service authority decision")
 	}
 	tx, err := a.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -220,6 +232,10 @@ func (a *Authority) Consume(ctx context.Context, id string, decision approval.Si
 	status = "AUTHORIZED"
 	if decision.Decision.Action == "DENY" {
 		status = "DENIED"
+	} else if decision.Decision.Action != "ALLOW_ONCE" {
+		if _, err := a.createGrantTx(ctx, tx, decision.Decision.DeviceID, request.Request, decision); err != nil {
+			return approval.Request{}, err
+		}
 	}
 	result, err := tx.ExecContext(ctx, "UPDATE authority_requests SET status=?,signed_decision=?,consumed_at=? WHERE request_id=? AND status='PENDING_APPROVAL'", status, encoded, now.Format(time.RFC3339Nano), id)
 	if err != nil {

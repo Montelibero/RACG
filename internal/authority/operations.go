@@ -60,7 +60,7 @@ func (a *Authority) runStoredOperation(ctx context.Context, request approval.Req
 		Payload json.RawMessage `json:"payload"`
 	}
 	if err := strictUnmarshal(request.Operation, &envelope); err != nil {
-		return failedOperationResult(err)
+		return failedOperationResult(fmt.Errorf("outer operation: %w", err))
 	}
 	switch envelope.Type {
 	case "cmd.run":
@@ -68,7 +68,7 @@ func (a *Authority) runStoredOperation(ctx context.Context, request approval.Req
 	case "fs.read":
 		var payload readFilePayload
 		if err := strictUnmarshal(envelope.Payload, &payload); err != nil {
-			return failedOperationResult(err)
+			return failedOperationResult(fmt.Errorf("fs.read payload: %w", err))
 		}
 		maxBytes := payload.MaxBytes
 		if maxBytes <= 0 || maxBytes > int64(options.Executor.MaxOutputBytes) {
@@ -78,7 +78,7 @@ func (a *Authority) runStoredOperation(ctx context.Context, request approval.Req
 	case "fs.patch_unified":
 		var payload patchFilePayload
 		if err := strictUnmarshal(envelope.Payload, &payload); err != nil {
-			return failedOperationResult(err)
+			return failedOperationResult(fmt.Errorf("patch payload: %w", err))
 		}
 		return executor.PatchFile(payload.Path, payload.Diff)
 	case "fs.upload":
@@ -88,7 +88,7 @@ func (a *Authority) runStoredOperation(ctx context.Context, request approval.Req
 	case "conf.set":
 		var payload configSetPayload
 		if err := strictUnmarshal(envelope.Payload, &payload); err != nil {
-			return failedOperationResult(err)
+			return failedOperationResult(fmt.Errorf("config payload: %w", err))
 		}
 		backup := true
 		if payload.Backup != nil {
@@ -112,13 +112,13 @@ func (a *Authority) runStoredOperation(ctx context.Context, request approval.Req
 func (a *Authority) runCommandOperation(ctx context.Context, request approval.Request, payloadBytes json.RawMessage, options OperationExecutionOptions) executor.Result {
 	var payload cmdRunPayload
 	if err := strictUnmarshal(payloadBytes, &payload); err != nil {
-		return failedOperationResult(err)
+		return failedOperationResult(fmt.Errorf("command payload: %w", err))
 	}
 	var stdin io.Reader
 	if payload.StdinUploadID != "" {
 		data, err := a.StagedUploadForRequest(ctx, request, payload.StdinUploadID)
 		if err != nil {
-			return failedOperationResult(err)
+			return failedOperationResult(fmt.Errorf("command staged input: %w", err))
 		}
 		stdin = bytes.NewReader(data)
 	}
