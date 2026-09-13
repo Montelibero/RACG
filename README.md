@@ -4,6 +4,11 @@ RACG is a local Approval Gateway for privileged operations. A client sends reque
 
 ## Features
 
+An experimental two-process service mode exists in this branch: the privileged
+`racg service-authority` owns execution state, while unprivileged
+`racg service-broker` relays signed protocol traffic. Example systemd units are
+in `deploy/systemd/`; broker deployment packaging is not complete.
+
 An isolated Linux desktop development preview lives in `apps/approver/`.
 Build it separately and run `racg-approver --help`. It inspects offline signed
 request files against a trusted server profile and can create an offline

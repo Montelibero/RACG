@@ -56,6 +56,10 @@ func (r *Root) Run(args []string) int {
 	switch rest[0] {
 	case "serve":
 		return NewServeCmd(r.stdout, r.stderr).Run(rest[1:])
+	case "service-authority":
+		return NewServiceAuthorityCmd(r.stdout, r.stderr).Run(rest[1:])
+	case "service-broker":
+		return NewServiceBrokerCmd(r.stdout, r.stderr).Run(rest[1:])
 	case "login":
 		return NewAuthCmd(r.stdout, r.stderr).RunLogin(rest[1:])
 	case "logout":
@@ -89,6 +93,10 @@ func usage() string {
 
 commands:
   serve      start RACG server and TUI
+  service-authority
+             start the privileged service authority/executor
+  service-broker
+             start the unprivileged signed-protocol relay
   login      save client auth from a pairing code
   logout     remove saved client auth
   session    inspect saved/current session
@@ -104,6 +112,7 @@ approval:
   Separate Linux desktop preview: apps/approver (racg-approver --help).
   Explicit --connect polls a signed service queue and sends local signed decisions.
   The desktop cannot execute operations; broker service deployment is not packaged.
+  Use "racg service-authority --help" and "racg service-broker --help".
   Manual approval and denial are local to the server TUI.
   Agent tokens cannot approve or deny requests over HTTP (403 REMOTE_DECISION_DISABLED).
   Existing authorized rules may still auto-approve matching requests.

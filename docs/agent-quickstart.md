@@ -27,6 +27,11 @@ mkdir -p ~/.codex/skills
 cp -R skills/racg-client-ops ~/.codex/skills/
 ```
 
+Interactive `racg serve` is unrelated to the experimental service mode. Server
+administrators can inspect the separate `racg service-authority` and
+`racg service-broker` commands; their systemd examples live under
+`deploy/systemd/`.
+
 Use the skill when an agent should operate through RACG instead of direct shell execution. It covers login, command submission, live output, final logs, cancel/kill, safe diagnostics, and auto-approve rule boundaries.
 
 ## 1. Connect

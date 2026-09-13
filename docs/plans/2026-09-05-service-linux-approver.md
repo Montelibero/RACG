@@ -1,6 +1,6 @@
 # RACG service mode and Linux approver
 
-Status: file execution extracted; shared UI contracts, signed protocol primitives, internal authenticated delivery/recovery, peer-verified Unix transport, trusted key/admin boundaries, operation admission/staging, stored execution/result delivery, reusable service grants and a desktop transport UI added. Production service composition/deployment and the full networked approver are not implemented. User authorized closing the legacy HTTP decision endpoint; it now rejects agent decisions while local TUI decisions remain available. Baseline inspected: `a1fda41`.
+Status: file execution extracted; shared UI contracts, signed protocol primitives, internal authenticated delivery/recovery, peer-verified Unix transport, trusted key/admin boundaries, operation admission/staging, stored execution/result delivery, reusable service grants, desktop transport UI and two-process service commands added. Production packaging/installer is not implemented. User authorized closing the legacy HTTP decision endpoint; it now rejects agent decisions while local TUI decisions remain available. Baseline inspected: `a1fda41`.
 
 ## Agreed scope
 
@@ -336,10 +336,21 @@ Verification: full tests, race tests, vet, Linux amd64/arm64 static builds and r
 - Remaining desktop work: reconnect/backoff policy, result and download rendering, enrollment command/UX, tray/background lifecycle and packaging.
 - Codespaces snapshot: `.codespaces/desktop-ui-transport-map.1789300955/belief_map.sexp` (153 files, 603 edges, 959 entities), earlier maps/cache retained.
 
+### Two-process service deployment commands
+
+- Added `racg service-authority` and `racg service-broker` with discoverable help, TOML configuration and explicit flag overrides. Authority startup owns/recovering state, opens privileged/admin listeners and serves the signed protocol; broker startup opens an unprivileged TCP/Unix relay, dials the exact peer-verified authority socket per client, and forwards bytes without authorization power.
+- The relay keeps no authority state/key and cannot sign or authorize. Broker listener URIs validate `tcp`, `tcp4`, `tcp6` and `unix`; Unix sockets use atomic publication, mode `0600`/`0660` and an inherited/configured GID. Explicit UID/GID flags correctly permit UID/GID 0.
+- Added example systemd units and a deployment README for dedicated authority/broker users, private state directories and hardening. They are examples, not an installer/release package.
+- Tests cover relay forwarding with signed queue verification, authority/broker help boundaries, and flag/config validation. Full race tests, vet and Linux amd64/arm64 builds passed.
+- Remaining: package/installer, admin CLI UX, health/readiness endpoints, rotation/enrollment UX, secrets/KDF policy, reusable-grant scope builder and desktop result/download rendering.
+- Codespaces snapshot: `.codespaces/service-deployment-map.1789308105/belief_map.sexp` (157 files, 645 edges, 976 entities), earlier maps/cache retained.
+
 ### Desktop build feasibility and UI integration
 
 - Selected Fyne 2.8.1 in the isolated desktop module; GUI dependencies remain outside the root server build.
 - Added explicit `--connect` and `--poll-interval` CLI flags plus a Service tab. The UI polls signed snapshots, announces fresh IDs through system notifications, supports inspecting verified requests, and submits selected `ALLOW_ONCE`/`DENY` decisions only after local signature and authority receipt verification. Offline file inspection and signing remain available without `--connect`.
+- Added an unprivileged relay command and privileged authority command. The relay accepts TCP/Unix listeners, dials the peer-verified local authority socket for every client, and blindly forwards protocol bytes; it has no signing key or authorization method. Commands load service TOML, normalize defaults, print readiness, and stop cleanly on context signals.
+- Added example systemd units/users/state layout and safety hardening for the two processes. They are deployment examples, not an installer or release package.
 - Added background poller cancellation, Fyne main-thread UI updates, device-key locking coordination for transport signatures, URI validation and widget tests using a fake signed protocol connection.
 - Official setup reference: https://docs.fyne.io/started/quick/ ; tray lifecycle reference: https://docs.fyne.io/explore/systray/ .
 - This workstation is Pop!_OS 24.04, unprivileged UID 1000. GCC and the GL/X11/Xcursor/Xrandr/Xinerama/Xi development interfaces are available. `pkg-config` reports the Xxf86vm development interface missing; `libxxf86vm-dev` is not installed.

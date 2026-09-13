@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/itolstov/racg/internal/authority"
+	"github.com/itolstov/racg/internal/broker"
 	"github.com/itolstov/racg/internal/executor"
 )
 
@@ -40,6 +41,8 @@ type AuthorityConfig struct {
 type BrokerConfig struct {
 	StateDir     string
 	SocketPath   string
+	ListenURI    string
+	ListenGID    int
 	AuthorityUID int
 	AuthorityGID int
 }
@@ -78,6 +81,8 @@ func DefaultBrokerConfig() BrokerConfig {
 	return BrokerConfig{
 		StateDir:   DefaultBrokerStateDir,
 		SocketPath: DefaultAuthoritySocket,
+		ListenURI:  "tcp://127.0.0.1:9444",
+		ListenGID:  -1,
 	}
 }
 
@@ -158,14 +163,28 @@ func (c BrokerConfig) Validate() error {
 	if c.AuthorityUID < 0 || c.AuthorityGID < 0 {
 		return errors.New("broker authority UID and GID required")
 	}
+	if _, _, err := broker.ParseListenerURI(c.ListenURI); err != nil {
+		return fmt.Errorf("broker listener: %w", err)
+	}
+	if c.ListenGID < -1 {
+		return errors.New("broker listen GID required")
+	}
 	return nil
+}
+
+func (c BrokerConfig) Normalized() BrokerConfig {
+	if c.ListenURI == "" {
+		c.ListenURI = "tcp://127.0.0.1:9444"
+	}
+	return c
 }
 
 func (c Config) Validate() error {
 	if err := c.Authority.Validate(); err != nil {
 		return err
 	}
-	if err := c.Broker.Validate(); err != nil {
+	brokerConfig := c.Broker.Normalized()
+	if err := brokerConfig.Validate(); err != nil {
 		return err
 	}
 	if pathsOverlap(c.Authority.StateDir, c.Broker.StateDir) || pathsOverlap(c.Broker.StateDir, c.Authority.StateDir) {
@@ -268,6 +287,7 @@ func applyServiceTOML(config *Config, lineNo int, key, value string) error {
 		"authority_admin_socket":  &config.Authority.AdminSocket,
 		"broker_state_dir":        &config.Broker.StateDir,
 		"broker_authority_socket": &config.Broker.SocketPath,
+		"broker_listen_uri":       &config.Broker.ListenURI,
 	}
 	if target, exists := stringTargets[key]; exists {
 		parsed, err := parseTOMLString(value)
@@ -287,6 +307,7 @@ func applyServiceTOML(config *Config, lineNo int, key, value string) error {
 		"execution_kill_grace_sec":      &config.Authority.Execution.KillGraceSec,
 		"broker_authority_uid":          &config.Broker.AuthorityUID,
 		"broker_authority_gid":          &config.Broker.AuthorityGID,
+		"broker_listen_gid":             &config.Broker.ListenGID,
 	}
 	if key == "execution_max_transfer_bytes" {
 		parsed, err := strconv.ParseInt(value, 10, 64)

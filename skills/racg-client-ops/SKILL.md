@@ -7,6 +7,11 @@ description: Use when an agent needs to run commands or transfer files through R
 
 Use RACG when command execution must go through a human-approved gateway instead of running directly on the host. Prefer RACG for remote/server diagnostics, long-running jobs, commands that need auditability, or workflows where the human operator approves requests in the RACG TUI.
 
+The experimental service mode uses separate privileged authority and
+unprivileged broker commands (`racg service-authority --help`,
+`racg service-broker --help`). It is not interchangeable with legacy
+interactive `racg serve`; do not mix their state or credentials.
+
 ## Core Workflow
 
 The separate desktop development preview (`apps/approver/`,

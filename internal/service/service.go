@@ -184,9 +184,11 @@ func (s *AuthorityService) Close() error {
 
 // ConnectBroker prepares broker-only state and opens the peer-verified client.
 func ConnectBroker(ctx context.Context, config BrokerConfig) (*broker.AuthorityClient, func(), error) {
+	config = config.Normalized()
 	if err := config.Validate(); err != nil {
 		return nil, nil, err
 	}
+	config = config.Normalized()
 	if err := PrepareBrokerState(config); err != nil {
 		return nil, nil, err
 	}
