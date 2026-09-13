@@ -1,6 +1,6 @@
 # RACG service mode and Linux approver
 
-Status: file execution extracted; shared UI contracts, signed protocol primitives, internal authenticated delivery/recovery, peer-verified Unix transport, trusted key/admin boundaries, operation admission/staging, stored execution/result delivery, reusable service grants, desktop transport UI and two-process service commands added. Production packaging/installer is not implemented. User authorized closing the legacy HTTP decision endpoint; it now rejects agent decisions while local TUI decisions remain available. Baseline inspected: `a1fda41`.
+Status: file execution extracted; shared UI contracts, signed protocol primitives, internal authenticated delivery/recovery, peer-verified Unix transport, trusted key/admin boundaries, operation admission/staging, stored execution/result delivery, reusable service grants, desktop transport UI, two-process service commands and trusted admin/enrollment CLI added. Production packaging/installer is not implemented. User authorized closing the legacy HTTP decision endpoint; it now rejects agent decisions while local TUI decisions remain available. Baseline inspected: `a1fda41`.
 
 ## Agreed scope
 
@@ -341,9 +341,11 @@ Verification: full tests, race tests, vet, Linux amd64/arm64 static builds and r
 - Added `racg service-authority` and `racg service-broker` with discoverable help, TOML configuration and explicit flag overrides. Authority startup owns/recovering state, opens privileged/admin listeners and serves the signed protocol; broker startup opens an unprivileged TCP/Unix relay, dials the exact peer-verified authority socket per client, and forwards bytes without authorization power.
 - The relay keeps no authority state/key and cannot sign or authorize. Broker listener URIs validate `tcp`, `tcp4`, `tcp6` and `unix`; Unix sockets use atomic publication, mode `0600`/`0660` and an inherited/configured GID. Explicit UID/GID flags correctly permit UID/GID 0.
 - Added example systemd units and a deployment README for dedicated authority/broker users, private state directories and hardening. They are examples, not an installer/release package.
+- Added `racg service-admin` over the exact peer-verified admin socket. It can inspect authority identity, export a mode-0600 desktop profile, list devices/agents/grants, enroll/rotate credentials with Ed25519 public keys and revoke credentials/grants. No bearer token or signing key crosses this boundary.
+- Added a full `service-admin` UX: identity/export-profile/list/enroll/rotate/revoke commands with JSON output, `@path` public-key input, atomic profile writes, detailed safety help and integration tests over a real peer-verified admin listener.
 - Tests cover relay forwarding with signed queue verification, authority/broker help boundaries, and flag/config validation. Full race tests, vet and Linux amd64/arm64 builds passed.
-- Remaining: package/installer, admin CLI UX, health/readiness endpoints, rotation/enrollment UX, secrets/KDF policy, reusable-grant scope builder and desktop result/download rendering.
-- Codespaces snapshot: `.codespaces/service-deployment-map.1789308105/belief_map.sexp` (157 files, 645 edges, 976 entities), earlier maps/cache retained.
+- Remaining: package/installer, health/readiness endpoints, secrets/KDF policy, reusable-grant scope builder and desktop result/download rendering.
+- Codespaces snapshot: `.codespaces/admin-cli-map.1789310182/belief_map.sexp` (159 files, 696 edges, 993 entities), earlier maps/cache retained.
 
 ### Desktop build feasibility and UI integration
 

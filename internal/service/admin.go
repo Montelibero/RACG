@@ -24,6 +24,7 @@ const (
 	AdminMethodRevokeAgent  = "v1/admin.revoke-agent"
 	AdminMethodListGrants   = "v1/admin.list-grants"
 	AdminMethodRevokeGrant  = "v1/admin.revoke-grant"
+	AdminMethodIdentity     = "v1/admin.identity"
 )
 
 type AdminRequest struct {
@@ -57,6 +58,12 @@ type AdminResult struct {
 	OK bool `json:"ok"`
 }
 
+type AdminIdentityResult struct {
+	Version   int    `json:"version"`
+	ServerID  string `json:"server_id"`
+	PublicKey []byte `json:"public_key"`
+}
+
 // AdminAuthority is the trusted local registry surface. It contains no
 // decision, execution or server-signing methods.
 type AdminAuthority interface {
@@ -68,6 +75,7 @@ type AdminAuthority interface {
 	RevokeAgentTrusted(context.Context, string) error
 	ListGrantsTrusted(context.Context) ([]authority.TrustedGrant, error)
 	RevokeGrantTrusted(context.Context, string) error
+	IdentityTrusted() (int, string, []byte, error)
 }
 
 // AdminClient talks to the authority's peer-authenticated local admin socket.
@@ -131,6 +139,11 @@ func (c *AdminClient) RevokeGrant(ctx context.Context, grantID string) error {
 	return c.call(ctx, AdminMethodRevokeGrant, AdminCredentialParams{ID: grantID}, &result)
 }
 
+func (c *AdminClient) Identity(ctx context.Context) (AdminIdentityResult, error) {
+	var result AdminIdentityResult
+	return result, c.call(ctx, AdminMethodIdentity, nil, &result)
+}
+
 func (c *AdminClient) call(ctx context.Context, method string, params, result any) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -172,6 +185,22 @@ func ServeAdminUnix(ctx context.Context, listener *broker.AuthorityUnixListener,
 	return broker.ServeUnix(ctx, listener, admin, func(ctx context.Context, conn io.ReadWriter) error {
 		return serveAdmin(ctx, backend, conn)
 	})
+}
+
+// ConnectAdminSocket opens the peer-verified admin client without requiring a
+// full service Config. It is intended for a trusted admin CLI run under the
+// exact allowed UID/GID.
+func ConnectAdminSocket(ctx context.Context, path string, peer broker.PeerCredentials) (*AdminClient, func(), error) {
+	conn, closeConn, err := broker.DialUnix(ctx, path, peer)
+	if err != nil {
+		return nil, nil, err
+	}
+	client, err := NewAdminClient(conn)
+	if err != nil {
+		closeConn()
+		return nil, nil, err
+	}
+	return client, closeConn, nil
 }
 
 // ConnectAdmin prepares no mutable broker state and opens the peer-verified
@@ -241,6 +270,9 @@ func handleAdmin(ctx context.Context, backend AdminAuthority, request AdminReque
 	case AdminMethodListGrants:
 		grants, err := backend.ListGrantsTrusted(ctx)
 		return AdminGrantsResult{Grants: grants}, err
+	case AdminMethodIdentity:
+		version, serverID, publicKey, err := backend.IdentityTrusted()
+		return AdminIdentityResult{Version: version, ServerID: serverID, PublicKey: publicKey}, err
 	}
 	var params AdminCredentialParams
 	if len(request.Params) == 0 || json.Unmarshal(request.Params, &params) != nil || params.ID == "" {

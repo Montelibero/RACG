@@ -42,7 +42,9 @@ broker remains untrusted: queue, request, and receipt signatures are checked
 locally.
 
 The signing-key auto-lock timer is independent from decision validity and
-future grants. Reconnect/backoff, download rendering, enrollment UX,
+future grants. On the authority host, `racg service-admin export-profile`
+writes a trusted desktop profile. It can also enroll, rotate, revoke and list
+devices, agents and grants. Reconnect/backoff, download rendering,
 tray/background lifecycle and packaging remain unfinished.
 
 Linux graphics build requirements: https://docs.fyne.io/started/quick/

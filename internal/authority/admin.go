@@ -3,6 +3,8 @@ package authority
 import (
 	"context"
 	"crypto/ed25519"
+
+	"github.com/itolstov/racg/internal/approval"
 )
 
 // TrustedCredential is an administrative registry view. Public keys are
@@ -19,6 +21,15 @@ func (a *Authority) ListDevicesTrusted(ctx context.Context) ([]TrustedCredential
 
 func (a *Authority) ListAgentsTrusted(ctx context.Context) ([]TrustedCredential, error) {
 	return listCredentials(ctx, a, "SELECT client_id,public_key,revoked FROM authority_agents ORDER BY client_id")
+}
+
+// IdentityTrusted returns the authority identity over the local trusted admin
+// boundary. Public-key disclosure is intentional; the signing key is not.
+func (a *Authority) IdentityTrusted() (int, string, []byte, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	public := a.key.Public().(ed25519.PublicKey)
+	return approval.Version, a.serverID, append([]byte(nil), public...), nil
 }
 
 // RotateDeviceTrusted is an explicit re-enrollment of one device identity.

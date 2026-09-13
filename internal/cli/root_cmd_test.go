@@ -36,6 +36,7 @@ func TestRootHelpIncludesFileAndConfigExamples(t *testing.T) {
 		"polls a signed service queue",
 		"service-authority",
 		"service-broker",
+		"service-admin",
 		"racg file read /path/file.txt",
 		"racg file patch /path/file.txt --diff-file /tmp/change.patch",
 		"racg file upload ./local.bin /srv/remote.bin",

@@ -60,6 +60,8 @@ func (r *Root) Run(args []string) int {
 		return NewServiceAuthorityCmd(r.stdout, r.stderr).Run(rest[1:])
 	case "service-broker":
 		return NewServiceBrokerCmd(r.stdout, r.stderr).Run(rest[1:])
+	case "service-admin":
+		return NewServiceAdminCmd(r.stdout, r.stderr).Run(rest[1:])
 	case "login":
 		return NewAuthCmd(r.stdout, r.stderr).RunLogin(rest[1:])
 	case "logout":
@@ -97,6 +99,8 @@ commands:
              start the privileged service authority/executor
   service-broker
              start the unprivileged signed-protocol relay
+  service-admin
+             administer trusted service devices, agents and grants
   login      save client auth from a pairing code
   logout     remove saved client auth
   session    inspect saved/current session
