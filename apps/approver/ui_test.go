@@ -46,7 +46,7 @@ func TestUICreatesOfflineDecision(t *testing.T) {
 	if err := os.WriteFile(requestPath, requestData, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	u := newPreviewUI(options{})
+	u := newPreviewUI(options{}, test.NewApp())
 	u.canvas()
 	u.profilePath.SetText(profilePath)
 	u.requestPath.SetText(requestPath)
@@ -84,7 +84,7 @@ func TestUICreatesOfflineDecision(t *testing.T) {
 }
 
 func TestUIVerificationFailureClearsPreview(t *testing.T) {
-	u := newPreviewUI(options{profile: "/nonexistent-racg-test-profile"})
+	u := newPreviewUI(options{profile: "/nonexistent-racg-test-profile"}, test.NewApp())
 	u.canvas()
 	u.preview.SetText("previous verified request")
 	test.Tap(u.verify)

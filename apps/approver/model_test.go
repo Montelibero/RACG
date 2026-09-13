@@ -61,10 +61,10 @@ func TestPreviewHelpIsExplicitAboutAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"no network or service connection", "cannot send decisions or execute",
+		"polls a broker/service protocol endpoint", "cannot execute",
 		"passphrase-encrypted", "Allow once or Deny", "never trust a broker-provided key",
 		"current pending", "--key", "--server-profile", "--request",
-		"Auto-lock field", "Decision validity", "nothing is sent",
+		"Auto-lock field", "Decision validity", "Offline envelopes remain in the Decision tab",
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("help missing %q", want)

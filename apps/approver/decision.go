@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strconv"
 	"time"
 
@@ -38,14 +39,40 @@ func verifiedPreview(profile ServerProfile, data []byte) (string, error) {
 	return text, err
 }
 
+// loadProfile accepts both the current atomic wrapped profile format and the
+// original trusted enrollment JSON used by the offline preview.
+func loadProfile(path string) (ServerProfile, error) {
+	profile, err := LoadServerProfile(path)
+	if err == nil {
+		return profile, nil
+	}
+	data, readErr := os.ReadFile(path)
+	if readErr != nil {
+		return ServerProfile{}, err
+	}
+	var legacy ServerProfile
+	if legacyErr := json.Unmarshal(data, &legacy); legacyErr != nil {
+		return ServerProfile{}, err
+	}
+	if err := validateProfile(legacy); err != nil {
+		return ServerProfile{}, err
+	}
+	return legacy, nil
+}
+
 func decisionEnvelope(request approval.Request, deviceID, action string, validUntil time.Time, key *DeviceKey) (string, error) {
-	if key == nil || len(key.Private) != ed25519.PrivateKeySize || key.ID == "" {
+	if key == nil {
 		return "", errors.New("signing key is locked")
 	}
+	private, err := key.privateCopy()
+	if err != nil {
+		return "", err
+	}
+	defer clearBytes(private)
 	if deviceID != key.ID {
 		return "", errors.New("request is not bound to the unlocked device")
 	}
-	signed, err := approval.SignDecision(request, deviceID, action, nil, validUntil, key.Private)
+	signed, err := approval.SignDecision(request, deviceID, action, nil, validUntil, private)
 	if err != nil {
 		return "", err
 	}
@@ -58,4 +85,10 @@ func decisionEnvelope(request approval.Request, deviceID, action string, validUn
 		return "", err
 	}
 	return pretty.String(), nil
+}
+
+func clearBytes(data []byte) {
+	for i := range data {
+		data[i] = 0
+	}
 }

@@ -33,7 +33,7 @@ func TestRootHelpIncludesFileAndConfigExamples(t *testing.T) {
 	got := out.String()
 	for _, want := range []string{
 		"racg-approver --help",
-		"cannot send approvals",
+		"polls a signed service queue",
 		"racg file read /path/file.txt",
 		"racg file patch /path/file.txt --diff-file /tmp/change.patch",
 		"racg file upload ./local.bin /srv/remote.bin",

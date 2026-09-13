@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"filippo.io/age"
 )
@@ -29,6 +30,7 @@ type DeviceKey struct {
 	ID      string
 	Private ed25519.PrivateKey
 	Public  ed25519.PublicKey
+	mu      sync.RWMutex
 }
 
 type encryptedKeyPayload struct {
@@ -166,6 +168,8 @@ func (k *DeviceKey) lock() {
 	if k == nil {
 		return
 	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
 	for i := range k.Private {
 		k.Private[i] = 0
 	}
@@ -173,8 +177,39 @@ func (k *DeviceKey) lock() {
 	k.Public = nil
 }
 
+// privateCopy gives a short-lived signing copy while coordinating auto-lock.
+// Go still cannot guarantee erasure of this returned copy.
+func (k *DeviceKey) privateCopy() (ed25519.PrivateKey, error) {
+	if k == nil {
+		return nil, errors.New("signing key is locked")
+	}
+	k.mu.RLock()
+	defer k.mu.RUnlock()
+	if len(k.Private) != ed25519.PrivateKeySize {
+		return nil, errors.New("signing key is locked")
+	}
+	return append(ed25519.PrivateKey(nil), k.Private...), nil
+}
+
+func (k *DeviceKey) publicKeyBytes() ed25519.PublicKey {
+	if k == nil {
+		return nil
+	}
+	k.mu.RLock()
+	defer k.mu.RUnlock()
+	if len(k.Public) != ed25519.PublicKeySize {
+		return nil
+	}
+	return append(ed25519.PublicKey(nil), k.Public...)
+}
+
 func (k *DeviceKey) publicKeyText() string {
-	if k == nil || len(k.Public) != ed25519.PublicKeySize {
+	if k == nil {
+		return ""
+	}
+	k.mu.RLock()
+	defer k.mu.RUnlock()
+	if len(k.Public) != ed25519.PublicKeySize {
 		return ""
 	}
 	return base64.StdEncoding.EncodeToString(k.Public)

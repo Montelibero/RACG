@@ -1,7 +1,7 @@
 # Linux approver development preview
 
 This is an isolated Go module so graphics/CGO dependencies do not enter the
-standalone server build. It is not yet the networked approval application.
+standalone server build. Service broker deployment is not packaged yet.
 
 Build here with Go 1.22.2 or later:
 
@@ -14,8 +14,8 @@ Run model and widget tests without a display using `go test -tags ci ./...`.
 The native build must also be checked separately; the CI tag does not verify
 window-manager integration.
 
-The preview accepts a trusted server profile and a signed request JSON file.
-Profile shape:
+Without `--connect`, the preview accepts a trusted server profile and a signed
+request JSON file. Profile shape:
 
 ```json
 {"server_id":"your-server","public_key":"base64-encoded-Ed25519-public-key"}
@@ -33,23 +33,16 @@ private key only in process memory, and `Lock now` or the configured auto-lock
 prevents further signatures. Go cannot guarantee that every transient copy of
 key material is erased from memory.
 
-After verifying a request, `Allow once` and `Deny` create a signed protocol
-envelope in the Decision tab. The operator must copy it explicitly. Envelopes
-are not sent anywhere by the current CLI and are not approvals until a service
-connection delivers them to the authority, which separately checks device
-enrollment, revocation, validity and pending state. The key unlock timer is
-independent from decision validity and future grants.
+After verifying an offline request, `Allow once` and `Deny` create a signed
+protocol envelope in the Decision tab. With explicit `--connect
+unix:///path/to/broker.sock` (or `tcp://host:port`), the Service tab polls a
+verified pending-request snapshot, sends selected decisions, and verifies the
+authority receipt. System notifications announce newly observed requests. The
+broker remains untrusted: queue, request, and receipt signatures are checked
+locally.
 
-The module now also contains a peer-reviewed protocol transport and atomic local
-profile storage for the next service-connected slice. It can poll an authority
-signed pending-request snapshot, verify it against the pinned server key, submit
-a locally signed decision and verify the authority receipt. This transport is
-not wired into the CLI/window yet, and no background connection starts by
-default. The broker remains untrusted: request, receipt and snapshot signatures
-are verified locally.
-
-The current CLI still performs no network connections or executions and saves no
-server profile or request. Service UI wiring, live notifications and download
-delivery remain unfinished.
+The signing-key auto-lock timer is independent from decision validity and
+future grants. Reconnect/backoff, download rendering, enrollment UX,
+tray/background lifecycle and packaging remain unfinished.
 
 Linux graphics build requirements: https://docs.fyne.io/started/quick/

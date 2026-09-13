@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -80,7 +81,7 @@ func (t Transport) validate(key *DeviceKey) error {
 	if t.Connection == nil {
 		return errors.New("server connection required")
 	}
-	if key == nil || len(key.Private) != ed25519.PrivateKeySize || key.ID == "" {
+	if key == nil || key.ID == "" || len(key.publicKeyBytes()) != ed25519.PublicKeySize {
 		return errors.New("signing key is locked")
 	}
 	return validateProfile(t.Profile)
@@ -96,10 +97,15 @@ func (t Transport) PendingRequests(ctx context.Context, key *DeviceKey) ([]appro
 	if err != nil {
 		return nil, err
 	}
-	signedList, err := approval.SignRequestList(list, key.Private)
+	private, err := key.privateCopy()
 	if err != nil {
 		return nil, err
 	}
+	signedList, err := approval.SignRequestList(list, private)
+	if err != nil {
+		return nil, err
+	}
+	clearBytes(private)
 	result, err := t.Connection.ListPending(ctx, signedList)
 	if err != nil {
 		return nil, err
@@ -125,10 +131,15 @@ func (t Transport) SubmitDecision(ctx context.Context, key *DeviceKey, request a
 	if _, err := rand.Read(challenge); err != nil {
 		return approval.SignedDecisionReceipt{}, err
 	}
-	decision, err := approval.SignDecision(request.Request, key.ID, action, nil, validUntil, key.Private)
+	private, err := key.privateCopy()
 	if err != nil {
 		return approval.SignedDecisionReceipt{}, err
 	}
+	decision, err := approval.SignDecision(request.Request, key.ID, action, nil, validUntil, private)
+	if err != nil {
+		return approval.SignedDecisionReceipt{}, err
+	}
+	clearBytes(private)
 	receipt, err := t.Connection.SubmitDecision(ctx, broker.DecisionSubmission{
 		RequestID: request.Request.RequestID,
 		Decision:  decision,
@@ -137,7 +148,7 @@ func (t Transport) SubmitDecision(ctx context.Context, key *DeviceKey, request a
 	if err != nil {
 		return approval.SignedDecisionReceipt{}, err
 	}
-	if err := approval.VerifyDecisionReceipt(request.Request, decision, receipt, challenge, key.Public, t.Profile.PublicKey, t.now()); err != nil {
+	if err := approval.VerifyDecisionReceipt(request.Request, decision, receipt, challenge, key.publicKeyBytes(), t.Profile.PublicKey, t.now()); err != nil {
 		return approval.SignedDecisionReceipt{}, err
 	}
 	return receipt, nil
@@ -190,4 +201,43 @@ func pendingNotification(requests []approval.SignedRequest) (string, string) {
 	first := visibleText(requests[0].Request.ClientID)
 	summary := fmt.Sprintf("%d pending request(s); newest agent: %s", len(requests), first)
 	return "RACG approvals pending", summary
+}
+
+// parseTransportAddress accepts only absolute URIs. Unix endpoints use the URI
+// path; TCP endpoints use host and port.
+func parseTransportAddress(value string) (string, string, error) {
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return "", "", err
+	}
+	if !parsed.IsAbs() {
+		return "", "", errors.New("endpoint must be an absolute unix:// or tcp:// URI")
+	}
+	switch parsed.Scheme {
+	case "unix":
+		if parsed.Path == "" {
+			return "", "", errors.New("unix endpoint requires a socket path")
+		}
+		if parsed.Host != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return "", "", errors.New("unix endpoint accepts a socket path only")
+		}
+		return "unix", parsed.Path, nil
+	case "tcp", "tcp4", "tcp6":
+		if parsed.Host == "" {
+			return "", "", errors.New("tcp endpoint requires host and port")
+		}
+		if _, _, err := net.SplitHostPort(parsed.Host); err != nil {
+			return "", "", fmt.Errorf("tcp endpoint requires host and port: %w", err)
+		}
+		if parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return "", "", errors.New("tcp endpoint accepts host and port only")
+		}
+		return parsed.Scheme, parsed.Host, nil
+	default:
+		return "", "", fmt.Errorf("unsupported endpoint scheme %q", parsed.Scheme)
+	}
+}
+
+func requestListText(request approval.SignedRequest) string {
+	return visibleText(fmt.Sprintf("%s · %s", request.Request.ClientID, request.Request.RequestID))
 }

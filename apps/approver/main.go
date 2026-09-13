@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -20,11 +21,14 @@ import (
 )
 
 const helpText = `usage: racg-approver [--key path] [--server-profile path] [--request path]
+                   [--connect URI] [--poll-interval duration]
 
 Development preview of the separate Linux desktop approver.
 It can create or unlock a passphrase-encrypted local signing key, inspect a
 signed request, and create an offline Allow once or Deny envelope.
-It has no network or service connection and cannot send decisions or execute.
+When --connect is supplied, it polls a broker/service protocol endpoint and can
+send locally signed decisions. It never receives an authority signing key and
+cannot execute operations. Without --connect, no network connection is made.
 The existing racg serve and its local TUI do not require this application.
 
 --key             optional passphrase-encrypted Ed25519 signing key; created with
@@ -32,6 +36,9 @@ The existing racg serve and its local TUI do not require this application.
 --server-profile  trusted JSON from SSH enrollment: server_id and public_key
                   (base64 Ed25519 public key); never trust a broker-provided key
 --request         JSON signed request envelope exported from the authority
+--connect         broker/service endpoint URI; examples:
+                  unix:///run/racg/approver.sock and tcp://127.0.0.1:9443
+--poll-interval   signed pending-list polling interval (default 5s)
 --help            show this help without opening a window
 
 Verify both files, unlock the signing key, then use Allow once or Deny. A valid
@@ -44,13 +51,17 @@ material is erased from memory.
 
 The Signing key Auto-lock field accepts an empty value (off) or a positive Go
 duration such as 15m. Decision validity is required and uses the same duration
-form. The Decision tab contains a copyable envelope only; nothing is sent.
+form. Offline envelopes remain in the Decision tab. Service decisions are sent
+only after the operator selects a verified pending request and uses a service
+action; the authority receipt is verified before the UI reports acceptance.
 `
 
 type options struct {
-	key     string
-	profile string
-	request string
+	key          string
+	profile      string
+	request      string
+	connect      string
+	pollInterval time.Duration
 }
 
 func parseOptions(args []string, out io.Writer) (options, error) {
@@ -61,6 +72,8 @@ func parseOptions(args []string, out io.Writer) (options, error) {
 	fs.StringVar(&o.key, "key", "", "passphrase-encrypted signing key")
 	fs.StringVar(&o.profile, "server-profile", "", "trusted server profile")
 	fs.StringVar(&o.request, "request", "", "signed request envelope")
+	fs.StringVar(&o.connect, "connect", "", "broker/service endpoint URI")
+	fs.DurationVar(&o.pollInterval, "poll-interval", 5*time.Second, "pending-list polling interval")
 	if err := fs.Parse(args); err != nil {
 		return o, err
 	}
@@ -78,6 +91,15 @@ type previewUI struct {
 	profilePath       *widget.Entry
 	requestPath       *widget.Entry
 	decisionValidity  *widget.Entry
+	transportAddress  *widget.Entry
+	pollInterval      *widget.Entry
+	saveProfile       *widget.Button
+	connect           *widget.Button
+	disconnect        *widget.Button
+	requestList       *widget.List
+	inspectSelected   *widget.Button
+	serviceAllow      *widget.Button
+	serviceDeny       *widget.Button
 	preview           *widget.Entry
 	decision          *widget.Entry
 	status            *widget.Label
@@ -88,13 +110,24 @@ type previewUI struct {
 	allow             *widget.Button
 	deny              *widget.Button
 
-	key       *DeviceKey
-	request   approval.Request
-	lockTimer *time.Timer
+	app             fyne.App
+	profileValue    ServerProfile
+	connection      Connection
+	closeConnection func()
+	transportCancel context.CancelFunc
+	serviceRequests []approval.SignedRequest
+	seenRequests    map[string]struct{}
+	selectedIndex   int
+	selectedRequest approval.SignedRequest
+	transportActive bool
+	disconnecting   bool
+	key             *DeviceKey
+	request         approval.Request
+	lockTimer       *time.Timer
 }
 
-func newPreviewUI(o options) *previewUI {
-	u := &previewUI{}
+func newPreviewUI(o options, application fyne.App) *previewUI {
+	u := &previewUI{app: application, seenRequests: map[string]struct{}{}}
 	u.keyPath = widget.NewEntry()
 	u.keyPath.SetPlaceHolder("Path to passphrase-encrypted signing key")
 	u.keyPath.SetText(o.key)
@@ -112,6 +145,14 @@ func newPreviewUI(o options) *previewUI {
 	u.requestPath.SetText(o.request)
 	u.decisionValidity = widget.NewEntry()
 	u.decisionValidity.SetPlaceHolder("Offline decision validity (example 5m)")
+	u.transportAddress = widget.NewEntry()
+	u.transportAddress.SetPlaceHolder("Broker/service URI (unix:///path or tcp://host:port)")
+	u.transportAddress.SetText(o.connect)
+	u.pollInterval = widget.NewEntry()
+	u.pollInterval.SetText(o.pollInterval.String())
+	u.saveProfile = widget.NewButton("Save profile", u.saveProfileClicked)
+	u.connect = widget.NewButton("Connect", u.connectClicked)
+	u.disconnect = widget.NewButton("Disconnect", u.disconnectClicked)
 	u.preview = widget.NewMultiLineEntry()
 	u.preview.TextStyle = fyne.TextStyle{Monospace: true}
 	u.preview.Wrapping = fyne.TextWrapOff
@@ -122,6 +163,9 @@ func newPreviewUI(o options) *previewUI {
 	u.decision.SetPlaceHolder("Offline signed decision envelope")
 	u.decision.Disable()
 	u.status = widget.NewLabel("Offline preview — signing key management only; no network or execution.")
+	if o.connect != "" {
+		u.status.SetText("Offline preview ready. Press Connect to poll the configured broker/service endpoint.")
+	}
 	u.status.Wrapping = fyne.TextWrapWord
 	u.createKey = widget.NewButton("Create encrypted key", u.createKeyClicked)
 	u.unlockKey = widget.NewButton("Unlock key", u.unlockKeyClicked)
@@ -146,10 +190,37 @@ func (u *previewUI) canvas() fyne.CanvasObject {
 		widget.NewFormItem("Signed request", u.requestPath),
 		widget.NewFormItem("Decision validity", u.decisionValidity),
 	)
-	requestButtons := container.NewHBox(u.verify, u.allow, u.deny)
+	requestButtons := container.NewHBox(u.verify, u.saveProfile, u.allow, u.deny)
+	u.requestList = widget.NewList(
+		func() int { return len(u.serviceRequests) },
+		func() fyne.CanvasObject { return widget.NewLabel("template") },
+		func(i int, object fyne.CanvasObject) {
+			if i >= 0 && i < len(u.serviceRequests) {
+				object.(*widget.Label).SetText(requestListText(u.serviceRequests[i]))
+			}
+		},
+	)
+	u.requestList.OnSelected = func(i int) {
+		if i >= 0 && i < len(u.serviceRequests) {
+			u.selectedIndex = i
+			u.selectedRequest = u.serviceRequests[i]
+		}
+		u.updateServiceButtons()
+	}
+	u.inspectSelected = widget.NewButton("Inspect selected", u.inspectServiceRequest)
+	u.serviceAllow = widget.NewButton("Send Allow once", func() { u.sendServiceDecision("ALLOW_ONCE") })
+	u.serviceDeny = widget.NewButton("Send Deny", func() { u.sendServiceDecision("DENY") })
+	u.updateServiceButtons()
+	serviceButtons := container.NewHBox(u.inspectSelected, u.serviceAllow, u.serviceDeny)
+	transportForm := widget.NewForm(
+		widget.NewFormItem("Endpoint", u.transportAddress),
+		widget.NewFormItem("Poll interval", u.pollInterval),
+	)
+	transportButtons := container.NewHBox(u.connect, u.disconnect)
 	top := container.NewVBox(
 		widget.NewLabelWithStyle("RACG Approver · offline signing preview", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		requestForm, requestButtons,
+		transportForm, transportButtons,
 		widget.NewLabelWithStyle("Signing key", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		keyForm, keyButtons,
 		u.status,
@@ -157,12 +228,13 @@ func (u *previewUI) canvas() fyne.CanvasObject {
 	tabs := container.NewAppTabs(
 		container.NewTabItem("Request", u.preview),
 		container.NewTabItem("Decision", u.decision),
+		container.NewTabItem("Service", container.NewVBox(serviceButtons, u.requestList)),
 	)
 	return container.NewBorder(top, nil, nil, nil, tabs)
 }
 
-func buildContent(o options) fyne.CanvasObject {
-	return newPreviewUI(o).canvas()
+func buildContent(o options, application fyne.App) fyne.CanvasObject {
+	return newPreviewUI(o, application).canvas()
 }
 
 func (u *previewUI) verifyClicked() {
@@ -171,11 +243,7 @@ func (u *previewUI) verifyClicked() {
 	u.decision.SetText("")
 	u.decision.Disable()
 	u.updateSigningButtons()
-	profileBytes, err := os.ReadFile(u.profilePath.Text)
-	var profile ServerProfile
-	if err == nil {
-		err = json.Unmarshal(profileBytes, &profile)
-	}
+	profile, err := loadProfile(u.profilePath.Text)
 	var request []byte
 	if err == nil {
 		request, err = os.ReadFile(u.requestPath.Text)
@@ -190,6 +258,7 @@ func (u *previewUI) verifyClicked() {
 		return
 	}
 	u.request = signed.Request
+	u.profileValue = profile
 	u.preview.SetText(text)
 	u.updateSigningButtons()
 	u.status.SetText("Signature verified. Offline snapshot only; not proof of safety or current pending status.")
@@ -323,6 +392,203 @@ func (u *previewUI) updateSigningButtons() {
 	}
 }
 
+func (u *previewUI) saveProfileClicked() {
+	if err := SaveServerProfile(u.profilePath.Text, u.profileValue); err != nil {
+		u.status.SetText("Profile save failed: " + visibleText(err.Error()))
+		return
+	}
+	u.status.SetText("Trusted profile saved with mode 0600. Never accept a profile from a broker message.")
+}
+
+func (u *previewUI) connectClicked() {
+	if u.transportActive {
+		u.status.SetText("Service connection is already active.")
+		return
+	}
+	interval, err := time.ParseDuration(strings.TrimSpace(u.pollInterval.Text))
+	if err != nil || interval <= 0 {
+		u.status.SetText("Connect failed: poll interval must be a positive duration")
+		return
+	}
+	profile, err := loadProfile(u.profilePath.Text)
+	if err != nil {
+		u.status.SetText("Connect failed: " + visibleText(err.Error()))
+		return
+	}
+	if u.key == nil {
+		u.status.SetText("Connect failed: unlock the signing key first")
+		return
+	}
+	network, address, err := parseTransportAddress(u.transportAddress.Text)
+	if err != nil {
+		u.status.SetText("Connect failed: " + visibleText(err.Error()))
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	connection, closeConnection, err := DialProtocol(ctx, network, address)
+	if err != nil {
+		cancel()
+		u.status.SetText("Connect failed: " + visibleText(err.Error()))
+		return
+	}
+	u.connection = connection
+	u.closeConnection = closeConnection
+	u.transportCancel = cancel
+	u.profileValue = profile
+	u.transportActive = true
+	u.updateServiceButtons()
+	u.status.SetText("Service connected. Pending snapshots are verified against the pinned server key.")
+	go func() {
+		poller := Poller{
+			Connection: connection,
+			Profile:    profile,
+			Interval:   interval,
+			OnPending:  u.handlePending,
+		}
+		err := poller.Run(ctx, u.key)
+		closeConnection()
+		fyne.Do(func() {
+			u.transportStopped(err)
+		})
+	}()
+}
+
+func (u *previewUI) disconnectClicked() {
+	if !u.transportActive {
+		return
+	}
+	u.disconnecting = true
+	u.transportCancel()
+	u.closeConnection()
+}
+
+func (u *previewUI) transportStopped(err error) {
+	u.transportActive = false
+	u.connection = nil
+	u.transportCancel = nil
+	u.closeConnection = nil
+	u.updateServiceButtons()
+	if u.disconnecting || errors.Is(err, context.Canceled) {
+		u.disconnecting = false
+		u.status.SetText("Service connection closed.")
+		return
+	}
+	u.disconnecting = false
+	u.status.SetText("Service connection stopped: " + visibleText(err.Error()))
+}
+
+func (u *previewUI) handlePending(requests []approval.SignedRequest, pollErr error) {
+	fyne.Do(func() {
+		u.applyPending(requests, pollErr)
+	})
+}
+
+func (u *previewUI) applyPending(requests []approval.SignedRequest, pollErr error) {
+	if pollErr != nil {
+		u.status.SetText("Pending poll failed: " + visibleText(pollErr.Error()))
+		return
+	}
+	fresh := make([]approval.SignedRequest, 0, len(requests))
+	for _, request := range requests {
+		if _, seen := u.seenRequests[request.Request.RequestID]; seen {
+			continue
+		}
+		u.seenRequests[request.Request.RequestID] = struct{}{}
+		fresh = append(fresh, request)
+	}
+	u.serviceRequests = append([]approval.SignedRequest(nil), requests...)
+	if u.requestList != nil {
+		u.requestList.Refresh()
+	}
+	if len(fresh) != 0 {
+		_ = NotifyPending(u.app, fresh)
+	}
+	if len(requests) == 0 {
+		u.status.SetText("Service connected. Pending queue is empty.")
+		return
+	}
+	u.status.SetText(fmt.Sprintf("Service connected. Verified %d pending request(s).", len(requests)))
+}
+
+func (u *previewUI) inspectServiceRequest() {
+	if u.selectedRequest.Request.RequestID == "" {
+		u.status.SetText("Select a service request first.")
+		return
+	}
+	data, err := json.Marshal(u.selectedRequest)
+	if err != nil {
+		u.status.SetText("Request display failed: " + visibleText(err.Error()))
+		return
+	}
+	text, err := verifiedPreview(u.profileValue, data)
+	if err != nil {
+		u.status.SetText("Request verification failed: " + visibleText(err.Error()))
+		return
+	}
+	u.request = u.selectedRequest.Request
+	u.preview.SetText(text)
+	u.updateSigningButtons()
+	u.status.SetText("Verified service request. Use Service actions to send a decision.")
+}
+
+func (u *previewUI) sendServiceDecision(action string) {
+	if !u.transportActive || u.selectedRequest.Request.RequestID == "" {
+		u.status.SetText("Select a verified pending request first.")
+		return
+	}
+	validity, err := parseFlexibleDuration(strings.TrimSpace(u.decisionValidity.Text))
+	if err != nil {
+		u.status.SetText("Service decision not sent: " + err.Error())
+		return
+	}
+	receipt, err := u.transportSubmit(action, validity)
+	if err != nil {
+		u.status.SetText("Service decision rejected: " + visibleText(err.Error()))
+		return
+	}
+	u.removeServiceRequest(u.selectedRequest.Request.RequestID)
+	u.status.SetText(fmt.Sprintf("%s sent. Authority receipt: %s.", action, receipt.Receipt.Status))
+}
+
+func (u *previewUI) transportSubmit(action string, validity time.Duration) (approval.SignedDecisionReceipt, error) {
+	transport := Transport{
+		Connection: u.connection,
+		Profile:    u.profileValue,
+	}
+	return transport.SubmitDecision(context.Background(), u.key, u.selectedRequest, action, time.Now().Add(validity))
+}
+
+func (u *previewUI) updateServiceButtons() {
+	ready := u.transportActive && u.selectedRequest.Request.RequestID != ""
+	if ready {
+		u.inspectSelected.Enable()
+		u.serviceAllow.Enable()
+		u.serviceDeny.Enable()
+	} else {
+		u.inspectSelected.Disable()
+		u.serviceAllow.Disable()
+		u.serviceDeny.Disable()
+	}
+}
+
+func (u *previewUI) removeServiceRequest(requestID string) {
+	remaining := make([]approval.SignedRequest, 0, len(u.serviceRequests))
+	for _, request := range u.serviceRequests {
+		if request.Request.RequestID != requestID {
+			remaining = append(remaining, request)
+		}
+	}
+	u.serviceRequests = remaining
+	if u.selectedRequest.Request.RequestID == requestID {
+		u.selectedIndex = -1
+		u.selectedRequest = approval.SignedRequest{}
+	}
+	if u.requestList != nil {
+		u.requestList.Refresh()
+	}
+	u.updateServiceButtons()
+}
+
 func parseFlexibleDuration(value string) (time.Duration, error) {
 	if value == "" {
 		return 0, errors.New("duration required")
@@ -359,6 +625,6 @@ func main() {
 	application := app.NewWithID("io.racg.approver.preview")
 	window := application.NewWindow("RACG Approver — offline signing preview")
 	window.Resize(fyne.NewSize(1080, 820))
-	window.SetContent(buildContent(o))
+	window.SetContent(buildContent(o, application))
 	window.ShowAndRun()
 }

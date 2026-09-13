@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 
 	"github.com/itolstov/racg/internal/approval"
 )
@@ -40,7 +41,7 @@ func ServeAuthority(ctx context.Context, authority Authority, in io.Reader, out 
 		}
 		var request Request
 		err := decoder.Decode(&request)
-		if errors.Is(err, io.EOF) {
+		if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
 			return nil
 		}
 		if err != nil {

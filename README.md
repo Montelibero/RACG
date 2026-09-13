@@ -7,13 +7,15 @@ RACG is a local Approval Gateway for privileged operations. A client sends reque
 An isolated Linux desktop development preview lives in `apps/approver/`.
 Build it separately and run `racg-approver --help`. It inspects offline signed
 request files against a trusted server profile and can create an offline
-Allow once/Deny envelope with a passphrase-encrypted local key. It cannot send
-an approval, connect to a service or execute operations. The standalone server
-has no GUI build dependency. See [preview instructions](apps/approver/README.md).
+Allow once/Deny envelope with a passphrase-encrypted local key. With explicit
+`--connect`, it can also poll a broker/service endpoint, verify signed pending
+requests, and send locally signed decisions. It cannot execute operations, and
+the standalone server has no GUI build dependency. See
+[preview instructions](apps/approver/README.md).
 
 Manual approval and denial are local to the server TUI. Agent bearer tokens cannot approve or deny requests: the legacy `POST /v1/requests/{id}/decision` endpoint returns `403 REMOTE_DECISION_DISABLED`. Existing authorized rules may still auto-approve matching requests. Standalone `racg serve` needs no installed service or desktop approver.
 
-Security upgrade: older server builds accepted decisions from agent tokens. Updating only the agent client does not fix those servers; install the corrected server binary and restart it. Signed remote approval is not yet available.
+Security upgrade: older server builds accepted decisions from agent tokens. Updating only the agent client does not fix those servers; install the corrected server binary and restart it. Legacy HTTP agent self-approval remains disabled.
 
 - HTTP API + WebSocket events
 - Built-in TUI approvals dashboard (mouse + hotkeys)

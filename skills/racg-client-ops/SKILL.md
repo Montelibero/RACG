@@ -10,15 +10,17 @@ Use RACG when command execution must go through a human-approved gateway instead
 ## Core Workflow
 
 The separate desktop development preview (`apps/approver/`,
-`racg-approver --help`) inspects offline signed request files and can create an
-offline Allow once/Deny envelope. It cannot send an approval, connect or
-execute; do not direct pending interactive requests there.
+`racg-approver --help`) inspects offline signed request files, can create an
+offline Allow once/Deny envelope, and—with explicit `--connect` to an
+experimental service endpoint—can poll verified pending requests and send
+locally signed decisions. It cannot execute and cannot connect to legacy
+interactive `racg serve`.
 
 On HTTP 500 `DECISION_PERSISTENCE_FAILED`, retain `error.request_id`: automatic approval failed, but the request exists and remains pending. Ask the operator to fix server storage and review that request in TUI, then resume with `racg request wait <id>`; do not resubmit.
 
 If a manual decision cannot be persisted, the server leaves the request pending without applying new rules or dispatching execution. Ask the operator to resolve the storage error shown in TUI; do not resubmit the operation as a workaround.
 
-Manual approval and denial are local to the server TUI. Agent tokens cannot approve or deny requests over HTTP: the legacy `POST /v1/requests/{id}/decision` endpoint returns `403 REMOTE_DECISION_DISABLED`. Do not retry it or attempt self-approval; submit and wait for the operator. Existing authorized rules may still auto-approve matching requests. Signed remote approval is not yet available. This protection requires an updated, restarted server, not just an updated client.
+Manual approval and denial are local to the server TUI. Agent tokens cannot approve or deny requests over HTTP: the legacy `POST /v1/requests/{id}/decision` endpoint returns `403 REMOTE_DECISION_DISABLED`. Do not retry it or attempt self-approval; submit and wait for the operator. Existing authorized rules may still auto-approve matching requests. This protection requires an updated, restarted server, not just an updated client.
 
 1. Resolve server auth:
    - If the user provides a pairing code, run `racg login --host <url> --pairing-code <code>`.
