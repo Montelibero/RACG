@@ -101,6 +101,8 @@ commands:
              start the unprivileged signed-protocol relay
   service-admin
              administer trusted service devices, agents and grants
+  service-agent
+             submit service operations and receive signed results
   login      save client auth from a pairing code
   logout     remove saved client auth
   session    inspect saved/current session

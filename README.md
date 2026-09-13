@@ -9,6 +9,10 @@ An experimental two-process service mode exists in this branch: the privileged
 `racg service-broker` relays signed protocol traffic. Example systemd units are
 in `deploy/systemd/`; broker deployment packaging is not complete.
 
+Experimental service agents use `racg service-agent --help` for encrypted key
+generation, signed operation submission, authenticated terminal results, and
+verified `fs.download` artifact delivery.
+
 An isolated Linux desktop development preview lives in `apps/approver/`.
 Build it separately and run `racg-approver --help`. It inspects offline signed
 request files against a trusted server profile and can create an offline

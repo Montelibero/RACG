@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"sync"
 
 	"github.com/itolstov/racg/internal/approval"
@@ -31,6 +32,25 @@ func NewAuthorityClient(conn io.ReadWriter) (*AuthorityClient, error) {
 		encoder: json.NewEncoder(conn),
 		decoder: json.NewDecoder(conn),
 	}, nil
+}
+
+// Dial opens a protocol client over any reachable relay transport. The broker
+// remains untrusted; callers verify every signed response.
+func Dial(ctx context.Context, network, address string) (*AuthorityClient, func(), error) {
+	if network == "" || address == "" {
+		return nil, nil, errors.New("protocol network and address required")
+	}
+	dialer := &net.Dialer{}
+	conn, err := dialer.DialContext(ctx, network, address)
+	if err != nil {
+		return nil, nil, err
+	}
+	client, err := NewAuthorityClient(conn)
+	if err != nil {
+		conn.Close()
+		return nil, nil, err
+	}
+	return client, func() { conn.Close() }, nil
 }
 
 func (c *AuthorityClient) SubmitAgent(ctx context.Context, signed approval.SignedSubmission) (approval.SignedRequest, error) {

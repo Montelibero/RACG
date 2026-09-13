@@ -12,6 +12,11 @@ unprivileged broker commands (`racg service-authority --help`,
 `racg service-broker --help`). It is not interchangeable with legacy
 interactive `racg serve`; do not mix their state or credentials.
 
+Experimental service agents use `racg service-agent --help` with their own
+passphrase-encrypted Ed25519 key. That key may submit operations and poll
+results; it cannot approve them. Verify the exported server profile and use the
+explicit relay `--connect` URI.
+
 ## Core Workflow
 
 The separate desktop development preview (`apps/approver/`,

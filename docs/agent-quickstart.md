@@ -32,6 +32,13 @@ administrators can inspect the separate `racg service-authority` and
 `racg service-broker` commands; their systemd examples live under
 `deploy/systemd/`.
 
+Experimental service-mode agents use `racg service-agent --help` instead of the
+legacy HTTP pairing workflow. It can generate a passphrase-encrypted Ed25519
+agent key, submit service operations to a signed relay, verify authority
+responses against the pinned server key, wait for terminal results, and save
+verified `fs.download` artifacts. The desktop approver signs decisions; the
+agent key cannot approve anything.
+
 Use the skill when an agent should operate through RACG instead of direct shell execution. It covers login, command submission, live output, final logs, cancel/kill, safe diagnostics, and auto-approve rule boundaries.
 
 ## 1. Connect

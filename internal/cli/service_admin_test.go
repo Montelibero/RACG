@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"errors"
+
 	"github.com/itolstov/racg/internal/authority"
 	"github.com/itolstov/racg/internal/broker"
 	"github.com/itolstov/racg/internal/service"
@@ -73,7 +75,8 @@ func adminCommandFixture(t *testing.T) (*ServiceAdminCmd, string) {
 	t.Cleanup(func() {
 		cancel()
 		listener.Close()
-		if err := <-serverDone; err != nil {
+		err := <-serverDone
+		if err != nil && !errors.Is(err, context.Canceled) {
 			t.Errorf("admin server: %v", err)
 		}
 	})
