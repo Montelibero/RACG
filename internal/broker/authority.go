@@ -19,6 +19,7 @@ type Authority interface {
 	StageUpload(context.Context, approval.SignedStagedUpload, []byte) (approval.StagedUpload, error)
 	SubmitDecision(context.Context, string, approval.SignedDecision, []byte) (approval.SignedDecisionReceipt, error)
 	LookupDecision(context.Context, approval.SignedDecisionLookup) (approval.SignedDecisionLookupResult, error)
+	ListPending(context.Context, approval.SignedRequestList) (approval.SignedRequestListResult, error)
 }
 
 // ServeAuthority reads sequential JSON protocol values from in and writes one
@@ -99,6 +100,12 @@ func handleAuthorityRequest(ctx context.Context, authority Authority, request Re
 			return nil, err
 		}
 		return authority.LookupDecision(ctx, params)
+	case MethodListPending:
+		var params approval.SignedRequestList
+		if err := decodeParams(request.Params, &params); err != nil {
+			return nil, err
+		}
+		return authority.ListPending(ctx, params)
 	default:
 		return nil, errors.New("unknown authority method")
 	}

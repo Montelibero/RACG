@@ -58,6 +58,11 @@ func (c *AuthorityClient) LookupDecision(ctx context.Context, signed approval.Si
 	return result, c.call(ctx, MethodLookupDecision, signed, &result)
 }
 
+func (c *AuthorityClient) ListPending(ctx context.Context, signed approval.SignedRequestList) (approval.SignedRequestListResult, error) {
+	var result approval.SignedRequestListResult
+	return result, c.call(ctx, MethodListPending, signed, &result)
+}
+
 func (c *AuthorityClient) call(ctx context.Context, method string, params, result any) error {
 	if err := ctx.Err(); err != nil {
 		return err

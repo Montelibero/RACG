@@ -20,6 +20,7 @@ const (
 	MethodStageUpload      = "v1/authority.stage-upload"
 	MethodSubmitDecision   = "v1/authority.submit-decision"
 	MethodLookupDecision   = "v1/authority.lookup-decision"
+	MethodListPending      = "v1/authority.list-pending"
 )
 
 type Request struct {

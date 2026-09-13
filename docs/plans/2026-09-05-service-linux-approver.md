@@ -1,6 +1,6 @@
 # RACG service mode and Linux approver
 
-Status: file execution extracted; shared UI contracts, signed protocol primitives, an offline signing preview, internal authenticated delivery/recovery, peer-verified Unix transport, trusted key/admin boundaries, operation admission/staging, stored execution/result delivery and reusable service grants added. Service mode and the networked desktop approver are not implemented. User authorized closing the legacy HTTP decision endpoint; it now rejects agent decisions while local TUI decisions remain available. Baseline inspected: `a1fda41`.
+Status: file execution extracted; shared UI contracts, signed protocol primitives, an offline signing preview, internal authenticated delivery/recovery, peer-verified Unix transport, trusted key/admin boundaries, operation admission/staging, stored execution/result delivery, reusable service grants and a verified desktop transport foundation added. Service mode and the networked desktop approver are not implemented. User authorized closing the legacy HTTP decision endpoint; it now rejects agent decisions while local TUI decisions remain available. Baseline inspected: `a1fda41`.
 
 ## Agreed scope
 
@@ -326,6 +326,15 @@ Verification: full tests, race tests, vet, Linux amd64/arm64 static builds and r
 - Tests cover matching/nonmatching/foreign-agent submissions, permanent grants, expiry, device revocation, canonical-scope rejection, session-action rejection, admin listing/revocation and full service auto-execution. Full race tests, vet and Linux amd64/arm64 builds passed.
 - Still remaining: desktop scope-builder UX, explicit import of legacy unsigned rules, live cancel/events, service binaries/installer and packaging.
 - Codespaces snapshot: `.codespaces/service-grants-map.1789267545/belief_map.sexp` (146 files, 521 edges, 921 entities), earlier maps/cache retained.
+
+### Desktop transport and profile foundation
+
+- Added a device-signed pending-list protocol. An enrolled approver device requests a fresh challenge-bound snapshot; the authority signs both empty and non-empty pending queues with their server-signed operation envelopes. This prevents a broker from hiding work by claiming an empty queue and keeps read-only inspection distinct from approval.
+- Exposed `ListPending` through the narrow broker protocol and authority authority implementation. It authenticates the current non-revoked device key, never mutates queue state, and returns only a point-in-time snapshot.
+- Added desktop-side atomic profile persistence (`0600`, symlink-safe publication, unsafe-parent rejection), a generic protocol connection, a transport that verifies pending snapshots and decision receipts against the pinned server/device identities, and a poller/notification callback boundary. These components are not yet wired into the Fyne CLI/window.
+- Tests cover signed empty/non-empty pending snapshots, consumed-request removal, revoked/forged devices, broker transport polling and decision submission/replay, profile round-trip/mode validation and notification text escaping. App race tests, native build/help, full root race tests, vet and Linux amd64/arm64 builds passed.
+- Remaining desktop work: wire polling/notifications/request cards into Fyne UI, enrollment command/UX, reconnect/backoff policy, result and download rendering, tray/background lifecycle and packaging.
+- Codespaces snapshot: `.codespaces/desktop-transport-map.1789298161/belief_map.sexp` (153 files, 603 edges, 952 entities), earlier maps/cache retained.
 
 ### Desktop build feasibility checkpoint
 

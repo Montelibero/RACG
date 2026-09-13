@@ -35,12 +35,21 @@ key material is erased from memory.
 
 After verifying a request, `Allow once` and `Deny` create a signed protocol
 envelope in the Decision tab. The operator must copy it explicitly. Envelopes
-are not sent anywhere and are not approvals until a future service connection
-delivers them to the authority, which separately checks device enrollment,
-revocation, validity and pending state. The key unlock timer is independent
-from decision validity and future grants.
+are not sent anywhere by the current CLI and are not approvals until a service
+connection delivers them to the authority, which separately checks device
+enrollment, revocation, validity and pending state. The key unlock timer is
+independent from decision validity and future grants.
 
-No network connections or executions are performed, and no server profile or
-request is saved. Service connectivity and notifications remain unfinished.
+The module now also contains a peer-reviewed protocol transport and atomic local
+profile storage for the next service-connected slice. It can poll an authority
+signed pending-request snapshot, verify it against the pinned server key, submit
+a locally signed decision and verify the authority receipt. This transport is
+not wired into the CLI/window yet, and no background connection starts by
+default. The broker remains untrusted: request, receipt and snapshot signatures
+are verified locally.
+
+The current CLI still performs no network connections or executions and saves no
+server profile or request. Service UI wiring, live notifications and download
+delivery remain unfinished.
 
 Linux graphics build requirements: https://docs.fyne.io/started/quick/

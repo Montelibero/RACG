@@ -35,6 +35,10 @@ func (fakeAuthority) LookupDecision(context.Context, approval.SignedDecisionLook
 	return approval.SignedDecisionLookupResult{}, errSocketBoundary
 }
 
+func (fakeAuthority) ListPending(context.Context, approval.SignedRequestList) (approval.SignedRequestListResult, error) {
+	return approval.SignedRequestListResult{}, errSocketBoundary
+}
+
 var errSocketBoundary = errSentinel("socket boundary reached")
 
 type errSentinel string
