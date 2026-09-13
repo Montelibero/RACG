@@ -1,6 +1,6 @@
 # RACG service mode and Linux approver
 
-Status: file execution extracted; shared UI contracts, signed protocol primitives, an offline signing preview, internal authenticated decision delivery/recovery boundaries, peer-verified Unix transport, trusted key/admin boundaries and authority operation admission/immutable byte staging added. Service mode and the networked desktop approver are not implemented. User authorized closing the legacy HTTP decision endpoint; it now rejects agent decisions while local TUI decisions remain available. Baseline inspected: `a1fda41`.
+Status: file execution extracted; shared UI contracts, signed protocol primitives, an offline signing preview, internal authenticated decision delivery/recovery boundaries, peer-verified Unix transport, trusted key/admin boundaries, authority operation admission/staging and a stored-operation execution adapter added. Service mode and the networked desktop approver are not implemented. User authorized closing the legacy HTTP decision endpoint; it now rejects agent decisions while local TUI decisions remain available. Baseline inspected: `a1fda41`.
 
 ## Agreed scope
 
@@ -297,6 +297,15 @@ Verification: full tests, race tests, vet, Linux amd64/arm64 static builds and r
 - Tests cover staged stdin binding and execution, tampered bytes, single claim semantics, unsupported operations, unknown fields, forged metadata fields and all operation schemas. Full race tests, vet and Linux amd64/arm64 builds passed.
 - Remaining: authority-owned download snapshots, streaming transfer transport and explicit resource limits, actual backend dispatch for all operation types, grants/rules, pending events/results, service binaries and desktop transport.
 - Codespaces snapshot: `.codespaces/admission-staging-map.1789258681/belief_map.sexp` (140 files, 430 edges, 885 entities), earlier maps/cache retained.
+
+### Stored-operation execution adapter
+
+- Added `Authority.ExecuteStored` as the privileged dispatch adapter. After the existing durable execution claim, it reparses the authority-owned signed operation with the same strict admission schema and dispatches all six operation types to the existing executor implementations. It does not accept broker bytes, paths or status.
+- `cmd.run` uses immutable authority-staged stdin, explicit/default timeout and existing process-group/output handling. `fs.upload` reads only the claimed authority-staged bytes. Staged bytes are deleted after a command/upload reaches terminal state; target side effects remain exactly-once-uncertain after a crash.
+- `fs.download` snapshots through the existing executor into an authority-owned SQLite artifact with size/SHA-256/mode/name. Retrieval is separate from execution and refuses non-success requests or integrity mismatch. `fs.read`, `fs.patch_unified` and `conf.set` retain the interactive executor semantics.
+- Execution options normalize to the existing defaults/output/kill-grace/transfer values until service configuration exposes explicit deployment settings. Tests cover staged stdin deletion, truncated read, upload atomic write/mode/staging cleanup, patch, config edit and authority-owned download snapshot.
+- This adapter is not yet automatically wired to broker decisions by the service composition, and agent result/download delivery is not yet implemented. Grants/rules, live events, cancellation transport, operation/resource configuration, service binaries and desktop transport remain unfinished.
+- Codespaces snapshot: `.codespaces/operation-runner-map.1789262721/belief_map.sexp` (142 files, 454 edges, 893 entities), earlier maps/cache retained.
 
 ### Desktop build feasibility checkpoint
 
