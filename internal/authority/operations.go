@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -113,7 +114,7 @@ func (a *Authority) runCommandOperation(ctx context.Context, request approval.Re
 	if err := strictUnmarshal(payloadBytes, &payload); err != nil {
 		return failedOperationResult(err)
 	}
-	var stdin *bytes.Reader
+	var stdin io.Reader
 	if payload.StdinUploadID != "" {
 		data, err := a.StagedUploadForRequest(ctx, request, payload.StdinUploadID)
 		if err != nil {

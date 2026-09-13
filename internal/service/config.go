@@ -12,6 +12,10 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/itolstov/racg/internal/authority"
+	"github.com/itolstov/racg/internal/executor"
 )
 
 const (
@@ -30,6 +34,7 @@ type AuthorityConfig struct {
 	BrokerGID   int
 	AdminUID    int
 	AdminGID    int
+	Execution   ExecutionConfig
 }
 
 type BrokerConfig struct {
@@ -44,11 +49,28 @@ type Config struct {
 	Broker    BrokerConfig
 }
 
+type ExecutionConfig struct {
+	DefaultTimeoutSec int
+	MaxOutputBytes    int
+	MaxTransferBytes  int64
+	KillGraceSec      int
+}
+
+func DefaultExecutionConfig() ExecutionConfig {
+	return ExecutionConfig{
+		DefaultTimeoutSec: 120,
+		MaxOutputBytes:    1024 * 1024,
+		MaxTransferBytes:  100 * 1024 * 1024,
+		KillGraceSec:      5,
+	}
+}
+
 func DefaultAuthorityConfig() AuthorityConfig {
 	return AuthorityConfig{
 		StateDir:    DefaultAuthorityStateDir,
 		SocketPath:  DefaultAuthoritySocket,
 		AdminSocket: DefaultAdminSocket,
+		Execution:   DefaultExecutionConfig(),
 	}
 }
 
@@ -71,6 +93,33 @@ func (c AuthorityConfig) PrivateKeyPath() string {
 	return filepath.Join(c.StateDir, "authority.key")
 }
 
+func (c ExecutionConfig) Validate() error {
+	for name, value := range map[string]int{
+		"default_timeout_sec": c.DefaultTimeoutSec,
+		"max_output_bytes":    c.MaxOutputBytes,
+		"kill_grace_sec":      c.KillGraceSec,
+	} {
+		if value < 0 {
+			return fmt.Errorf("%s must not be negative", name)
+		}
+	}
+	if c.MaxTransferBytes < 0 {
+		return errors.New("max_transfer_bytes must not be negative")
+	}
+	return nil
+}
+
+func (c ExecutionConfig) Options() authority.OperationExecutionOptions {
+	return authority.OperationExecutionOptions{
+		Executor: executor.Options{
+			MaxOutputBytes: c.MaxOutputBytes,
+			KillGrace:      time.Duration(c.KillGraceSec) * time.Second,
+		},
+		DefaultTimeout:   time.Duration(c.DefaultTimeoutSec) * time.Second,
+		MaxTransferBytes: c.MaxTransferBytes,
+	}
+}
+
 func (c AuthorityConfig) Validate() error {
 	if c.ServerID == "" {
 		return errors.New("authority server ID required")
@@ -89,6 +138,9 @@ func (c AuthorityConfig) Validate() error {
 	}
 	if c.AdminUID < 0 || c.AdminGID < 0 {
 		return errors.New("authority admin UID and GID required")
+	}
+	if err := c.Execution.Validate(); err != nil {
+		return fmt.Errorf("authority execution settings: %w", err)
 	}
 	if c.SocketPath == c.AdminSocket {
 		return errors.New("broker and admin sockets must be separate")
@@ -226,12 +278,23 @@ func applyServiceTOML(config *Config, lineNo int, key, value string) error {
 		return nil
 	}
 	intTargets := map[string]*int{
-		"authority_broker_uid": &config.Authority.BrokerUID,
-		"authority_broker_gid": &config.Authority.BrokerGID,
-		"authority_admin_uid":  &config.Authority.AdminUID,
-		"authority_admin_gid":  &config.Authority.AdminGID,
-		"broker_authority_uid": &config.Broker.AuthorityUID,
-		"broker_authority_gid": &config.Broker.AuthorityGID,
+		"authority_broker_uid":          &config.Authority.BrokerUID,
+		"authority_broker_gid":          &config.Authority.BrokerGID,
+		"authority_admin_uid":           &config.Authority.AdminUID,
+		"authority_admin_gid":           &config.Authority.AdminGID,
+		"execution_default_timeout_sec": &config.Authority.Execution.DefaultTimeoutSec,
+		"execution_max_output_bytes":    &config.Authority.Execution.MaxOutputBytes,
+		"execution_kill_grace_sec":      &config.Authority.Execution.KillGraceSec,
+		"broker_authority_uid":          &config.Broker.AuthorityUID,
+		"broker_authority_gid":          &config.Broker.AuthorityGID,
+	}
+	if key == "execution_max_transfer_bytes" {
+		parsed, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			return fmt.Errorf("line %d: %s: expected integer", lineNo, key)
+		}
+		config.Authority.Execution.MaxTransferBytes = parsed
+		return nil
 	}
 	if target, exists := intTargets[key]; exists {
 		parsed, err := strconv.Atoi(value)

@@ -1,6 +1,6 @@
 # RACG service mode and Linux approver
 
-Status: file execution extracted; shared UI contracts, signed protocol primitives, an offline signing preview, internal authenticated decision delivery/recovery boundaries, peer-verified Unix transport, trusted key/admin boundaries, authority operation admission/staging and a stored-operation execution adapter added. Service mode and the networked desktop approver are not implemented. User authorized closing the legacy HTTP decision endpoint; it now rejects agent decisions while local TUI decisions remain available. Baseline inspected: `a1fda41`.
+Status: file execution extracted; shared UI contracts, signed protocol primitives, an offline signing preview, internal authenticated decision delivery/recovery boundaries, peer-verified Unix transport, trusted key/admin boundaries, authority operation admission/staging, stored-operation execution and authenticated result/download delivery added. Service mode and the networked desktop approver are not implemented. User authorized closing the legacy HTTP decision endpoint; it now rejects agent decisions while local TUI decisions remain available. Baseline inspected: `a1fda41`.
 
 ## Agreed scope
 
@@ -306,6 +306,16 @@ Verification: full tests, race tests, vet, Linux amd64/arm64 static builds and r
 - Execution options normalize to the existing defaults/output/kill-grace/transfer values until service configuration exposes explicit deployment settings. Tests cover staged stdin deletion, truncated read, upload atomic write/mode/staging cleanup, patch, config edit and authority-owned download snapshot.
 - This adapter is not yet automatically wired to broker decisions by the service composition, and agent result/download delivery is not yet implemented. Grants/rules, live events, cancellation transport, operation/resource configuration, service binaries and desktop transport remain unfinished.
 - Codespaces snapshot: `.codespaces/operation-runner-map.1789262721/belief_map.sexp` (142 files, 454 edges, 893 entities), earlier maps/cache retained.
+
+### Automatic execution and authenticated result delivery
+
+- The privileged service now wraps its narrow broker authority surface with an execution supervisor. After `SubmitDecision` durably consumes an `ALLOW_ONCE` decision, it dispatches `Authority.ExecuteStored` on a shutdown-tracked worker. The authority socket exposes no execution method; DENY decisions dispatch nothing.
+- Authority startup now calls crash recovery after acquiring exclusive state ownership and before opening listeners; interrupted `EXECUTING` requests become `UNCERTAIN` and are never rerun. Graceful shutdown waits for bounded terminal workers before closing SQLite.
+- Added explicit authority execution settings (default timeout, output limit, transfer limit, kill grace) to the internal service config, with non-negative validation and established defaults. Zero values retain those defaults until explicitly configured.
+- Agent submission lookup now carries the authority-signed terminal `ExecutionResult`. Successful `fs.download` lookup also carries the authority-owned artifact metadata and exact bytes inside the signed response; verification rejects digest mismatch, unexpected downloads, missing successful download artifacts and forged statuses. Pending/denied/non-download responses have no result/artifact.
+- Tests cover broker-decision dispatch through service composition, agent lookup after terminal execution, direct execution result/download delivery, result integrity, execution config parsing and graceful worker accounting. Full race tests, vet and Linux amd64/arm64 builds passed.
+- Still remaining: live events/cancel transport, reusable grants/rules, service binaries/installer, desktop transport/notifications and packaging.
+- Codespaces snapshot: `.codespaces/result-delivery-map.1789264785/belief_map.sexp` (143 files, 475 edges, 902 entities), earlier maps/cache retained.
 
 ### Desktop build feasibility checkpoint
 

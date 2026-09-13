@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	"github.com/itolstov/racg/internal/approval"
+	"github.com/itolstov/racg/internal/executor"
 )
 
 // LookupSubmission is read-only recovery. It authenticates the current agent
@@ -33,7 +34,7 @@ func (a *Authority) LookupSubmission(ctx context.Context, signed approval.Signed
 	var status string
 	err := a.db.QueryRowContext(ctx, "SELECT r.envelope,r.status FROM authority_submissions s JOIN authority_requests r ON r.request_id=s.request_id WHERE s.client_id=? AND s.nonce=?", q.ClientID, q.SubmissionNonce).Scan(&data, &status)
 	if errors.Is(err, sql.ErrNoRows) {
-		return approval.SignLookupResult(q, nil, "", a.key)
+		return approval.SignLookupResult(q, nil, "", nil, nil, a.key)
 	}
 	if err != nil {
 		return approval.SignedLookupResult{}, err
@@ -48,5 +49,45 @@ func (a *Authority) LookupSubmission(ctx context.Context, signed approval.Signed
 	if request.Request.ClientID != q.ClientID {
 		return approval.SignedLookupResult{}, errors.New("stored submission owner mismatch")
 	}
-	return approval.SignLookupResult(q, &request, status, a.key)
+	var executionData []byte
+	if err := a.db.QueryRowContext(ctx, "SELECT result FROM authority_executions WHERE request_id=?", request.Request.RequestID).Scan(&executionData); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return approval.SignedLookupResult{}, err
+	}
+	var execution *approval.ExecutionResult
+	switch status {
+	case "SUCCEEDED", "FAILED", "KILLED", "TIMED_OUT":
+		if len(executionData) == 0 {
+			return approval.SignedLookupResult{}, errors.New("terminal execution missing result")
+		}
+		var stored executor.Result
+		if err := json.Unmarshal(executionData, &stored); err != nil {
+			return approval.SignedLookupResult{}, err
+		}
+		execution = &approval.ExecutionResult{
+			Status:          stored.Status,
+			ExitCode:        stored.ExitCode,
+			DurationMs:      stored.DurationMs,
+			Stdout:          stored.Stdout,
+			Stderr:          stored.Stderr,
+			StdoutTruncated: stored.StdoutTruncated,
+			StderrTruncated: stored.StderrTruncated,
+			StdoutSHA256:    stored.StdoutSHA256,
+			StderrSHA256:    stored.StderrSHA256,
+		}
+	}
+	var download *approval.DownloadArtifact
+	var operation struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(request.Request.Operation, &operation); err != nil {
+		return approval.SignedLookupResult{}, err
+	}
+	if status == "SUCCEEDED" && operation.Type == "fs.download" {
+		download = &approval.DownloadArtifact{}
+		if err := a.db.QueryRowContext(ctx, "SELECT name,size,sha256,mode,data FROM authority_download_artifacts WHERE request_id=?", request.Request.RequestID).
+			Scan(&download.Name, &download.Size, &download.SHA256, &download.Mode, &download.Data); err != nil {
+			return approval.SignedLookupResult{}, err
+		}
+	}
+	return approval.SignLookupResult(q, &request, status, execution, download, a.key)
 }

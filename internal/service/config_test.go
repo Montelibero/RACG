@@ -36,6 +36,10 @@ authority_broker_uid = 1001
 authority_broker_gid = 2001
 authority_admin_uid = 3001
 authority_admin_gid = 4001
+execution_default_timeout_sec = 30
+execution_max_output_bytes = 2048
+execution_max_transfer_bytes = 4096
+execution_kill_grace_sec = 2
 broker_state_dir = "/var/lib/racg-broker"
 broker_authority_socket = "/run/racg/authority.sock"
 broker_authority_uid = 0
@@ -45,7 +49,8 @@ unknown_future_key = true
 	if err := ApplyTOML(&config, input); err != nil {
 		t.Fatal(err)
 	}
-	if config.Authority.ServerID != "prod" || config.Authority.BrokerUID != 1001 || config.Authority.AdminGID != 4001 || config.Broker.AuthorityGID != 0 {
+	if config.Authority.ServerID != "prod" || config.Authority.BrokerUID != 1001 || config.Authority.AdminGID != 4001 || config.Broker.AuthorityGID != 0 ||
+		config.Authority.Execution.DefaultTimeoutSec != 30 || config.Authority.Execution.MaxTransferBytes != 4096 {
 		t.Fatalf("config=%+v", config)
 	}
 	config.Authority.ServerID = "prod"
@@ -53,6 +58,10 @@ unknown_future_key = true
 	config.Authority.BrokerGID = 2001
 	config.Authority.AdminUID = 3001
 	config.Authority.AdminGID = 4001
+	config.Authority.Execution.DefaultTimeoutSec = 30
+	config.Authority.Execution.MaxOutputBytes = 2048
+	config.Authority.Execution.MaxTransferBytes = 4096
+	config.Authority.Execution.KillGraceSec = 2
 	config.Broker.AuthorityUID = 0
 	config.Broker.AuthorityGID = 0
 	if err := config.Validate(); err != nil {

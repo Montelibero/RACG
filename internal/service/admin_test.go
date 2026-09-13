@@ -12,7 +12,6 @@ import (
 
 	"github.com/itolstov/racg/internal/approval"
 	"github.com/itolstov/racg/internal/broker"
-	"github.com/itolstov/racg/internal/executor"
 )
 
 func adminServiceFixture(t *testing.T) (*AuthorityService, AuthorityConfig, func()) {
@@ -125,10 +124,33 @@ func TestAdminSocketEnrollsRotatesAndRevokes(t *testing.T) {
 	if err := approval.VerifyDecisionReceipt(signedRequest.Request, decision, receipt, make([]byte, 32), devicePublic, original.Public().(ed25519.PublicKey), time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Authority().Execute(ctx, signedRequest.Request.RequestID, func(context.Context, approval.Request) executor.Result {
-		return executor.Result{Status: "SUCCEEDED"}
-	}); err != nil {
+	lookup, err := approval.NewLookup("server", "agent", submission.Nonce, time.Now().Add(time.Minute))
+	if err != nil {
 		t.Fatal(err)
+	}
+	signedLookup, err := approval.SignLookup(lookup, agentKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		lookupResult, err := brokerClient.LookupSubmission(ctx, signedLookup)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := approval.VerifyLookupResult(lookup, lookupResult, original.Public().(ed25519.PublicKey), time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		if lookupResult.Result.Status == "SUCCEEDED" {
+			if lookupResult.Result.Result == nil || lookupResult.Result.Result.Stdout != "admin\n" {
+				t.Fatalf("lookup result=%+v output=%q stderr=%q", lookupResult.Result, lookupResult.Result.Result.Stdout, lookupResult.Result.Result.Stderr)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("execution did not finish: %+v", lookupResult.Result)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 	newDevicePublic, _, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

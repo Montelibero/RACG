@@ -23,6 +23,7 @@ type AuthorityService struct {
 	peer          broker.PeerCredentials
 	adminPeer     broker.PeerCredentials
 	authority     *authority.Authority
+	executions    *executionSupervisor
 	db            *sql.DB
 	lock          *os.File
 }
@@ -59,6 +60,13 @@ func OpenAuthority(ctx context.Context, config AuthorityConfig, signingKey ed255
 		service.Close()
 		return nil, err
 	}
+	// Startup owns the state exclusively. Interrupted EXECUTING requests become
+	// UNCERTAIN before any socket accepts traffic and are never rerun.
+	if _, err := service.authority.RecoverInterruptedTrusted(ctx); err != nil {
+		service.Close()
+		return nil, err
+	}
+	service.executions = newExecutionSupervisor(service.authority, config.Execution.Options())
 	service.listener, err = broker.ListenAuthorityUnix(config.SocketPath, broker.PeerCredentials{
 		UID: config.BrokerUID,
 		GID: config.BrokerGID,
@@ -95,7 +103,7 @@ func (s *AuthorityService) Run(ctx context.Context) error {
 	}
 	results := make(chan error, 2)
 	go func() {
-		results <- broker.ServeAuthorityUnix(ctx, s.listener, s.peer, s.authority)
+		results <- broker.ServeAuthorityUnix(ctx, s.listener, s.peer, s.executions)
 	}()
 	go func() {
 		results <- ServeAdminUnix(ctx, s.adminListener, s.adminPeer, s.authority)
@@ -144,6 +152,12 @@ func (s *AuthorityService) Close() error {
 			closeErr = err
 		}
 		s.adminListener = nil
+	}
+	if s.executions != nil {
+		if err := s.executions.Close(); err != nil && closeErr == nil {
+			closeErr = err
+		}
+		s.executions = nil
 	}
 	if s.db != nil {
 		if err := s.db.Close(); err != nil && closeErr == nil {

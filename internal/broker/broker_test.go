@@ -12,7 +12,6 @@ import (
 
 	"github.com/itolstov/racg/internal/approval"
 	"github.com/itolstov/racg/internal/authority"
-	"github.com/itolstov/racg/internal/executor"
 	_ "modernc.org/sqlite"
 )
 
@@ -114,22 +113,11 @@ func TestAuthorityClientComposesSignedAgentAndApproverMessages(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := a.Execute(ctx, signedRequest.Request.RequestID, func(context.Context, approval.Request) executor.Result {
-		got, err := a.StagedUploadForRequest(context.Background(), signedRequest.Request, stagedUpload.UploadID)
-		if err != nil {
-			t.Errorf("staged upload: %v", err)
-			return executor.Result{Status: "FAILED"}
-		}
-		if string(got) != string(staged) {
-			t.Errorf("staged upload=%q", got)
-			return executor.Result{Status: "FAILED"}
-		}
-		return executor.Result{Status: "SUCCEEDED"}
-	})
+	result, err := a.ExecuteStored(ctx, signedRequest.Request.RequestID, authority.OperationExecutionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Status != "SUCCEEDED" {
+	if result.Status != "SUCCEEDED" || result.Stdout != string(staged) {
 		t.Fatalf("result=%+v", result)
 	}
 
