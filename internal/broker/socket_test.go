@@ -23,6 +23,10 @@ func (fakeAuthority) LookupSubmission(context.Context, approval.SignedLookup) (a
 	return approval.SignedLookupResult{}, errSocketBoundary
 }
 
+func (fakeAuthority) StageUpload(context.Context, approval.SignedStagedUpload, []byte) (approval.StagedUpload, error) {
+	return approval.StagedUpload{}, errSocketBoundary
+}
+
 func (fakeAuthority) SubmitDecision(context.Context, string, approval.SignedDecision, []byte) (approval.SignedDecisionReceipt, error) {
 	return approval.SignedDecisionReceipt{}, errSocketBoundary
 }

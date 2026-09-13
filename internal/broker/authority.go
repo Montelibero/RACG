@@ -16,6 +16,7 @@ import (
 type Authority interface {
 	Submit(context.Context, approval.SignedSubmission) (approval.SignedRequest, error)
 	LookupSubmission(context.Context, approval.SignedLookup) (approval.SignedLookupResult, error)
+	StageUpload(context.Context, approval.SignedStagedUpload, []byte) (approval.StagedUpload, error)
 	SubmitDecision(context.Context, string, approval.SignedDecision, []byte) (approval.SignedDecisionReceipt, error)
 	LookupDecision(context.Context, approval.SignedDecisionLookup) (approval.SignedDecisionLookupResult, error)
 }
@@ -80,6 +81,12 @@ func handleAuthorityRequest(ctx context.Context, authority Authority, request Re
 			return nil, err
 		}
 		return authority.LookupSubmission(ctx, params)
+	case MethodStageUpload:
+		var params UploadSubmission
+		if err := decodeParams(request.Params, &params); err != nil {
+			return nil, err
+		}
+		return authority.StageUpload(ctx, params.Upload, params.Data)
 	case MethodSubmitDecision:
 		var params DecisionSubmission
 		if err := decodeParams(request.Params, &params); err != nil {

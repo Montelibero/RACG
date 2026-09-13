@@ -58,7 +58,19 @@ func TestAuthorityClientComposesSignedAgentAndApproverMessages(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	operation := []byte(`{"type":"cmd.run","payload":{"argv":["/bin/echo","composed"]}}`)
+	staged := []byte("immutable broker transport stdin\n")
+	stagedUpload, err := approval.NewStagedUpload("server", "agent", staged, time.Unix(1100, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	signedStagedUpload, err := approval.SignStagedUpload(stagedUpload, agentKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.StageUpload(ctx, UploadSubmission{Upload: signedStagedUpload, Data: staged}); err != nil {
+		t.Fatal(err)
+	}
+	operation := []byte(`{"type":"cmd.run","payload":{"argv":["/bin/cat"],"stdin_upload_id":"` + stagedUpload.UploadID + `"}}`)
 	submission, err := approval.NewSubmission("server", "agent", operation, time.Unix(1100, 0))
 	if err != nil {
 		t.Fatal(err)
@@ -71,14 +83,16 @@ func TestAuthorityClientComposesSignedAgentAndApproverMessages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	admittedOperation := append([]byte(nil), signedRequest.Request.Operation...)
 	if err := approval.VerifyRequest(signedRequest, "server", serverKey.Public().(ed25519.PublicKey)); err != nil {
 		t.Fatal(err)
 	}
-	signedRequest.Request.Operation = []byte(`{"type":"cmd.run","payload":{"argv":["/bin/sh","evil"]}}`)
+	tamperedOperation := []byte(`{"type":"cmd.run","payload":{"argv":["/bin/sh","evil"]}}`)
+	signedRequest.Request.Operation = tamperedOperation
 	if err := approval.VerifyRequest(signedRequest, "server", serverKey.Public().(ed25519.PublicKey)); err == nil {
 		t.Fatal("broker-modified operation accepted")
 	}
-	signedRequest.Request.Operation = operation
+	signedRequest.Request.Operation = admittedOperation
 
 	decision, err := approval.SignDecision(signedRequest.Request, "device", "ALLOW_ONCE", nil, time.Unix(1100, 0), deviceKey)
 	if err != nil {
@@ -101,6 +115,15 @@ func TestAuthorityClientComposesSignedAgentAndApproverMessages(t *testing.T) {
 	}
 
 	result, err := a.Execute(ctx, signedRequest.Request.RequestID, func(context.Context, approval.Request) executor.Result {
+		got, err := a.StagedUploadForRequest(context.Background(), signedRequest.Request, stagedUpload.UploadID)
+		if err != nil {
+			t.Errorf("staged upload: %v", err)
+			return executor.Result{Status: "FAILED"}
+		}
+		if string(got) != string(staged) {
+			t.Errorf("staged upload=%q", got)
+			return executor.Result{Status: "FAILED"}
+		}
 		return executor.Result{Status: "SUCCEEDED"}
 	})
 	if err != nil {

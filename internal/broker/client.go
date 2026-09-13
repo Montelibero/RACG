@@ -43,6 +43,11 @@ func (c *AuthorityClient) LookupSubmission(ctx context.Context, signed approval.
 	return result, c.call(ctx, MethodLookupSubmission, signed, &result)
 }
 
+func (c *AuthorityClient) StageUpload(ctx context.Context, submission UploadSubmission) (approval.StagedUpload, error) {
+	var result approval.StagedUpload
+	return result, c.call(ctx, MethodStageUpload, submission, &result)
+}
+
 func (c *AuthorityClient) SubmitDecision(ctx context.Context, submission DecisionSubmission) (approval.SignedDecisionReceipt, error) {
 	var result approval.SignedDecisionReceipt
 	return result, c.call(ctx, MethodSubmitDecision, submission, &result)

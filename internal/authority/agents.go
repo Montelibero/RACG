@@ -91,7 +91,11 @@ func (a *Authority) Submit(ctx context.Context, signed approval.SignedSubmission
 	if !errors.Is(err, sql.ErrNoRows) {
 		return approval.SignedRequest{}, err
 	}
-	request, err := approval.NewRequest(a.serverID, uuid.NewString(), s.ClientID, "", s.Operation)
+	admittedOperation, stagedUploads, err := a.admitOperation(tx, s.ClientID, s.Operation)
+	if err != nil {
+		return approval.SignedRequest{}, err
+	}
+	request, err := approval.NewRequest(a.serverID, uuid.NewString(), s.ClientID, "", admittedOperation)
 	if err != nil {
 		return approval.SignedRequest{}, err
 	}
@@ -107,6 +111,9 @@ func (a *Authority) Submit(ctx context.Context, signed approval.SignedSubmission
 		return approval.SignedRequest{}, err
 	}
 	if _, err := tx.ExecContext(ctx, "INSERT INTO authority_submissions(client_id,nonce,digest,request_id) VALUES(?,?,?,?)", s.ClientID, s.Nonce, digest[:], request.RequestID); err != nil {
+		return approval.SignedRequest{}, err
+	}
+	if err := claimStagedUploads(tx, s.ClientID, request.RequestID, stagedUploads); err != nil {
 		return approval.SignedRequest{}, err
 	}
 	if err := tx.Commit(); err != nil {

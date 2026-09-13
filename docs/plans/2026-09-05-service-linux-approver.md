@@ -1,6 +1,6 @@
 # RACG service mode and Linux approver
 
-Status: file execution extracted; shared UI contracts, signed protocol primitives, an offline signing preview, internal authenticated decision delivery/recovery boundaries, peer-verified Unix transport, privileged service composition/config and trusted key/admin boundaries added. Service mode and the networked desktop approver are not implemented. User authorized closing the legacy HTTP decision endpoint; it now rejects agent decisions while local TUI decisions remain available. Baseline inspected: `a1fda41`.
+Status: file execution extracted; shared UI contracts, signed protocol primitives, an offline signing preview, internal authenticated decision delivery/recovery boundaries, peer-verified Unix transport, trusted key/admin boundaries and authority operation admission/immutable byte staging added. Service mode and the networked desktop approver are not implemented. User authorized closing the legacy HTTP decision endpoint; it now rejects agent decisions while local TUI decisions remain available. Baseline inspected: `a1fda41`.
 
 ## Agreed scope
 
@@ -287,6 +287,16 @@ Verification: full tests, race tests, vet, Linux amd64/arm64 static builds and r
 - The authority process now serves broker and trusted-admin listeners together and normalizes context cancellation. Tests cover persistent identity, mode/PEM rejection, admin enrollment, signed submission/decision/execution through broker transport, rotation rejection of old device keys, revocation registry state and both peer boundaries.
 - This remains internal with no CLI command, service installer or deployment artifact. A separate server-identity key-rotation/migration design, operation admission, immutable staging, execution backend wiring, desktop transport, packaging and deployment remain unfinished.
 - Codespaces snapshot: `.codespaces/admin-trust-map.1789253064/belief_map.sexp` (137 files, 385 edges, 858 entities), earlier maps/cache retained.
+
+### Authority operation admission and immutable staging
+
+- Added authority-owned strict admission for the service operation set (`cmd.run`, `fs.read`, `fs.patch_unified`, `fs.upload`, `fs.download`, `conf.set`). Unknown operation fields are rejected so a broker cannot carry behavior-affecting data outside the reviewed display schema.
+- Added agent-signed upload staging metadata and authority-owned bytes in SQLite. The agent signs server/client/upload IDs, size and SHA-256; `Authority.StageUpload` authenticates the current enrolled agent, verifies exact bytes and stores them before any operation references them. Retry with the same upload ID/digest is idempotent; reuse with different bytes is rejected.
+- `Authority.Submit` now admits operations inside the same transaction that freezes request bytes and submission retry identity. It replaces upload references with authority-assigned size/digest metadata and durably claims each staged byte to the generated request. Admission failure leaves no request or submission; transaction rollback releases claims.
+- `Authority.StagedUploadForRequest` exposes immutable bytes only to the trusted execution backend after that exact request has been authorized and claimed. It rechecks owning agent, request claim, size and digest before returning bytes. The broker protocol can relay signed staging bytes but still cannot authorize their use.
+- Tests cover staged stdin binding and execution, tampered bytes, single claim semantics, unsupported operations, unknown fields, forged metadata fields and all operation schemas. Full race tests, vet and Linux amd64/arm64 builds passed.
+- Remaining: authority-owned download snapshots, streaming transfer transport and explicit resource limits, actual backend dispatch for all operation types, grants/rules, pending events/results, service binaries and desktop transport.
+- Codespaces snapshot: `.codespaces/admission-staging-map.1789258681/belief_map.sexp` (140 files, 430 edges, 885 entities), earlier maps/cache retained.
 
 ### Desktop build feasibility checkpoint
 

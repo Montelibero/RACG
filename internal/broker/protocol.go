@@ -17,6 +17,7 @@ const ProtocolVersion = 1
 const (
 	MethodSubmitAgent      = "v1/authority.submit-agent"
 	MethodLookupSubmission = "v1/authority.lookup-submission"
+	MethodStageUpload      = "v1/authority.stage-upload"
 	MethodSubmitDecision   = "v1/authority.submit-decision"
 	MethodLookupDecision   = "v1/authority.lookup-decision"
 )
@@ -42,4 +43,11 @@ type DecisionSubmission struct {
 	RequestID string                  `json:"request_id"`
 	Decision  approval.SignedDecision `json:"decision"`
 	Challenge []byte                  `json:"challenge"`
+}
+
+// UploadSubmission separates signed metadata from raw bytes. The authority
+// verifies the digest before persisting anything as usable staging.
+type UploadSubmission struct {
+	Upload approval.SignedStagedUpload `json:"upload"`
+	Data   []byte                      `json:"data"`
 }
