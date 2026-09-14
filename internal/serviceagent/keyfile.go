@@ -159,3 +159,10 @@ func (k *Key) PublicKeyBase64() string {
 	}
 	return base64.StdEncoding.EncodeToString(k.Public)
 }
+
+func (k *Key) privateCopy() (ed25519.PrivateKey, error) {
+	if k == nil || len(k.Private) != ed25519.PrivateKeySize {
+		return nil, errors.New("agent key is locked or invalid")
+	}
+	return append(ed25519.PrivateKey(nil), k.Private...), nil
+}

@@ -22,6 +22,10 @@ func (c Connection) validate() error {
 	return nil
 }
 
+func (c Connection) StageUpload(ctx context.Context, signed approval.SignedStagedUpload, data []byte) (approval.StagedUpload, error) {
+	return c.Client.StageUpload(ctx, broker.UploadSubmission{Upload: signed, Data: append([]byte(nil), data...)})
+}
+
 type Submission struct {
 	Request approval.SignedRequest
 	Nonce   []byte
@@ -93,6 +97,41 @@ func (t Transport) Submit(ctx context.Context, operation []byte, validUntil time
 		return Submission{}, errors.New("authority returned another agent's request")
 	}
 	return Submission{Request: request, Nonce: submission.Nonce}, nil
+}
+
+// StageUpload stores agent-authenticated immutable bytes. It does not authorize
+// use against any target; the operation must later reference the upload ID.
+func (t Transport) StageUpload(ctx context.Context, data []byte, validUntil time.Time) (approval.StagedUpload, error) {
+	if err := t.validate(); err != nil {
+		return approval.StagedUpload{}, err
+	}
+	upload, err := approval.NewStagedUpload(t.Profile.ServerID, t.Key.ClientID, data, validUntil)
+	if err != nil {
+		return approval.StagedUpload{}, err
+	}
+	private, err := t.Key.privateCopy()
+	if err != nil {
+		return approval.StagedUpload{}, err
+	}
+	signed, err := approval.SignStagedUpload(upload, private)
+	if err != nil {
+		return approval.StagedUpload{}, err
+	}
+	clearBytes(private)
+	stored, err := t.Connection.StageUpload(ctx, signed, append([]byte(nil), data...))
+	if err != nil {
+		return approval.StagedUpload{}, err
+	}
+	if stored.UploadID != upload.UploadID || stored.Size != upload.Size || stored.SHA256 != upload.SHA256 {
+		return approval.StagedUpload{}, errors.New("authority returned mismatched staged upload")
+	}
+	return stored, nil
+}
+
+func clearBytes(data []byte) {
+	for i := range data {
+		data[i] = 0
+	}
 }
 
 // Wait polls authenticated lookup snapshots until a terminal status. It never

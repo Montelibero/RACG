@@ -46,6 +46,8 @@ func (c *ServiceAgentCmd) Run(args []string) int {
 		return c.runRun(args[1:])
 	case "download":
 		return c.runDownload(args[1:])
+	case "upload":
+		return c.runUpload(args[1:])
 	default:
 		fmt.Fprintf(c.stderr, "unknown service-agent command %q\n", args[0])
 		return 2
@@ -106,6 +108,83 @@ func (c *ServiceAgentCmd) runDownload(args []string) int {
 	return c.runProtocol(args, true)
 }
 
+func (c *ServiceAgentCmd) runUpload(args []string) int {
+	fs := flag.NewFlagSet("racg service-agent upload", flag.ContinueOnError)
+	fs.SetOutput(c.stderr)
+	profilePath := fs.String("profile", "", "trusted server profile from service-admin export-profile")
+	keyPath := fs.String("key", "", "passphrase-encrypted agent key")
+	connect := fs.String("connect", "", "broker/service endpoint URI")
+	clientID := fs.String("client-id", "", "agent identity (overrides encrypted key identity)")
+	local := fs.String("local", "", "local file to upload")
+	remote := fs.String("remote", "", "remote target path")
+	mode := fs.String("mode", "", "remote file mode (for example 0644)")
+	stageValidity := fs.Duration("stage-validity", time.Hour, "how long immutable staging may be referenced")
+	submissionValidity := fs.Duration("submission-validity", time.Hour, "how long the signed submission may be delivered")
+	resultValidity := fs.Duration("decision-validity", time.Hour, "recommended decision validity for the approver")
+	timeout := fs.Duration("timeout", 2*time.Minute, "how long to wait for a terminal result")
+	out := fs.String("out", "", "write authenticated result JSON to this file")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *local == "" || *remote == "" {
+		fmt.Fprintln(c.stderr, "upload requires --local and --remote")
+		return 2
+	}
+	data, err := os.ReadFile(*local)
+	if err != nil {
+		fmt.Fprintf(c.stderr, "upload failed: %v\n", err)
+		return 1
+	}
+	transport, closeConn, err := c.newTransport(*profilePath, *keyPath, *connect, *clientID)
+	if err != nil {
+		fmt.Fprintf(c.stderr, "upload failed: %v\n", err)
+		return 1
+	}
+	defer closeConn()
+	staged, err := transport.StageUpload(context.Background(), data, time.Now().Add(*stageValidity))
+	if err != nil {
+		fmt.Fprintf(c.stderr, "upload failed: %v\n", err)
+		return 1
+	}
+	operation, err := json.Marshal(map[string]any{
+		"type": "fs.upload",
+		"payload": map[string]any{
+			"path":      *remote,
+			"upload_id": staged.UploadID,
+			"mode":      *mode,
+		},
+	})
+	if err != nil {
+		fmt.Fprintf(c.stderr, "upload failed: %v\n", err)
+		return 1
+	}
+	submission, err := transport.Submit(context.Background(), operation, time.Now().Add(*submissionValidity))
+	if err != nil {
+		fmt.Fprintf(c.stderr, "upload failed: %v\n", err)
+		return 1
+	}
+	result, err := transport.Wait(context.Background(), submission.Nonce, time.Now().Add(*timeout))
+	if err != nil {
+		fmt.Fprintf(c.stderr, "upload failed: %v\n", err)
+		return 1
+	}
+	if *out != "" {
+		if err := writeAgentResult(*out, submission, result); err != nil {
+			fmt.Fprintf(c.stderr, "upload failed: %v\n", err)
+			return 1
+		}
+	}
+	fmt.Fprintf(c.stdout, "request_id=%s\nstatus=%s\nremote=%s\n", result.Request.Request.RequestID, result.Status, *remote)
+	fmt.Fprintf(c.stdout, "decision_validity=%s\n", *resultValidity)
+	if result.Execution != nil {
+		fmt.Fprintf(c.stdout, "stdout=%q\nstderr=%q\n", result.Execution.Stdout, result.Execution.Stderr)
+	}
+	if result.Status == "SUCCEEDED" {
+		return 0
+	}
+	return 1
+}
+
 func (c *ServiceAgentCmd) runProtocol(args []string, download bool) int {
 	name := "racg service-agent run"
 	if download {
@@ -120,15 +199,25 @@ func (c *ServiceAgentCmd) runProtocol(args []string, download bool) int {
 	timeout := fs.Duration("timeout", 2*time.Minute, "how long to wait for a terminal result")
 	out := fs.String("out", "", "write authenticated result JSON to this file")
 	downloadOutput := fs.String("download-output", "", "write fs.download artifact to this path")
+	stdinFile := fs.String("stdin-file", "", "optional local file to stage as command stdin")
+	stageValidity := fs.Duration("stage-validity", time.Hour, "how long immutable staging may be referenced")
+	submissionValidity := fs.Duration("submission-validity", time.Hour, "how long the signed submission may be delivered")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	operation, argv, err := c.operationPayload(download, fs.Args())
+	argv := fs.Args()
+	var operation []byte
+	var stagedData []byte
+	var err error
 	if err != nil {
 		fmt.Fprintf(c.stderr, "%s failed: %v\n", name, err)
 		return 2
 	}
-	_ = argv
+	if download {
+		operation, err = c.downloadPayload(argv)
+	} else {
+		operation, stagedData, err = c.runPayload(argv, *stdinFile)
+	}
 	if *profilePath == "" || *keyPath == "" || *connect == "" {
 		fmt.Fprintf(c.stderr, "%s requires --profile, --key and --connect\n", name)
 		return 2
@@ -169,7 +258,28 @@ func (c *ServiceAgentCmd) runProtocol(args []string, download bool) int {
 		Profile:    profile,
 		Key:        key,
 	}
-	submission, err := transport.Submit(ctx, operation, time.Now().Add(*timeout))
+	if stagedData != nil {
+		staged, stageErr := transport.StageUpload(context.Background(), stagedData, time.Now().Add(*stageValidity))
+		if stageErr != nil {
+			fmt.Fprintf(c.stderr, "%s failed: %v\n", name, stageErr)
+			return 1
+		}
+		var envelope struct {
+			Type    string         `json:"type"`
+			Payload map[string]any `json:"payload"`
+		}
+		if err := json.Unmarshal(operation, &envelope); err != nil {
+			fmt.Fprintf(c.stderr, "%s failed: %v\n", name, err)
+			return 1
+		}
+		envelope.Payload["stdin_upload_id"] = staged.UploadID
+		operation, err = json.Marshal(envelope)
+		if err != nil {
+			fmt.Fprintf(c.stderr, "%s failed: %v\n", name, err)
+			return 1
+		}
+	}
+	submission, err := transport.Submit(ctx, operation, time.Now().Add(*submissionValidity))
 	if err != nil {
 		fmt.Fprintf(c.stderr, "%s failed: %v\n", name, err)
 		return 1
@@ -209,19 +319,77 @@ func (c *ServiceAgentCmd) runProtocol(args []string, download bool) int {
 	return 1
 }
 
-func (c *ServiceAgentCmd) operationPayload(download bool, argv []string) ([]byte, []string, error) {
-	if download {
-		if len(argv) != 1 || argv[0] == "" {
-			return nil, nil, errors.New("download requires one remote PATH")
-		}
-		data, err := json.Marshal(map[string]any{"type": "fs.download", "payload": map[string]any{"path": argv[0]}})
-		return data, argv, err
+func (c *ServiceAgentCmd) downloadPayload(argv []string) ([]byte, error) {
+	if len(argv) != 1 || argv[0] == "" {
+		return nil, errors.New("download requires one remote PATH")
 	}
+	return json.Marshal(map[string]any{"type": "fs.download", "payload": map[string]any{"path": argv[0]}})
+}
+
+func (c *ServiceAgentCmd) runPayload(argv []string, stdinFile string) ([]byte, []byte, error) {
 	if len(argv) == 0 || argv[0] == "" {
 		return nil, nil, errors.New("run requires argv after --")
 	}
-	data, err := json.Marshal(map[string]any{"type": "cmd.run", "payload": map[string]any{"argv": argv}})
-	return data, argv, err
+	var staged []byte
+	if stdinFile != "" {
+		data, err := readServiceInput(c.stdin, stdinFile)
+		if err != nil {
+			return nil, nil, err
+		}
+		staged = data
+	}
+	operation, err := json.Marshal(map[string]any{
+		"type":    "cmd.run",
+		"payload": map[string]any{"argv": argv},
+	})
+	return operation, staged, err
+}
+
+func readServiceInput(stdin io.Reader, path string) ([]byte, error) {
+	if path != "-" {
+		return os.ReadFile(path)
+	}
+	if stdin == nil {
+		return nil, errors.New("stdin required")
+	}
+	return io.ReadAll(stdin)
+}
+
+func (c *ServiceAgentCmd) newTransport(profilePath, keyPath, connect, clientID string) (serviceagent.Transport, func(), error) {
+	profile, err := serviceagent.LoadProfile(profilePath)
+	if err != nil {
+		return serviceagent.Transport{}, nil, err
+	}
+	passphrase, err := c.readPassphrase()
+	if err != nil {
+		return serviceagent.Transport{}, nil, err
+	}
+	key, err := serviceagent.LoadKey(keyPath, passphrase)
+	if err != nil {
+		return serviceagent.Transport{}, nil, err
+	}
+	if clientID != "" {
+		key.ClientID = clientID
+	}
+	network, address, err := broker.ParseListenerURI(connect)
+	if err != nil {
+		return serviceagent.Transport{}, nil, err
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	client, closeConn, err := broker.Dial(ctx, network, address)
+	if err != nil {
+		cancel()
+		return serviceagent.Transport{}, nil, err
+	}
+	closeAll := func() {
+		closeConn()
+		cancel()
+	}
+	return serviceagent.Transport{
+		Connection: serviceagent.Connection{Client: client},
+		Profile:    profile,
+		Key:        key,
+	}, closeAll, nil
 }
 
 func (c *ServiceAgentCmd) readPassphrase() (string, error) {
@@ -307,6 +475,8 @@ commands:
       submit cmd.run, wait for an authenticated result
   download [flags] -- PATH
       request fs.download, wait, verify and atomically save the artifact
+  upload --local PATH --remote PATH [--mode MODE]
+      stage bytes, request fs.upload, wait and verify the result
 
 run/download flags:
   --profile PATH            trusted server profile
@@ -314,6 +484,8 @@ run/download flags:
   --connect URI             broker relay endpoint (tcp:// or unix://)
   --client-id ID            override the ID stored in the key
   --timeout DURATION        terminal-result wait deadline (default 2m)
+  --stage-validity DURATION immutable staging reference validity (default 1h)
+  --submission-validity DURATION signed submission delivery validity (default 1h)
   --out PATH                write authenticated result JSON
   --download-output PATH    write verified download bytes
 
