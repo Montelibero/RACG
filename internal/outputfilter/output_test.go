@@ -25,6 +25,25 @@ func TestRedactMasksCommonSecretForms(t *testing.T) {
 	}
 }
 
+func TestRedactMasksUnderscorePrefixedSecrets(t *testing.T) {
+	input := strings.Join([]string{
+		"AUTHELIA_TELEGRAM_CLIENT_SECRET=tg-secret",
+		"AUTH_CLIENT_SECRET=abc123",
+		"TELEGRAM_BOT_TOKEN=456:def",
+		`AUTH_CLIENT_SECRET="quoted-secret"`,
+	}, "\n")
+
+	got := Redact(input)
+	for _, secret := range []string{"tg-secret", "abc123", "456:def", "quoted-secret"} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("redacted output still contains %q:\n%s", secret, got)
+		}
+	}
+	if !strings.Contains(got, "AUTHELIA_TELEGRAM_CLIENT_SECRET=") || strings.Count(got, Placeholder) < 4 {
+		t.Fatalf("unexpected redacted output:\n%s", got)
+	}
+}
+
 func TestRedactMasksPrivateKeyBlock(t *testing.T) {
 	input := "before\n-----BEGIN PRIVATE KEY-----\nsecret material\n-----END PRIVATE KEY-----\nafter\n"
 	got := Redact(input)

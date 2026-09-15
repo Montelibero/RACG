@@ -12,7 +12,7 @@ var secretPatterns = []struct {
 	{regexp.MustCompile(`(?im)(\bauthorization\s*:\s*)(?:bearer\s+)?[^\r\n]+`), `${1}` + Placeholder},
 	{regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+`), `Bearer ` + Placeholder},
 	{regexp.MustCompile(`(?i)("(?:password|passwd|pwd|token|secret|api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|authorization)"\s*:\s*)("(?:\\.|[^"\\])*"|[^,\s}\]]+)`), `${1}"` + Placeholder + `"`},
-	{regexp.MustCompile(`(?im)\b(password|passwd|pwd|token|secret|api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key)(\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s;,\r\n]+)`), `${1}${2}` + Placeholder},
+	{regexp.MustCompile(`(?im)(\b|_)(password|passwd|pwd|token|secret|api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key)(\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s;,\r\n]+)`), `${1}${2}${3}` + Placeholder},
 	{regexp.MustCompile(`(?i)([a-z][a-z0-9+.-]*://[^/\s:@]+:)[^@/\s]+@`), `${1}` + Placeholder + `@`},
 	{regexp.MustCompile(`(?i)\b(?:github_pat_|gh[pousr]_|sk-|xox[baprs]-)[A-Za-z0-9._=-]{8,}`), Placeholder},
 }
