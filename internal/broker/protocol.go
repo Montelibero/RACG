@@ -21,6 +21,7 @@ const (
 	MethodSubmitDecision   = "v1/authority.submit-decision"
 	MethodLookupDecision   = "v1/authority.lookup-decision"
 	MethodListPending      = "v1/authority.list-pending"
+	MethodCancelSubmission = "v1/authority.cancel-submission"
 )
 
 type Request struct {

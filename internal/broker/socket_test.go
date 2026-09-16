@@ -39,6 +39,10 @@ func (fakeAuthority) ListPending(context.Context, approval.SignedRequestList) (a
 	return approval.SignedRequestListResult{}, errSocketBoundary
 }
 
+func (fakeAuthority) CancelSubmission(context.Context, approval.SignedCancellation) (approval.SignedCancellationResult, error) {
+	return approval.SignedCancellationResult{}, errSocketBoundary
+}
+
 var errSocketBoundary = errSentinel("socket boundary reached")
 
 type errSentinel string

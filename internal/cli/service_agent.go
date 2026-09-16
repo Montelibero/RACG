@@ -48,6 +48,8 @@ func (c *ServiceAgentCmd) Run(args []string) int {
 		return c.runDownload(args[1:])
 	case "upload":
 		return c.runUpload(args[1:])
+	case "cancel":
+		return c.runCancel(args[1:])
 	default:
 		fmt.Fprintf(c.stderr, "unknown service-agent command %q\n", args[0])
 		return 2
@@ -180,6 +182,46 @@ func (c *ServiceAgentCmd) runUpload(args []string) int {
 		fmt.Fprintf(c.stdout, "stdout=%q\nstderr=%q\n", result.Execution.Stdout, result.Execution.Stderr)
 	}
 	if result.Status == "SUCCEEDED" {
+		return 0
+	}
+	return 1
+}
+
+func (c *ServiceAgentCmd) runCancel(args []string) int {
+	fs := flag.NewFlagSet("racg service-agent cancel", flag.ContinueOnError)
+	fs.SetOutput(c.stderr)
+	profilePath := fs.String("profile", "", "trusted server profile from service-admin export-profile")
+	keyPath := fs.String("key", "", "passphrase-encrypted agent key")
+	connect := fs.String("connect", "", "broker/service endpoint URI")
+	clientID := fs.String("client-id", "", "agent identity (overrides encrypted key identity)")
+	requestID := fs.String("request-id", "", "request ID returned by run")
+	nonce := fs.String("nonce", "", "submission nonce returned by run (hex)")
+	validity := fs.Duration("validity", time.Minute, "how long the signed cancellation may be delivered")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *requestID == "" || *nonce == "" {
+		fmt.Fprintln(c.stderr, "cancel requires --request-id and --nonce")
+		return 2
+	}
+	nonceBytes, err := hex.DecodeString(strings.TrimSpace(*nonce))
+	if err != nil || len(nonceBytes) != 32 {
+		fmt.Fprintln(c.stderr, "nonce must be 64 hexadecimal characters")
+		return 2
+	}
+	transport, closeConn, err := c.newTransport(*profilePath, *keyPath, *connect, *clientID)
+	if err != nil {
+		fmt.Fprintf(c.stderr, "cancel failed: %v\n", err)
+		return 1
+	}
+	defer closeConn()
+	result, err := transport.Cancel(context.Background(), *requestID, nonceBytes, time.Now().Add(*validity))
+	if err != nil {
+		fmt.Fprintf(c.stderr, "cancel failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(c.stdout, "request_id=%s\nauthority_status=%s\ncanceled=%t\n", result.RequestID, result.Status, result.Canceled)
+	if result.Canceled {
 		return 0
 	}
 	return 1
@@ -475,6 +517,8 @@ commands:
       submit cmd.run, wait for an authenticated result
   download [flags] -- PATH
       request fs.download, wait, verify and atomically save the artifact
+  cancel [flags] --request-id ID --nonce HEX
+      durably cancel a request before authority dispatch
   upload --local PATH --remote PATH [--mode MODE]
       stage bytes, request fs.upload, wait and verify the result
 
@@ -488,6 +532,15 @@ run/download flags:
   --submission-validity DURATION signed submission delivery validity (default 1h)
   --out PATH                write authenticated result JSON
   --download-output PATH    write verified download bytes
+
+cancel flags:
+  --profile PATH            trusted server profile
+  --key PATH                passphrase-encrypted agent key
+  --connect URI             broker relay endpoint (tcp:// or unix://)
+  --client-id ID            override the ID stored in the key
+  --request-id ID           request ID from run
+  --nonce HEX               submission nonce from run --out
+  --validity DURATION       signed cancellation delivery validity (default 1m)
 
 Set RACG_AGENT_PASSPHRASE for non-interactive key use. A FAILED/KILLED/TIMED_OUT
 status exits nonzero; UNCERTAIN means external effects are unknown and must

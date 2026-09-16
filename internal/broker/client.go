@@ -83,6 +83,11 @@ func (c *AuthorityClient) ListPending(ctx context.Context, signed approval.Signe
 	return result, c.call(ctx, MethodListPending, signed, &result)
 }
 
+func (c *AuthorityClient) CancelSubmission(ctx context.Context, signed approval.SignedCancellation) (approval.SignedCancellationResult, error) {
+	var result approval.SignedCancellationResult
+	return result, c.call(ctx, MethodCancelSubmission, signed, &result)
+}
+
 func (c *AuthorityClient) call(ctx context.Context, method string, params, result any) error {
 	if err := ctx.Err(); err != nil {
 		return err

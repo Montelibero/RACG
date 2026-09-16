@@ -26,6 +26,10 @@ func (c Connection) StageUpload(ctx context.Context, signed approval.SignedStage
 	return c.Client.StageUpload(ctx, broker.UploadSubmission{Upload: signed, Data: append([]byte(nil), data...)})
 }
 
+func (c Connection) CancelSubmission(ctx context.Context, signed approval.SignedCancellation) (approval.SignedCancellationResult, error) {
+	return c.Client.CancelSubmission(ctx, signed)
+}
+
 type Submission struct {
 	Request approval.SignedRequest
 	Nonce   []byte
@@ -185,4 +189,36 @@ func (t Transport) Wait(ctx context.Context, nonce []byte, deadline time.Time) (
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+}
+
+// Cancel asks the authority to durably cancel a pre-dispatch operation. The
+// signed response may refuse; it never claims a running job was killed.
+func (t Transport) Cancel(ctx context.Context, requestID string, nonce []byte, validUntil time.Time) (approval.CancellationResult, error) {
+	if err := t.validate(); err != nil {
+		return approval.CancellationResult{}, err
+	}
+	if requestID == "" || len(nonce) != 32 {
+		return approval.CancellationResult{}, errors.New("request ID and submission nonce required")
+	}
+	cancellation, err := approval.NewCancellation(t.Profile.ServerID, t.Key.ClientID, requestID, nonce, validUntil)
+	if err != nil {
+		return approval.CancellationResult{}, err
+	}
+	private, err := t.Key.privateCopy()
+	if err != nil {
+		return approval.CancellationResult{}, err
+	}
+	signed, err := approval.SignCancellation(cancellation, private)
+	if err != nil {
+		return approval.CancellationResult{}, err
+	}
+	clearBytes(private)
+	response, err := t.Connection.CancelSubmission(ctx, signed)
+	if err != nil {
+		return approval.CancellationResult{}, err
+	}
+	if err := approval.VerifyCancellationResult(cancellation, response, t.Profile.PublicKey, t.now()); err != nil {
+		return approval.CancellationResult{}, err
+	}
+	return response.Result, nil
 }

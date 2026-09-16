@@ -1,6 +1,6 @@
 # RACG service mode and Linux approver
 
-Status: file execution extracted; shared UI contracts, signed protocol primitives, internal authenticated delivery/recovery, peer-verified Unix transport, trusted key/admin boundaries, operation admission/staging, stored execution/result delivery, reusable service grants, desktop transport UI, two-process service commands, trusted admin/enrollment CLI, authenticated agent results/downloads and service stdin/upload staging delivery added. Production packaging/installer is not implemented. User authorized closing the legacy HTTP decision endpoint; it now rejects agent decisions while local TUI decisions remain available. Baseline inspected: `a1fda41`.
+Status: file execution extracted; shared UI contracts, signed protocol primitives, internal authenticated delivery/recovery, peer-verified Unix transport, trusted key/admin boundaries, operation admission/staging, stored execution/result delivery, reusable service grants, desktop transport UI, two-process service commands, trusted admin/enrollment CLI, authenticated agent results/downloads, service stdin/upload staging delivery and pre-dispatch cancellation added. Production packaging/installer is not implemented. User authorized closing the legacy HTTP decision endpoint; it now rejects agent decisions while local TUI decisions remain available. Baseline inspected: `a1fda41`.
 
 ## Agreed scope
 
@@ -351,6 +351,14 @@ Verification: full tests, race tests, vet, Linux amd64/arm64 static builds and r
 - Tests cover relay forwarding with signed queue verification, authority/broker help boundaries, and flag/config validation. Full race tests, vet and Linux amd64/arm64 builds passed.
 - Remaining: package/installer, health/readiness endpoints, secrets/KDF policy, reusable-grant scope builder and desktop result/download rendering.
 - Codespaces snapshot: `.codespaces/admin-cli-map.1789310182/belief_map.sexp` (159 files, 696 edges, 993 entities), earlier maps/cache retained.
+
+### Signed agent cancellation
+
+- Added an agent-signed cancellation protocol bound to server/agent/request identity, original submission nonce, fresh challenge and caller-chosen validity. A cancellation authorizes mutation only for the originating agent.
+- Added `Authority.CancelSubmission` and broker method `CancelSubmission`. The authority durably transitions only `PENDING_APPROVAL` or authorized-not-dispatched requests to `CANCELED`; an already claimed `EXECUTING` request returns an authority-signed refusal/status snapshot and is never falsely claimed killed. The trusted executor can still persist `KILLED` independently, but cancellation never rewrites a running job's state.
+- Added `serviceagent.Transport.Cancel`, broker relay support and `racg service-agent cancel`. The agent verifies the authority response, challenge, request identity and `CANCELED` consistency before reporting success. Already-canceled requests return a signed idempotent success snapshot.
+- Tests cover cancellation binding/expiry, pending and authorized pre-dispatch cancellation, running-job refusal, final-state preservation, foreign/revoked agent rejection and broker protocol surface. Full race tests, vet and Linux amd64/arm64 builds passed.
+- Latest successful architecture snapshot remains `.codespaces/agent-staging-map.1789344784/belief_map.sexp` (164 files, 743 edges, 1022 entities); a newer map rebuild was blocked by an incompatible skill parser update, and earlier maps/cache remain retained.
 
 ### Desktop build feasibility and UI integration
 

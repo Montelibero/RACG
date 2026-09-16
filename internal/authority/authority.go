@@ -53,6 +53,7 @@ func New(ctx context.Context, db *sql.DB, serverID string, key ed25519.PrivateKe
 		"CREATE TABLE IF NOT EXISTS authority_download_artifacts (request_id TEXT PRIMARY KEY, name TEXT NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL, mode TEXT NOT NULL, data BLOB NOT NULL)",
 		"CREATE TABLE IF NOT EXISTS authority_grants (grant_id TEXT PRIMARY KEY, device_id TEXT NOT NULL, client_id TEXT NOT NULL, canonical_scope BLOB NOT NULL, rule BLOB NOT NULL, expires_at TEXT, revoked INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)",
 		"CREATE TABLE IF NOT EXISTS authority_grant_requests (request_id TEXT PRIMARY KEY, grant_id TEXT NOT NULL)",
+		"CREATE TABLE IF NOT EXISTS authority_cancellations (request_id TEXT PRIMARY KEY, nonce BLOB NOT NULL, cancellation BLOB NOT NULL)",
 	} {
 		if _, err := tx.ExecContext(ctx, statement); err != nil {
 			return nil, err
