@@ -15,6 +15,7 @@ Status: file execution extracted; shared UI contracts, signed protocol primitive
 - Mobile is native Android Kotlin + Jetpack Compose. The Docker build produces an installable debug APK without Android Studio; protocol and approval integration are not added yet.
 - The mobile shell includes the camera QR import flow. The next mobile stage is enrollment persistence, secure device-key creation, and connection of the signed approval protocol.
 - The mobile QR import now validates the trusted setup schema, persists the server profile, and creates an Ed25519 device key encrypted with an Android Keystore wrapping key. It intentionally remains offline until biometric unlock and the signed broker client are added.
+- Docker debug APKs use a repository-local debug signing key so local updates preserve application data and no longer require uninstall/reinstall.
 - Telegram notifications are a later stage. They do not grant execution authority.
 - No arbitrary new request, server or device caps. Protocol safety requirements must be explained and distinguished from product policy.
 

@@ -31,6 +31,7 @@ RUN chmod +x gradlew
 COPY settings.gradle.kts settings.gradle.kts
 COPY build.gradle.kts build.gradle.kts
 COPY gradle.properties gradle.properties
+COPY docker/debug.keystore docker/debug.keystore
 COPY app/build.gradle.kts app/build.gradle.kts
 COPY app/proguard-rules.pro app/proguard-rules.pro
 

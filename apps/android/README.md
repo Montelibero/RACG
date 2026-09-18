@@ -8,6 +8,10 @@ Build without Android Studio:
 
 Outputs a debug APK and an unsigned release APK under `dist/`.
 
+Debug builds use the repository-local `docker/debug.keystore` so local APK
+updates keep the same signature. This keystore is intentionally for debug
+builds only and is not a release credential.
+
 The setup QR is generated only by trusted desktop administration and contains:
 
 ```json
