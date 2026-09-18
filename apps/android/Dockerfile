@@ -38,7 +38,7 @@ RUN --mount=type=cache,target=/root/.gradle ./gradlew --no-daemon :app:dependenc
 
 COPY app/src app/src
 
-RUN --mount=type=cache,target=/root/.gradle ./gradlew --no-daemon :app:assembleDebug :app:assembleRelease
+RUN --mount=type=cache,target=/root/.gradle ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease
 
 FROM scratch AS apk-export
 COPY --from=build /workspace/app/build/outputs/apk/debug/app-debug.apk /racg-approver-debug.apk

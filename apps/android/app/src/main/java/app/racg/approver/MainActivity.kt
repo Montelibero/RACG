@@ -17,14 +17,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 
 private enum class Screen {
     Home,
     ScanSetup,
-    SetupRead,
 }
 
 class MainActivity : ComponentActivity() {
@@ -33,22 +36,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    var screen by remember { mutableStateOf(Screen.Home) }
-
-                    when (screen) {
-                        Screen.Home -> HomeScreen(
-                            onScanSetup = { screen = Screen.ScanSetup },
-                        )
-
-                        Screen.ScanSetup -> BarcodeScannerView(
-                            onScanned = { screen = Screen.SetupRead },
-                            modifier = Modifier.fillMaxSize(),
-                        )
-
-                        Screen.SetupRead -> SetupReadScreen(
-                            onBack = { screen = Screen.Home },
-                        )
-                    }
+                    AppContent()
                 }
             }
         }
@@ -56,7 +44,59 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun HomeScreen(onScanSetup: () -> Unit) {
+private fun AppContent() {
+    val context = LocalContext.current
+    val store = remember { DataStoreApproverStore(context) }
+    val scope = rememberCoroutineScope()
+    var screen by remember { mutableStateOf(Screen.Home) }
+    var setup by remember { mutableStateOf<StoredSetup?>(null) }
+    var status by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(store) {
+        setup = store.load()
+    }
+
+    when (screen) {
+        Screen.Home -> HomeScreen(
+            setup = setup,
+            status = status,
+            onScanSetup = { screen = Screen.ScanSetup },
+        )
+
+        Screen.ScanSetup -> BarcodeScannerView(
+            onScanned = { raw ->
+                scope.launch {
+                    try {
+                        val payload = SetupQrParser.parse(raw)
+                        val material = setup?.keyMaterial ?: run {
+                            val privateKey = DeviceKeyManager.generate()
+                            DeviceKeyMaterial(
+                                publicKey = DeviceKeyManager.publicKey(privateKey).encoded,
+                                encryptedPrivateKey = DeviceKeyManager.protect(context, privateKey),
+                            )
+                        }
+                        val newSetup = StoredSetup(payload, material)
+                        store.save(newSetup)
+                        setup = newSetup
+                        status = "Connected to ${payload.serverId}"
+                        screen = Screen.Home
+                    } catch (_: Exception) {
+                        status = "Setup QR was not valid"
+                        screen = Screen.Home
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+@Composable
+private fun HomeScreen(
+    setup: StoredSetup?,
+    status: String?,
+    onScanSetup: () -> Unit,
+) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -65,17 +105,29 @@ private fun HomeScreen(onScanSetup: () -> Unit) {
     ) {
         Text("RACG Approver", style = MaterialTheme.typography.headlineMedium)
         Text(
-            "Set up this device with a QR code.",
+            when {
+                setup != null -> "Connected to ${setup.payload.serverId}"
+                else -> "Set up this device with a QR code."
+            },
             style = MaterialTheme.typography.bodyLarge,
         )
-        Button(onClick = onScanSetup) {
-            Text("Scan setup QR")
+        status?.let {
+            Text(it, style = MaterialTheme.typography.bodyMedium)
         }
-        OutlinedButton(onClick = onScanSetup) {
+        Button(
+            onClick = onScanSetup,
+            enabled = setup == null,
+        ) {
+            Text(if (setup == null) "Scan setup QR" else "Already set up")
+        }
+        OutlinedButton(
+            onClick = {},
+            enabled = false,
+        ) {
             Text("Transfer to another phone")
         }
         Text(
-            "This build reads the QR code only. It cannot approve anything yet.",
+            "This build stores setup and creates a device key. It cannot approve anything yet.",
             style = MaterialTheme.typography.bodyMedium,
             textAlign = TextAlign.Start,
         )
