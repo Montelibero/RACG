@@ -13,6 +13,7 @@ Status: file execution extracted; shared UI contracts, signed protocol primitive
 - Desktop: multiple servers, background connection, sound, notifications, request details, decisions and results. Tray support must be optional.
 - Desktop UI is native only. Browser-based UI, browser extensions, WebCrypto signing, Electron/Tauri/Wails-style browser shells and local web approval endpoints are explicitly rejected.
 - Mobile is native Android Kotlin + Jetpack Compose. The Docker build produces an installable debug APK without Android Studio; protocol and approval integration are not added yet.
+- The mobile shell includes the camera QR import flow. The next mobile stage is enrollment persistence, secure device-key creation, and connection of the signed approval protocol.
 - Telegram notifications are a later stage. They do not grant execution authority.
 - No arbitrary new request, server or device caps. Protocol safety requirements must be explained and distinguished from product policy.
 
