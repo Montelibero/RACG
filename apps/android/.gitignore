@@ -2,3 +2,5 @@
 /build
 /dist/
 /local.properties
+/docker/release.keystore
+/docker/release.properties

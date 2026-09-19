@@ -25,6 +25,18 @@ android {
         versionName = "0.1.0-dev"
     }
 
+    val releaseStoreFile = System.getenv("RACG_RELEASE_STORE")
+    if (!releaseStoreFile.isNullOrBlank()) {
+        signingConfigs {
+            create("release") {
+                storeFile = rootProject.file(releaseStoreFile)
+                storePassword = System.getenv("RACG_RELEASE_STORE_PASSWORD")
+                keyAlias = System.getenv("RACG_RELEASE_KEY_ALIAS")
+                keyPassword = System.getenv("RACG_RELEASE_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         debug {
             signingConfig = signingConfigs.getByName("debug")
@@ -32,6 +44,7 @@ android {
         release {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 

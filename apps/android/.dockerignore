@@ -1,4 +1,6 @@
 build
 app/build
 dist
+docker/release.keystore
+docker/release.properties
 local.properties

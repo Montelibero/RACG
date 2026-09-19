@@ -40,11 +40,27 @@ RUN --mount=type=cache,target=/root/.gradle ./gradlew --no-daemon :app:dependenc
 
 COPY app/src app/src
 
-RUN --mount=type=cache,target=/root/.gradle ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease
+RUN --mount=type=cache,target=/root/.gradle \
+    --mount=type=secret,id=racg_release_keystore,target=/run/secrets/release.keystore \
+    --mount=type=secret,id=racg_release_properties,target=/run/secrets/release.properties \
+    if [ -f /run/secrets/release.keystore ] && [ -f /run/secrets/release.properties ]; then \
+      export RACG_RELEASE_STORE=/run/secrets/release.keystore; \
+      set -a; \
+      . /run/secrets/release.properties; \
+      set +a; \
+    fi; \
+    ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease \
+    && mkdir /out \
+    && cp app/build/outputs/apk/debug/app-debug.apk /out/racg-approver-debug.apk \
+    && if [ -f app/build/outputs/apk/release/app-release.apk ]; then \
+      cp app/build/outputs/apk/release/app-release.apk /out/racg-approver-release.apk; \
+    else \
+      cp app/build/outputs/apk/release/app-release-unsigned.apk /out/racg-approver-release-unsigned.apk; \
+    fi
 
 FROM scratch AS apk-export
 COPY --from=build /workspace/app/build/outputs/apk/debug/app-debug.apk /racg-approver-debug.apk
-COPY --from=build /workspace/app/build/outputs/apk/release/app-release-unsigned.apk /racg-approver-release-unsigned.apk
+COPY --from=build /out/ ./
 
 FROM android-sdk AS build-image
 WORKDIR /workspace

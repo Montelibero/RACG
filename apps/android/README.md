@@ -6,11 +6,23 @@ Build without Android Studio:
 ./build-docker.sh dist
 ```
 
-Outputs a debug APK and an unsigned release APK under `dist/`.
+Outputs a debug APK under `dist/`. Without release signing it also produces an
+unsigned release APK.
 
 Debug builds use the repository-local `docker/debug.keystore` so local APK
 updates keep the same signature. This keystore is intentionally for debug
 builds only and is not a release credential.
+
+For a signed release, create and keep a local release identity:
+
+```sh
+./prepare-release-key.sh
+./build-docker.sh dist
+```
+
+The identity files are ignored by git and created with mode `0600`. Back them up
+before relying on the release APK; without the original identity, Android will
+not accept an update as the same app.
 
 The setup QR is generated only by trusted desktop administration and contains:
 
