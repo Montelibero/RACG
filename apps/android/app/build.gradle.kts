@@ -21,8 +21,11 @@ android {
         applicationId = "app.racg.approver"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0-dev"
+        versionCode = System.getenv("RACG_ANDROID_VERSION_CODE")?.toIntOrNull() ?: 2
+        versionName = System.getenv("RACG_ANDROID_VERSION_NAME") ?: "0.1.0-alpha.1"
+
+        val sourceRevision = System.getenv("RACG_SOURCE_REVISION") ?: "unknown"
+        buildConfigField("String", "SOURCE_REVISION", "\"$sourceRevision\"")
     }
 
     val releaseStoreFile = System.getenv("RACG_RELEASE_STORE")
@@ -59,6 +62,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

@@ -24,6 +24,10 @@ RUN yes | sdkmanager --licenses >/dev/null \
 FROM android-sdk AS build
 WORKDIR /workspace
 ARG SOURCE_REVISION=local
+ARG ANDROID_VERSION_CODE=2
+ARG ANDROID_VERSION_NAME=0.1.0-alpha.1
+ENV RACG_ANDROID_VERSION_CODE=${ANDROID_VERSION_CODE}
+ENV RACG_ANDROID_VERSION_NAME=${ANDROID_VERSION_NAME}
 
 COPY gradlew gradlew
 COPY gradle/wrapper gradle/wrapper
@@ -49,6 +53,7 @@ RUN --mount=type=cache,target=/root/.gradle \
       . /run/secrets/release.properties; \
       set +a; \
     fi; \
+    export RACG_SOURCE_REVISION="$SOURCE_REVISION"; \
     ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease \
     && mkdir /out \
     && cp app/build/outputs/apk/debug/app-debug.apk /out/racg-approver-debug.apk \

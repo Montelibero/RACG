@@ -32,3 +32,14 @@ for apk in racg-approver-release.apk racg-approver-release-unsigned.apk; do
     printf 'Release APK: %s/%s\n' "$OUT" "$apk"
   fi
 done
+(
+  cd "$OUT"
+  artifacts=()
+  [[ -f racg-approver-debug.apk ]] && artifacts+=(racg-approver-debug.apk)
+  [[ -f racg-approver-release.apk ]] && artifacts+=(racg-approver-release.apk)
+  [[ -f racg-approver-release-unsigned.apk ]] && artifacts+=(racg-approver-release-unsigned.apk)
+  if ((${#artifacts[@]})); then
+    sha256sum "${artifacts[@]}" > SHA256SUMS
+    printf 'Checksums: %s/SHA256SUMS\n' "$OUT"
+  fi
+)

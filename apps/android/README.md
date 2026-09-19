@@ -24,6 +24,12 @@ The identity files are ignored by git and created with mode `0600`. Back them up
 before relying on the release APK; without the original identity, Android will
 not accept an update as the same app.
 
+The build writes `SHA256SUMS` beside the artifacts. Verify a signed release with:
+
+```sh
+./verify-release.sh dist/racg-approver-release.apk
+```
+
 The setup QR is generated only by trusted desktop administration and contains:
 
 ```json
