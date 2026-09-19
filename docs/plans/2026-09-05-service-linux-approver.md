@@ -22,6 +22,7 @@ Status: file execution extracted; shared UI contracts, signed protocol primitive
 - Added local multi-server management. The phone lists stored profiles and can forget one without implying authority-side revocation.
 - Added delegated mobile transfer. The current phone signs a one-time, expiring grant; authority stores only the grant and token hash, then accepts a separately signed enrollment from the new phone's newly generated keys. The old device remains active and private keys never move between phones.
 - Added Docker release signing without Android Studio. A local mode-0600 identity is generated outside git, injected through BuildKit secrets, and produces a signed release APK; `apksigner verify` is part of local artifact validation.
+- Added Android release metadata and artifact verification: version `0.1.0-alpha.1` carries a monotonic code and source revision, the build emits SHA-256 checksums, and `verify-release.sh` runs APK signature plus checksum validation.
 - Docker debug APKs use a repository-local debug signing key so local updates preserve application data and no longer require uninstall/reinstall.
 - Telegram notifications are a later stage. They do not grant execution authority.
 - No arbitrary new request, server or device caps. Protocol safety requirements must be explained and distinguished from product policy.
