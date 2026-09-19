@@ -28,5 +28,7 @@ docker build \
   .
 printf 'Debug APK: %s/racg-approver-debug.apk\n' "$OUT"
 for apk in racg-approver-release.apk racg-approver-release-unsigned.apk; do
-  [[ -f "$OUT/$apk" ]] && printf 'Release APK: %s/%s\n' "$OUT" "$apk"
+  if [[ -f "$OUT/$apk" ]]; then
+    printf 'Release APK: %s/%s\n' "$OUT" "$apk"
+  fi
 done

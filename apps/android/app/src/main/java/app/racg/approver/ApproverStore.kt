@@ -22,6 +22,7 @@ data class StoredSetup(
 interface ApproverStore {
     suspend fun loadAll(): List<StoredSetup>
     suspend fun save(setup: StoredSetup): List<StoredSetup>
+    suspend fun forget(serverId: String): List<StoredSetup>
 }
 
 class DataStoreApproverStore(private val context: Context) : ApproverStore {
@@ -47,6 +48,15 @@ class DataStoreApproverStore(private val context: Context) : ApproverStore {
     override suspend fun save(setup: StoredSetup): List<StoredSetup> {
         val current = loadAll()
         val updated = current.filterNot { it.payload.serverId == setup.payload.serverId } + setup
+        context.approverDataStore.edit { values ->
+            values[Keys.setups] = encodeSetups(updated)
+            clearLegacy(values)
+        }
+        return updated
+    }
+
+    override suspend fun forget(serverId: String): List<StoredSetup> {
+        val updated = loadAll().filterNot { it.payload.serverId == serverId }
         context.approverDataStore.edit { values ->
             values[Keys.setups] = encodeSetups(updated)
             clearLegacy(values)

@@ -42,6 +42,7 @@ private enum class Screen {
     Home,
     ScanSetup,
     Approvals,
+    Servers,
 }
 
 class MainActivity : FragmentActivity() {
@@ -93,6 +94,7 @@ private fun AppContent() {
             setups = setups,
             status = status,
             onShowApprovals = { screen = Screen.Approvals },
+            onManageServers = { screen = Screen.Servers },
             onScanSetup = { screen = Screen.ScanSetup },
             onStartWatching = { startWatching() },
             onStopWatching = {
@@ -176,6 +178,22 @@ private fun AppContent() {
                 onBack = { screen = Screen.Home },
             )
         }
+
+        Screen.Servers -> ServersScreen(
+            setups = setups,
+            onBack = { screen = Screen.Home },
+            onAddServer = { screen = Screen.ScanSetup },
+            onForget = { target ->
+                scope.launch {
+                    setups = store.forget(target.payload.serverId)
+                    status = "Removed ${target.payload.serverId} from this phone"
+                    if (setups.isEmpty()) {
+                        ApproverPollService.stop(context)
+                    }
+                    screen = Screen.Servers
+                }
+            },
+        )
     }
 }
 
@@ -184,6 +202,7 @@ private fun HomeScreen(
     setups: List<StoredSetup>,
     status: String?,
     onShowApprovals: () -> Unit,
+    onManageServers: () -> Unit,
     onScanSetup: () -> Unit,
     onStartWatching: () -> Unit,
     onStopWatching: () -> Unit,
@@ -210,6 +229,12 @@ private fun HomeScreen(
             enabled = setups.isNotEmpty(),
         ) {
             Text("Show approvals")
+        }
+        OutlinedButton(
+            onClick = onManageServers,
+            enabled = setups.isNotEmpty(),
+        ) {
+            Text("Manage servers")
         }
         OutlinedButton(
             onClick = onScanSetup,

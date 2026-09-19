@@ -41,6 +41,10 @@ request, displays its digest and operation, and submits verified
 queues are polled independently and merged into one aggregate list. One server
 being offline does not hide verified approvals from other servers.
 
+The server-management screen lists configured profiles and can remove one from
+the phone. Removal is explicitly local: server-side access stays active until an
+administrator revokes that device.
+
 The approval key is a non-exportable ECDSA P-256 signing key in Android
 Keystore. It cannot be used until the user completes strong biometric or
 device-credential authentication; successful unlock opens a short signing
