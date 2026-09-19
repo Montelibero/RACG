@@ -32,11 +32,3 @@ func TestServerHealthzHandler(t *testing.T) {
 		t.Fatalf("pairing len=%d", got)
 	}
 }
-
-func TestServerRejectsInvalidMaxTransferBytes(t *testing.T) {
-	cfg := config.Defaults()
-	cfg.MaxTransferBytes = 0
-	if _, err := New(cfg); err == nil {
-		t.Fatal("expected max_transfer_bytes validation error")
-	}
-}

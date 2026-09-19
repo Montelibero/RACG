@@ -33,7 +33,7 @@ func Defaults() Config {
 		DBPath:                  defaultDBPath(),
 		DefaultTimeoutSec:       120,
 		MaxOutputBytes:          1 * 1024 * 1024,
-		MaxTransferBytes:        100 * 1024 * 1024,
+		MaxTransferBytes:        0,
 		MaxConcurrency:          3,
 		PairingCodeTTLSeconds:   180,
 		LockFirstClientAddr:     false,
@@ -140,11 +140,8 @@ func ApplyTOMLSimple(cfg *Config, r io.Reader) error {
 			}
 			cfg.MaxConcurrency = n
 		case "max_transfer_bytes":
-			n, err := strconv.ParseInt(val, 10, 64)
-			if err != nil || n <= 0 {
-				return fmt.Errorf("line %d: max_transfer_bytes: expected positive integer", lineNo)
-			}
-			cfg.MaxTransferBytes = n
+			// Deprecated compatibility key. Transfers are approval-gated and
+			// no longer size-capped by default.
 		case "lock_first_client_addr":
 			b, err := strconv.ParseBool(val)
 			if err != nil {

@@ -73,7 +73,7 @@ func TestDownloadFileCreatesIndependentSnapshot(t *testing.T) {
 	if err := os.WriteFile(source, data, 0o640); err != nil {
 		t.Fatal(err)
 	}
-	meta, res := DownloadFile(source, target, int64(len(data)))
+	meta, res := DownloadFile(source, target)
 	if res.Status != "SUCCEEDED" {
 		t.Fatalf("result=%+v", res)
 	}
@@ -97,7 +97,7 @@ func TestDownloadFileCreatesIndependentSnapshot(t *testing.T) {
 	}
 }
 
-func TestDownloadFileRejectsOversizeAndDirectory(t *testing.T) {
+func TestDownloadFileRejectsDirectory(t *testing.T) {
 	for _, directory := range []bool{false, true} {
 		dir := t.TempDir()
 		source, target := filepath.Join(dir, "source"), filepath.Join(dir, "snapshot")
@@ -105,10 +105,8 @@ func TestDownloadFileRejectsOversizeAndDirectory(t *testing.T) {
 			if err := os.Mkdir(source, 0o700); err != nil {
 				t.Fatal(err)
 			}
-		} else if err := os.WriteFile(source, []byte("too long"), 0o600); err != nil {
-			t.Fatal(err)
 		}
-		_, res := DownloadFile(source, target, 2)
+		_, res := DownloadFile(source, target)
 		if res.Status != "FAILED" {
 			t.Fatalf("result=%+v", res)
 		}

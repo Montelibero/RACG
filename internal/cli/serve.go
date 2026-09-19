@@ -52,7 +52,7 @@ func (c *ServeCmd) run(parent context.Context, args []string) int {
 	profile := fs.String("profile", "", "server profile name; uses a separate persisted DB/rules file")
 	fs.StringVar(&cfg.ListenAddr, "listen-addr", cfg.ListenAddr, "listen address")
 	fs.IntVar(&cfg.Port, "port", cfg.Port, "listen port")
-	fs.Int64Var(&cfg.MaxTransferBytes, "max-transfer-bytes", cfg.MaxTransferBytes, "maximum upload or download size in bytes")
+	fs.Int64Var(&cfg.MaxTransferBytes, "max-transfer-bytes", 0, "deprecated; transfers are approval-gated and unlimited")
 
 	if err := fs.Parse(args); err != nil {
 		return 2

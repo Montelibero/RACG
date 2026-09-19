@@ -980,7 +980,7 @@ func (a *API) handleInfo(w http.ResponseWriter, r *http.Request) {
 			"default_timeout_sec": a.cfg.DefaultTimeoutSec,
 			"max_output_bytes":    a.cfg.MaxOutputBytes,
 			"max_concurrency":     a.cfg.MaxConcurrency,
-			"max_transfer_bytes":  a.maxTransferBytes(),
+			"max_transfer_bytes":  0,
 		},
 		"features": map[string]any{
 			"lock_first_client_addr": a.cfg.LockFirstClientAddr,

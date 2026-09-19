@@ -44,13 +44,6 @@ func (a *API) transferDir() string {
 	return a.cfg.DBPath + ".transfers"
 }
 
-func (a *API) maxTransferBytes() int64 {
-	if a.cfg.MaxTransferBytes > 0 {
-		return a.cfg.MaxTransferBytes
-	}
-	return 100 * 1024 * 1024
-}
-
 func (a *API) uploadDataPath(id string) string {
 	return filepath.Join(a.transferDir(), "upload-"+id+".bin")
 }
@@ -89,18 +82,13 @@ func (a *API) handleUploadStage(w http.ResponseWriter, r *http.Request, c auth.C
 	_ = tmp.Chmod(0o600)
 
 	h := sha256.New()
-	limited := io.LimitReader(r.Body, a.maxTransferBytes()+1)
-	n, copyErr := io.Copy(io.MultiWriter(tmp, h), limited)
+	n, copyErr := io.Copy(io.MultiWriter(tmp, h), r.Body)
 	closeErr := tmp.Close()
 	if copyErr != nil || closeErr != nil {
 		if copyErr == nil {
 			copyErr = closeErr
 		}
 		writeError(w, http.StatusBadRequest, "UPLOAD_FAILED", copyErr.Error(), "")
-		return
-	}
-	if n > a.maxTransferBytes() {
-		writeError(w, http.StatusRequestEntityTooLarge, "TRANSFER_TOO_LARGE", fmt.Sprintf("maximum transfer size is %d bytes", a.maxTransferBytes()), "")
 		return
 	}
 	if err := os.Rename(tmpPath, a.uploadDataPath(id)); err != nil {
@@ -340,7 +328,7 @@ func (a *API) executeFileDownload(startedAt time.Time, requestID string, op rule
 	if err := json.Unmarshal(op.Payload, &p); err != nil {
 		return transferErrorResult(startedAt, err)
 	}
-	meta, res := executor.DownloadFile(p.Path, a.downloadDataPath(requestID), a.maxTransferBytes())
+	meta, res := executor.DownloadFile(p.Path, a.downloadDataPath(requestID))
 	if res.Status != "SUCCEEDED" {
 		return fileExecutionRecord(startedAt, time.Now().UTC(), res)
 	}

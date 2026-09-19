@@ -48,7 +48,7 @@ func (c *ServiceAuthorityCmd) run(ctx context.Context, args []string) int {
 	adminGID := fs.Int("admin-gid", config.AdminGID, "GID allowed to use the admin socket")
 	defaultTimeout := fs.Int("execution-default-timeout-sec", execution.DefaultTimeoutSec, "default execution timeout")
 	maxOutput := fs.Int("execution-max-output-bytes", execution.MaxOutputBytes, "maximum retained output bytes")
-	maxTransfer := fs.Int64("execution-max-transfer-bytes", execution.MaxTransferBytes, "maximum transfer bytes")
+	fs.Int64("execution-max-transfer-bytes", 0, "deprecated; transfers are approval-gated and unlimited")
 	killGrace := fs.Int("execution-kill-grace-sec", execution.KillGraceSec, "process-group kill grace")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -70,7 +70,6 @@ func (c *ServiceAuthorityCmd) run(ctx context.Context, args []string) int {
 	applyIntOverride(changed, "execution-default-timeout-sec", &cfg.Authority.Execution.DefaultTimeoutSec, *defaultTimeout)
 	applyIntOverride(changed, "execution-max-output-bytes", &cfg.Authority.Execution.MaxOutputBytes, *maxOutput)
 	applyIntOverride(changed, "execution-kill-grace-sec", &cfg.Authority.Execution.KillGraceSec, *killGrace)
-	applyInt64Override(changed, "execution-max-transfer-bytes", &cfg.Authority.Execution.MaxTransferBytes, *maxTransfer)
 	cfg.Broker.SocketPath = cfg.Authority.SocketPath
 	cfg.Broker = cfg.Broker.Normalized()
 	if err := cfg.Validate(); err != nil {

@@ -3,7 +3,6 @@ package cli
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -206,19 +205,6 @@ func TestServeInteractiveAgentRoundTrip(t *testing.T) {
 		return nil
 	}
 	if code := cmd.run(ctx, []string{"--port", "0"}); code != 0 {
-		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
-	}
-}
-
-func TestServeInvalidConfigurationDoesNotStartUI(t *testing.T) {
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	var stdout, stderr bytes.Buffer
-	cmd := NewServeCmd(&stdout, &stderr)
-	cmd.runUI = func(context.Context, tui.ServeUIConfig) error {
-		t.Fatal("UI started with invalid configuration")
-		return fmt.Errorf("unexpected UI")
-	}
-	if code := cmd.Run([]string{"--max-transfer-bytes", "0"}); code != 1 || !strings.Contains(stderr.String(), "server init failed:") {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 }

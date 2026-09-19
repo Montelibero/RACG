@@ -55,7 +55,6 @@ type Config struct {
 type ExecutionConfig struct {
 	DefaultTimeoutSec int
 	MaxOutputBytes    int
-	MaxTransferBytes  int64
 	KillGraceSec      int
 }
 
@@ -63,7 +62,6 @@ func DefaultExecutionConfig() ExecutionConfig {
 	return ExecutionConfig{
 		DefaultTimeoutSec: 120,
 		MaxOutputBytes:    1024 * 1024,
-		MaxTransferBytes:  100 * 1024 * 1024,
 		KillGraceSec:      5,
 	}
 }
@@ -108,9 +106,6 @@ func (c ExecutionConfig) Validate() error {
 			return fmt.Errorf("%s must not be negative", name)
 		}
 	}
-	if c.MaxTransferBytes < 0 {
-		return errors.New("max_transfer_bytes must not be negative")
-	}
 	return nil
 }
 
@@ -120,8 +115,7 @@ func (c ExecutionConfig) Options() authority.OperationExecutionOptions {
 			MaxOutputBytes: c.MaxOutputBytes,
 			KillGrace:      time.Duration(c.KillGraceSec) * time.Second,
 		},
-		DefaultTimeout:   time.Duration(c.DefaultTimeoutSec) * time.Second,
-		MaxTransferBytes: c.MaxTransferBytes,
+		DefaultTimeout: time.Duration(c.DefaultTimeoutSec) * time.Second,
 	}
 }
 
@@ -308,14 +302,6 @@ func applyServiceTOML(config *Config, lineNo int, key, value string) error {
 		"broker_authority_uid":          &config.Broker.AuthorityUID,
 		"broker_authority_gid":          &config.Broker.AuthorityGID,
 		"broker_listen_gid":             &config.Broker.ListenGID,
-	}
-	if key == "execution_max_transfer_bytes" {
-		parsed, err := strconv.ParseInt(value, 10, 64)
-		if err != nil {
-			return fmt.Errorf("line %d: %s: expected integer", lineNo, key)
-		}
-		config.Authority.Execution.MaxTransferBytes = parsed
-		return nil
 	}
 	if target, exists := intTargets[key]; exists {
 		parsed, err := strconv.Atoi(value)

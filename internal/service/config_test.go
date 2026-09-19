@@ -50,7 +50,7 @@ unknown_future_key = true
 		t.Fatal(err)
 	}
 	if config.Authority.ServerID != "prod" || config.Authority.BrokerUID != 1001 || config.Authority.AdminGID != 4001 || config.Broker.AuthorityGID != 0 ||
-		config.Authority.Execution.DefaultTimeoutSec != 30 || config.Authority.Execution.MaxTransferBytes != 4096 {
+		config.Authority.Execution.DefaultTimeoutSec != 30 {
 		t.Fatalf("config=%+v", config)
 	}
 	config.Authority.ServerID = "prod"
@@ -60,7 +60,6 @@ unknown_future_key = true
 	config.Authority.AdminGID = 4001
 	config.Authority.Execution.DefaultTimeoutSec = 30
 	config.Authority.Execution.MaxOutputBytes = 2048
-	config.Authority.Execution.MaxTransferBytes = 4096
 	config.Authority.Execution.KillGraceSec = 2
 	config.Broker.AuthorityUID = 0
 	config.Broker.AuthorityGID = 0

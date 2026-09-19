@@ -91,7 +91,7 @@ func UploadFile(p UploadSpec, src io.Reader) Result {
 }
 
 // DownloadFile snapshots an already-authorized regular file into private artifact storage.
-func DownloadFile(path, artifactPath string, maxBytes int64) (FileArtifact, Result) {
+func DownloadFile(path, artifactPath string) (FileArtifact, Result) {
 	startedAt := time.Now()
 	src, err := os.Open(path)
 	if err != nil {
@@ -105,9 +105,6 @@ func DownloadFile(path, artifactPath string, maxBytes int64) (FileArtifact, Resu
 	if !info.Mode().IsRegular() {
 		return FileArtifact{}, fileEditResult(startedAt, "", errors.New("download source is not a regular file"))
 	}
-	if info.Size() > maxBytes {
-		return FileArtifact{}, fileEditResult(startedAt, "", fmt.Errorf("file exceeds maximum transfer size of %d bytes", maxBytes))
-	}
 	if err := os.MkdirAll(filepath.Dir(artifactPath), 0o700); err != nil {
 		return FileArtifact{}, fileEditResult(startedAt, "", err)
 	}
@@ -119,7 +116,7 @@ func DownloadFile(path, artifactPath string, maxBytes int64) (FileArtifact, Resu
 	defer os.Remove(tmpPath)
 	_ = tmp.Chmod(0o600)
 	h := sha256.New()
-	n, copyErr := io.Copy(io.MultiWriter(tmp, h), io.LimitReader(src, maxBytes+1))
+	n, copyErr := io.Copy(io.MultiWriter(tmp, h), src)
 	if copyErr == nil {
 		copyErr = tmp.Sync()
 	}
@@ -128,9 +125,6 @@ func DownloadFile(path, artifactPath string, maxBytes int64) (FileArtifact, Resu
 	}
 	if copyErr != nil {
 		return FileArtifact{}, fileEditResult(startedAt, "", copyErr)
-	}
-	if n > maxBytes {
-		return FileArtifact{}, fileEditResult(startedAt, "", fmt.Errorf("file exceeds maximum transfer size of %d bytes", maxBytes))
 	}
 	if err := os.Rename(tmpPath, artifactPath); err != nil {
 		return FileArtifact{}, fileEditResult(startedAt, "", err)

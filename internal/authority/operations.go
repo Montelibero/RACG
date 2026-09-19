@@ -20,13 +20,11 @@ import (
 
 // OperationExecutionOptions reuses the existing interactive executor defaults.
 // Zero MaxOutputBytes/KillGrace values are normalized by executor.New. A zero
-// DefaultTimeout uses the established 120-second default; zero MaxTransferBytes
-// uses the established 100 MiB transfer default. These are deployment settings,
-// not approval semantics.
+// DefaultTimeout uses the established 120-second default. These are deployment
+// settings, not approval semantics.
 type OperationExecutionOptions struct {
-	Executor         executor.Options
-	DefaultTimeout   time.Duration
-	MaxTransferBytes int64
+	Executor       executor.Options
+	DefaultTimeout time.Duration
 }
 
 func (o OperationExecutionOptions) normalized() OperationExecutionOptions {
@@ -38,9 +36,6 @@ func (o OperationExecutionOptions) normalized() OperationExecutionOptions {
 	}
 	if o.DefaultTimeout <= 0 {
 		o.DefaultTimeout = 120 * time.Second
-	}
-	if o.MaxTransferBytes <= 0 {
-		o.MaxTransferBytes = 100 * 1024 * 1024
 	}
 	return o
 }
@@ -171,7 +166,7 @@ func (a *Authority) runDownloadOperation(ctx context.Context, requestID string, 
 	}
 	artifactPath := filepath.Join(directory, "snapshot.bin")
 	defer os.RemoveAll(directory)
-	meta, result := executor.DownloadFile(payload.Path, artifactPath, options.MaxTransferBytes)
+	meta, result := executor.DownloadFile(payload.Path, artifactPath)
 	if result.Status != "SUCCEEDED" {
 		return result
 	}

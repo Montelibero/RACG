@@ -247,7 +247,7 @@ Upload stages bytes without changing the target, then creates an `fs.upload` app
 
 Download creates an `fs.download` approval request first. After approval, RACG snapshots and streams the server file; the client verifies SHA-256 before atomically replacing the local destination. Existing local files require `--force`. File contents are not stored in request JSON or displayed in the TUI.
 
-The default server transfer limit is 100 MiB. Start the server with `--max-transfer-bytes N` to change it. Transfers do not support resume in this version.
+There is no server-imposed transfer size limit; the approval request shows the size before authorization. Transfers do not support resume in this version.
 
 ## 6. Approval And Status
 
