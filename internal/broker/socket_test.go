@@ -47,6 +47,14 @@ func (fakeAuthority) EnrollDevice(context.Context, approval.DeviceEnrollmentSubm
 	return approval.SignedDeviceEnrollmentReceipt{}, errSocketBoundary
 }
 
+func (fakeAuthority) CreateDeviceTransfer(context.Context, approval.SignedDeviceTransferGrant) error {
+	return errSocketBoundary
+}
+
+func (fakeAuthority) EnrollTransfer(context.Context, approval.DeviceTransferSubmission) (approval.SignedDeviceTransferReceipt, error) {
+	return approval.SignedDeviceTransferReceipt{}, errSocketBoundary
+}
+
 var errSocketBoundary = errSentinel("socket boundary reached")
 
 type errSentinel string

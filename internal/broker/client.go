@@ -93,6 +93,16 @@ func (c *AuthorityClient) EnrollDevice(ctx context.Context, submission approval.
 	return result, c.call(ctx, MethodEnrollDevice, submission, &result)
 }
 
+func (c *AuthorityClient) CreateDeviceTransfer(ctx context.Context, grant approval.SignedDeviceTransferGrant) error {
+	var result map[string]bool
+	return c.call(ctx, MethodCreateTransfer, DeviceTransferGrantSubmission{Grant: grant}, &result)
+}
+
+func (c *AuthorityClient) EnrollTransfer(ctx context.Context, submission approval.DeviceTransferSubmission) (approval.SignedDeviceTransferReceipt, error) {
+	var result approval.SignedDeviceTransferReceipt
+	return result, c.call(ctx, MethodEnrollTransfer, submission, &result)
+}
+
 func (c *AuthorityClient) call(ctx context.Context, method string, params, result any) error {
 	if err := ctx.Err(); err != nil {
 		return err

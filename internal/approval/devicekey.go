@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"time"
 )
 
 const (
@@ -30,6 +31,58 @@ func ValidateDeviceKeyType(keyType string) error {
 	default:
 		return fmt.Errorf("unsupported device key type %q", keyType)
 	}
+}
+
+func readRandom(data []byte) (int, error) {
+	return rand.Read(data)
+}
+
+func cloneBytes(data []byte) []byte {
+	if data == nil {
+		return nil
+	}
+	return append([]byte(nil), data...)
+}
+
+func checkFutureTime(encoded string, now time.Time) error {
+	until, err := time.Parse(time.RFC3339Nano, encoded)
+	if err != nil {
+		return fmt.Errorf("parse validity: %w", err)
+	}
+	if !now.Before(until) {
+		return errors.New("validity expired")
+	}
+	return nil
+}
+
+func validateDeviceSigner(keyType string, key crypto.Signer, deviceID string) error {
+	switch keyType {
+	case KeyTypeEd25519:
+		private, ok := key.(ed25519.PrivateKey)
+		if !ok || len(private) != ed25519.PrivateKeySize {
+			return errors.New("device signer is not Ed25519")
+		}
+		if deviceID == "" {
+			return errors.New("invalid Ed25519 device signer")
+		}
+		return nil
+	case KeyTypeECDSAP256:
+		private, ok := key.(*ecdsa.PrivateKey)
+		if !ok || private.Curve != elliptic.P256() || deviceID == "" {
+			return errors.New("device signer is not ECDSA P-256")
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported device signer type %q", keyType)
+	}
+}
+
+func ed25519Sign(private ed25519.PrivateKey, message []byte) []byte {
+	return ed25519.Sign(private, message)
+}
+
+func ed25519Verify(public ed25519.PublicKey, message, signature []byte) bool {
+	return ed25519.Verify(public, message, signature)
 }
 
 func validateECDSAP256PublicKey(encoded []byte) error {

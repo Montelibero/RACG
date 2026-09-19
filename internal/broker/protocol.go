@@ -23,6 +23,8 @@ const (
 	MethodListPending      = "v1/authority.list-pending"
 	MethodCancelSubmission = "v1/authority.cancel-submission"
 	MethodEnrollDevice     = "v1/authority.enroll-device"
+	MethodCreateTransfer   = "v1/authority.create-transfer"
+	MethodEnrollTransfer   = "v1/authority.enroll-transfer"
 )
 
 type Request struct {
@@ -53,4 +55,10 @@ type DecisionSubmission struct {
 type UploadSubmission struct {
 	Upload approval.SignedStagedUpload `json:"upload"`
 	Data   []byte                      `json:"data"`
+}
+
+// DeviceTransferGrantSubmission carries an old phone's signed authorization
+// for registering a new phone's independently generated keys.
+type DeviceTransferGrantSubmission struct {
+	Grant approval.SignedDeviceTransferGrant `json:"grant"`
 }

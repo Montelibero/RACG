@@ -29,6 +29,15 @@ class BrokerClient(
             ApprovalProtocol.decodeSignedEnrollmentReceipt(it)
         }
 
+    fun createTransfer(grant: SignedDeviceTransferGrant) {
+        call("v1/authority.create-transfer", ApprovalProtocol.encodeTransferGrantSubmission(grant)) { it }
+    }
+
+    fun enrollTransfer(submission: DeviceTransferSubmission): SignedDeviceTransferReceipt =
+        call("v1/authority.enroll-transfer", ApprovalProtocol.encodeTransferSubmission(submission)) {
+            ApprovalProtocol.decodeSignedTransferReceipt(it)
+        }
+
     private fun <T> call(
         method: String,
         params: String,

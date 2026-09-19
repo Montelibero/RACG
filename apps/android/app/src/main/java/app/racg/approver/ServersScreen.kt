@@ -28,6 +28,7 @@ fun ServersScreen(
     setups: List<StoredSetup>,
     onBack: () -> Unit,
     onAddServer: () -> Unit,
+    onTransfer: (StoredSetup) -> Unit,
     onForget: (StoredSetup) -> Unit,
 ) {
     var pendingForget by remember { mutableStateOf<StoredSetup?>(null) }
@@ -69,6 +70,9 @@ fun ServersScreen(
                         )
                         OutlinedButton(onClick = { pendingForget = setup }) {
                             Text("Remove from phone")
+                        }
+                        OutlinedButton(onClick = { onTransfer(setup) }) {
+                            Text("Transfer to new phone")
                         }
                     }
                 }

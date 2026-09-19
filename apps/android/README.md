@@ -45,6 +45,11 @@ The server-management screen lists configured profiles and can remove one from
 the phone. Removal is explicitly local: server-side access stays active until an
 administrator revokes that device.
 
+The management screen can also create a one-time transfer QR. The new phone
+scans it, generates its own approval and poll keys, enrolls them through the
+authority, and verifies the transfer receipt. The old phone remains active; no
+private key is included in the QR or transferred between phones.
+
 The approval key is a non-exportable ECDSA P-256 signing key in Android
 Keystore. It cannot be used until the user completes strong biometric or
 device-credential authentication; successful unlock opens a short signing

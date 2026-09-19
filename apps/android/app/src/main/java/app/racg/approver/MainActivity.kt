@@ -36,6 +36,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.net.URI
 import java.time.Instant
+import java.security.SecureRandom
 import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
 
 private enum class Screen {
@@ -43,6 +44,7 @@ private enum class Screen {
     ScanSetup,
     Approvals,
     Servers,
+    TransferQr,
 }
 
 class MainActivity : FragmentActivity() {
@@ -66,6 +68,8 @@ private fun AppContent() {
     var screen by remember { mutableStateOf(Screen.Home) }
     var setups by remember { mutableStateOf<List<StoredSetup>>(emptyList()) }
     var status by remember { mutableStateOf<String?>(null) }
+    var transferQr by remember { mutableStateOf<String?>(null) }
+    var transferServerId by remember { mutableStateOf<String?>(null) }
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
@@ -89,6 +93,54 @@ private fun AppContent() {
         setups = store.loadAll()
     }
 
+    fun transferServer(target: StoredSetup) {
+        val activity = context as? FragmentActivity
+        if (activity == null) {
+            status = "Approver key authentication is unavailable"
+            return
+        }
+        requestDeviceAuthentication(activity) {
+            scope.launch {
+                try {
+                    val qr = withContext(Dispatchers.IO) {
+                        val token = ByteArray(32).also { SecureRandom().nextBytes(it) }
+                        val suffix = ByteArray(6).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
+                        val newDeviceId = target.payload.approverId + "-transfer-" + suffix
+                        val grant = ApprovalProtocol.newDeviceTransferGrant(
+                            serverId = target.payload.serverId,
+                            currentDeviceId = target.payload.approverId,
+                            keyType = target.approvalKeyMaterial.keyType,
+                            newDeviceId = newDeviceId,
+                            token = token,
+                            now = Instant.now(),
+                        )
+                        val signedGrant = ApprovalProtocol.signDeviceTransferGrant(
+                            grant,
+                            DeviceKeyManager.approvalSigner(target.approvalKeyMaterial.publicKey),
+                        )
+                        val uri = URI(target.payload.endpoint)
+                        BrokerClient(uri.host, uri.port).createTransfer(signedGrant)
+                        org.json.JSONObject().apply {
+                            put("v", 3)
+                            put("kind", SetupQrParser.KIND)
+                            put("server_id", target.payload.serverId)
+                            put("server_public_key", java.util.Base64.getEncoder().encodeToString(target.payload.serverPublicKey))
+                            put("endpoint", target.payload.endpoint)
+                            put("new_device_id", newDeviceId)
+                            put("grant_challenge", java.util.Base64.getEncoder().encodeToString(grant.challenge))
+                            put("transfer_token", java.util.Base64.getEncoder().encodeToString(token))
+                        }.toString()
+                    }
+                    transferQr = qr
+                    transferServerId = target.payload.serverId
+                    screen = Screen.TransferQr
+                } catch (_: Exception) {
+                    status = "Transfer could not be created"
+                }
+            }
+        }
+    }
+
     when (screen) {
         Screen.Home -> HomeScreen(
             setups = setups,
@@ -108,7 +160,7 @@ private fun AppContent() {
                 scope.launch {
                     try {
                         val payload = SetupQrParser.parse(raw)
-                        if (setups.any { it.payload.serverId == payload.serverId }) {
+                        if (payload.transferToken != null && setups.any { it.payload.serverId == payload.serverId }) {
                             status = "That server is already configured"
                             screen = Screen.Home
                             return@launch
@@ -126,33 +178,44 @@ private fun AppContent() {
                             scope.launch {
                                 try {
                                     val completed = withContext(Dispatchers.IO) {
-                                        payload.enrollmentToken?.let { token ->
+                                        payload.transferToken?.let { transferToken ->
+                                            val transferDeviceId = payload.transferDeviceId
+                                                ?: throw IllegalArgumentException("Transfer identity is missing")
                                             val serverKey = Ed25519PublicKeyParameters(payload.serverPublicKey, 0)
-                                            val enrollment = ApprovalProtocol.newDeviceEnrollmentWithKeyType(
+                                            val enrollment = ApprovalProtocol.newDeviceTransferEnrollment(
                                                 serverId = payload.serverId,
-                                                deviceId = payload.approverId,
-                                                keyType = KEY_TYPE_ECDSA_P256,
-                                                publicKey = newSetup.approvalKeyMaterial.publicKey,
+                                                newDeviceId = transferDeviceId,
+                                                signer = DeviceKeyManager.approvalSigner(newSetup.approvalKeyMaterial.publicKey),
                                                 pollKey = newSetup.pollKeyMaterial.publicKey,
-                                                token = token,
+                                                grantChallenge = payload.transferGrantChallenge
+                                                    ?: throw IllegalArgumentException("Transfer grant is missing"),
+                                                token = transferToken,
                                                 now = Instant.now(),
                                             )
-                                            val signed = ApprovalProtocol.signDeviceEnrollment(
+                                            val signed = ApprovalProtocol.signDeviceTransferEnrollment(
                                                 enrollment,
                                                 DeviceKeyManager.approvalSigner(newSetup.approvalKeyMaterial.publicKey),
                                             )
                                             val uri = URI(payload.endpoint)
-                                            val receipt = BrokerClient(uri.host, uri.port).enrollDevice(
-                                                DeviceEnrollmentSubmission(signed, token),
+                                            val receipt = BrokerClient(uri.host, uri.port).enrollTransfer(
+                                                DeviceTransferSubmission(
+                                                    enrollment = signed,
+                                                    token = transferToken,
+                                                ),
                                             )
-                                            ApprovalProtocol.verifyEnrollmentReceipt(
+                                            ApprovalProtocol.verifyTransferReceipt(
                                                 signed,
                                                 receipt,
                                                 serverKey,
                                                 Instant.now(),
                                             )
                                         }
-                                        newSetup.copy(payload = payload.copy(enrollmentToken = null))
+                                        newSetup.copy(
+                                            payload = payload.copy(
+                                                transferToken = null,
+                                                transferGrantChallenge = null,
+                                            ),
+                                        )
                                     }
                                     setups = store.save(completed)
                                     status = "Setup saved for ${payload.serverId}"
@@ -183,6 +246,7 @@ private fun AppContent() {
             setups = setups,
             onBack = { screen = Screen.Home },
             onAddServer = { screen = Screen.ScanSetup },
+            onTransfer = { target -> transferServer(target) },
             onForget = { target ->
                 scope.launch {
                     setups = store.forget(target.payload.serverId)
@@ -194,6 +258,16 @@ private fun AppContent() {
                 }
             },
         )
+
+        Screen.TransferQr -> transferQr?.let { qr ->
+            transferServerId?.let { serverId ->
+                TransferQrScreen(
+                    serverId = serverId,
+                    qr = qr,
+                    onDone = { screen = Screen.Servers },
+                )
+            }
+        }
     }
 }
 

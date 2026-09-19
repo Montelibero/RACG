@@ -10,6 +10,9 @@ data class SetupPayload(
     val approverId: String,
     val endpoint: String,
     val enrollmentToken: ByteArray?,
+    val transferToken: ByteArray? = null,
+    val transferDeviceId: String? = null,
+    val transferGrantChallenge: ByteArray? = null,
 )
 
 /** Parses a QR produced by trusted desktop administration. It never accepts
@@ -17,12 +20,13 @@ data class SetupPayload(
 object SetupQrParser {
     const val KIND = "racg.approver.setup"
     private const val TOKEN_VERSION = 2
+    private const val TRANSFER_VERSION = 3
     private const val ED25519_KEY_BYTES = 32
 
     fun parse(raw: String): SetupPayload {
         val value = JSONObject(raw)
         val version = value.getInt("v")
-        require(version in 1..TOKEN_VERSION) { "Unsupported setup QR version" }
+        require(version in 1..TRANSFER_VERSION) { "Unsupported setup QR version" }
         require(value.getString("kind") == KIND) { "This QR code is not an approver setup" }
 
         val serverId = value.requireText("server_id")
@@ -31,6 +35,21 @@ object SetupQrParser {
         val serverKey = decodeKey(value.requireText("server_public_key"))
         val token = if (version == TOKEN_VERSION) {
             decodeKey(value.requireText("enrollment_token"))
+        } else {
+            null
+        }
+        val transferToken = if (version == TRANSFER_VERSION) {
+            decodeKey(value.requireText("transfer_token"))
+        } else {
+            null
+        }
+        val transferDeviceId = if (version == TRANSFER_VERSION) {
+            value.requireText("new_device_id")
+        } else {
+            null
+        }
+        val transferGrantChallenge = if (version == TRANSFER_VERSION) {
+            decodeKey(value.requireText("grant_challenge"))
         } else {
             null
         }
@@ -53,6 +72,9 @@ object SetupQrParser {
             approverId = approverId,
             endpoint = endpoint,
             enrollmentToken = token,
+            transferToken = transferToken,
+            transferDeviceId = transferDeviceId,
+            transferGrantChallenge = transferGrantChallenge,
         )
     }
 

@@ -56,6 +56,8 @@ func New(ctx context.Context, db *sql.DB, serverID string, key ed25519.PrivateKe
 		"CREATE TABLE IF NOT EXISTS authority_cancellations (request_id TEXT PRIMARY KEY, nonce BLOB NOT NULL, cancellation BLOB NOT NULL)",
 		"CREATE TABLE IF NOT EXISTS authority_device_setups (token_hash BLOB PRIMARY KEY, device_id TEXT NOT NULL, expires_at TEXT NOT NULL, used_at TEXT, enrolled_public_key BLOB)",
 		"CREATE INDEX IF NOT EXISTS authority_device_setups_device_id ON authority_device_setups(device_id)",
+		"CREATE TABLE IF NOT EXISTS authority_device_transfers (transfer_hash BLOB PRIMARY KEY, current_device_id TEXT NOT NULL, new_device_id TEXT NOT NULL, grant BLOB NOT NULL, expires_at TEXT NOT NULL, used_at TEXT)",
+		"CREATE INDEX IF NOT EXISTS authority_device_transfers_devices ON authority_device_transfers(current_device_id,new_device_id)",
 	} {
 		if _, err := tx.ExecContext(ctx, statement); err != nil {
 			return nil, err

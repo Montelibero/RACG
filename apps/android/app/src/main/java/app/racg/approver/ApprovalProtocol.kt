@@ -139,6 +139,57 @@ data class DeviceEnrollmentReceipt(
 
 data class SignedDeviceEnrollmentReceipt(val receipt: DeviceEnrollmentReceipt, val signature: ByteArray)
 
+data class DeviceTransferGrant(
+    val version: Int,
+    val serverId: String,
+    val currentDeviceId: String,
+    val keyType: String,
+    val newDeviceId: String,
+    val transferTokenSha256: ByteArray,
+    val challenge: ByteArray,
+    val validUntil: String,
+)
+
+data class SignedDeviceTransferGrant(val grant: DeviceTransferGrant, val signature: ByteArray)
+
+data class DeviceTransferEnrollment(
+    val version: Int,
+    val serverId: String,
+    val newDeviceId: String,
+    val keyType: String,
+    val publicKey: ByteArray,
+    val pollKey: ByteArray,
+    val grantChallenge: ByteArray,
+    val transferTokenSha256: ByteArray,
+    val challenge: ByteArray,
+    val validUntil: String,
+)
+
+data class SignedDeviceTransferEnrollment(
+    val enrollment: DeviceTransferEnrollment,
+    val signature: ByteArray,
+)
+
+data class DeviceTransferSubmission(
+    val enrollment: SignedDeviceTransferEnrollment,
+    val token: ByteArray,
+)
+
+data class DeviceTransferReceipt(
+    val version: Int,
+    val serverId: String,
+    val currentDeviceId: String,
+    val newDeviceId: String,
+    val keyType: String,
+    val publicKey: ByteArray,
+    val pollKey: ByteArray,
+    val grantSha256: String,
+    val challenge: ByteArray,
+    val status: String,
+)
+
+data class SignedDeviceTransferReceipt(val receipt: DeviceTransferReceipt, val signature: ByteArray)
+
 /**
  * Byte-compatible codec for the Go approval protocol. Signatures cover exact
  * encoding/json output, including declaration field order and HTML escaping.
@@ -343,6 +394,117 @@ object ApprovalProtocol {
         ) { "Authority receipt signature is invalid" }
     }
 
+    fun newDeviceTransferGrant(
+        serverId: String,
+        currentDeviceId: String,
+        keyType: String,
+        newDeviceId: String,
+        token: ByteArray,
+        now: Instant,
+        lifetimeSeconds: Long = 600,
+    ): DeviceTransferGrant = DeviceTransferGrant(
+        version = APPROVAL_VERSION,
+        serverId = serverId,
+        currentDeviceId = currentDeviceId,
+        keyType = keyType,
+        newDeviceId = newDeviceId,
+        transferTokenSha256 = sha256(token),
+        challenge = randomBytes(),
+        validUntil = now.plusSeconds(lifetimeSeconds).toString(),
+    )
+
+    fun signDeviceTransferGrant(grant: DeviceTransferGrant, signer: DeviceSigner): SignedDeviceTransferGrant {
+        validateTransferGrant(grant)
+        require(grant.currentDeviceId.isNotBlank() && grant.keyType == signer.keyType) {
+            "Transfer signer identity mismatch"
+        }
+        return SignedDeviceTransferGrant(
+            grant = grant,
+            signature = signer.sign(message("device-transfer-grant", encodeTransferGrant(grant))),
+        )
+    }
+
+    fun newDeviceTransferEnrollment(
+        serverId: String,
+        newDeviceId: String,
+        signer: DeviceSigner,
+        pollKey: ByteArray,
+        grantChallenge: ByteArray,
+        token: ByteArray,
+        now: Instant,
+        lifetimeSeconds: Long = 300,
+    ): DeviceTransferEnrollment = DeviceTransferEnrollment(
+        version = APPROVAL_VERSION,
+        serverId = serverId,
+        newDeviceId = newDeviceId,
+        keyType = signer.keyType,
+        publicKey = signer.publicKey,
+        pollKey = pollKey,
+        grantChallenge = grantChallenge,
+        transferTokenSha256 = sha256(token),
+        challenge = randomBytes(),
+        validUntil = now.plusSeconds(lifetimeSeconds).toString(),
+    )
+
+    fun signDeviceTransferEnrollment(
+        enrollment: DeviceTransferEnrollment,
+        signer: DeviceSigner,
+    ): SignedDeviceTransferEnrollment {
+        validateTransferEnrollment(enrollment)
+        require(enrollment.newDeviceId.isNotBlank() && enrollment.keyType == signer.keyType) {
+            "Transfer signer identity mismatch"
+        }
+        return SignedDeviceTransferEnrollment(
+            enrollment = enrollment,
+            signature = signer.sign(message("device-transfer-enrollment", encodeTransferEnrollment(enrollment))),
+        )
+    }
+
+    fun verifyTransferEnrollment(
+        signed: SignedDeviceTransferEnrollment,
+        serverId: String,
+        newDeviceId: String,
+        now: Instant,
+    ) {
+        val enrollment = signed.enrollment
+        validateTransferEnrollment(enrollment)
+        require(enrollment.serverId == serverId && enrollment.newDeviceId == newDeviceId) {
+            "Transfer enrollment identity mismatch"
+        }
+        verifyDeviceSignature(
+            enrollment.keyType,
+            enrollment.publicKey,
+            message("device-transfer-enrollment", encodeTransferEnrollment(enrollment)),
+            signed.signature,
+        ) { "Transfer enrollment signature is invalid" }
+        require(now.isBefore(Instant.parse(enrollment.validUntil))) { "Transfer enrollment expired" }
+    }
+
+    fun verifyTransferReceipt(
+        enrollment: SignedDeviceTransferEnrollment,
+        signedReceipt: SignedDeviceTransferReceipt,
+        serverKey: Ed25519PublicKeyParameters,
+        now: Instant,
+    ) {
+        val enrollmentBody = enrollment.enrollment
+        verifyTransferEnrollment(enrollment, enrollmentBody.serverId, enrollmentBody.newDeviceId, now)
+        val receipt = signedReceipt.receipt
+        require(
+            receipt.version == APPROVAL_VERSION && receipt.serverId == enrollmentBody.serverId &&
+                receipt.newDeviceId == enrollmentBody.newDeviceId &&
+                receipt.keyType == enrollmentBody.keyType &&
+                receipt.publicKey.contentEquals(enrollmentBody.publicKey) &&
+                receipt.pollKey.contentEquals(enrollmentBody.pollKey) &&
+                receipt.challenge.contentEquals(enrollmentBody.challenge) &&
+                receipt.status == "TRANSFERRED",
+        ) { "Transfer receipt does not match the enrollment" }
+        verify(
+            serverKey,
+            message("device-transfer-receipt", encodeTransferReceipt(receipt)),
+            signedReceipt.signature,
+        ) { "Transfer receipt signature is invalid" }
+    }
+
     fun newDeviceEnrollment(
         serverId: String,
         deviceId: String,
@@ -454,6 +616,44 @@ object ApprovalProtocol {
             message("device-enrollment-receipt", encodeEnrollmentReceipt(receipt)),
             signedReceipt.signature,
         ) { "Enrollment receipt signature is invalid" }
+    }
+
+    fun decodeSignedTransferEnrollment(raw: JSONObject): SignedDeviceTransferEnrollment {
+        val enrollment = requireObject(raw, "enrollment")
+        return SignedDeviceTransferEnrollment(
+            enrollment = DeviceTransferEnrollment(
+                version = enrollment.getInt("version"),
+                serverId = enrollment.requireString("server_id"),
+                newDeviceId = enrollment.requireString("new_device_id"),
+                keyType = enrollment.requireString("key_type"),
+                publicKey = enrollment.decodeBase64("public_key"),
+                pollKey = enrollment.decodeBase64("poll_public_key"),
+                grantChallenge = enrollment.decodeBase64("grant_challenge"),
+                transferTokenSha256 = enrollment.decodeBase64("transfer_token_sha256"),
+                challenge = enrollment.decodeBase64("challenge"),
+                validUntil = enrollment.requireString("valid_until"),
+            ),
+            signature = raw.decodeBase64("signature"),
+        )
+    }
+
+    fun decodeSignedTransferReceipt(raw: JSONObject): SignedDeviceTransferReceipt {
+        val receipt = requireObject(raw, "receipt")
+        return SignedDeviceTransferReceipt(
+            receipt = DeviceTransferReceipt(
+                version = receipt.getInt("version"),
+                serverId = receipt.requireString("server_id"),
+                currentDeviceId = receipt.requireString("current_device_id"),
+                newDeviceId = receipt.requireString("new_device_id"),
+                keyType = receipt.requireString("key_type"),
+                publicKey = receipt.decodeBase64("public_key"),
+                pollKey = receipt.decodeBase64("poll_public_key"),
+                grantSha256 = receipt.requireString("grant_sha256"),
+                challenge = receipt.decodeBase64("challenge"),
+                status = receipt.requireString("status"),
+            ),
+            signature = raw.decodeBase64("signature"),
+        )
     }
 
     fun decodeSignedRequest(raw: JSONObject): SignedApprovalRequest {
@@ -688,6 +888,67 @@ object ApprovalProtocol {
         base64("signature", value.signature)
     }
 
+    internal fun encodeTransferGrant(value: DeviceTransferGrant): String = jsonObject {
+        number("version", value.version)
+        text("server_id", value.serverId)
+        text("current_device_id", value.currentDeviceId)
+        text("key_type", value.keyType)
+        text("new_device_id", value.newDeviceId)
+        base64("transfer_token_sha256", value.transferTokenSha256)
+        base64("challenge", value.challenge)
+        text("valid_until", value.validUntil)
+    }
+
+    internal fun encodeSignedTransferGrant(value: SignedDeviceTransferGrant): String = jsonObject {
+        raw("grant", encodeTransferGrant(value.grant))
+        base64("signature", value.signature)
+    }
+
+    internal fun encodeTransferGrantSubmission(value: SignedDeviceTransferGrant): String = jsonObject {
+        raw("grant", encodeSignedTransferGrant(value))
+    }
+
+    internal fun encodeTransferEnrollment(value: DeviceTransferEnrollment): String = jsonObject {
+        number("version", value.version)
+        text("server_id", value.serverId)
+        text("new_device_id", value.newDeviceId)
+        text("key_type", value.keyType)
+        base64("public_key", value.publicKey)
+        base64("poll_public_key", value.pollKey)
+        base64("grant_challenge", value.grantChallenge)
+        base64("transfer_token_sha256", value.transferTokenSha256)
+        base64("challenge", value.challenge)
+        text("valid_until", value.validUntil)
+    }
+
+    internal fun encodeSignedTransferEnrollment(value: SignedDeviceTransferEnrollment): String = jsonObject {
+        raw("enrollment", encodeTransferEnrollment(value.enrollment))
+        base64("signature", value.signature)
+    }
+
+    internal fun encodeTransferSubmission(value: DeviceTransferSubmission): String = jsonObject {
+        raw("enrollment", encodeSignedTransferEnrollment(value.enrollment))
+        base64("token", value.token)
+    }
+
+    internal fun encodeTransferReceipt(value: DeviceTransferReceipt): String = jsonObject {
+        number("version", value.version)
+        text("server_id", value.serverId)
+        text("current_device_id", value.currentDeviceId)
+        text("new_device_id", value.newDeviceId)
+        text("key_type", value.keyType)
+        base64("public_key", value.publicKey)
+        base64("poll_public_key", value.pollKey)
+        text("grant_sha256", value.grantSha256)
+        base64("challenge", value.challenge)
+        text("status", value.status)
+    }
+
+    internal fun encodeSignedTransferReceipt(value: SignedDeviceTransferReceipt): String = jsonObject {
+        raw("receipt", encodeTransferReceipt(value.receipt))
+        base64("signature", value.signature)
+    }
+
     fun sha256Hex(value: ByteArray): String =
         MessageDigest.getInstance("SHA-256").digest(value)
             .joinToString("") { "%02x".format(it.toInt() and 0xff) }
@@ -753,7 +1014,40 @@ object ApprovalProtocol {
         require(value.tokenSha256.size == KEY_BYTES) { "Invalid enrollment token digest" }
         require(value.challenge.size == KEY_BYTES) { "Invalid enrollment challenge" }
         runCatching { Instant.parse(value.validUntil) }
-            .onFailure { throw IllegalArgumentException("Invalid enrollment validity") }
+        .onFailure { throw IllegalArgumentException("Invalid enrollment validity") }
+    }
+
+    private fun validateTransferGrant(value: DeviceTransferGrant) {
+        require(value.version == APPROVAL_VERSION) { "Unsupported transfer grant version" }
+        require(
+            value.serverId.isNotBlank() && value.currentDeviceId.isNotBlank() &&
+                value.newDeviceId.isNotBlank() && value.currentDeviceId != value.newDeviceId,
+        ) { "Invalid transfer grant identity" }
+        require(value.keyType == KEY_TYPE_ED25519 || value.keyType == KEY_TYPE_ECDSA_P256) {
+            "Unsupported transfer key type"
+        }
+        require(value.transferTokenSha256.size == KEY_BYTES) { "Invalid transfer token digest" }
+        require(value.challenge.size == KEY_BYTES) { "Invalid transfer grant challenge" }
+        runCatching { Instant.parse(value.validUntil) }
+            .onFailure { throw IllegalArgumentException("Invalid transfer grant validity") }
+    }
+
+    private fun validateTransferEnrollment(value: DeviceTransferEnrollment) {
+        require(value.version == APPROVAL_VERSION) { "Unsupported transfer enrollment version" }
+        require(value.serverId.isNotBlank() && value.newDeviceId.isNotBlank()) {
+            "Invalid transfer enrollment identity"
+        }
+        require(value.keyType == KEY_TYPE_ED25519 || value.keyType == KEY_TYPE_ECDSA_P256) {
+            "Unsupported transfer key type"
+        }
+        require(value.publicKey.isNotEmpty() && value.pollKey.isNotEmpty()) {
+            "Invalid transfer public keys"
+        }
+        require(value.grantChallenge.size == KEY_BYTES) { "Invalid transfer grant challenge" }
+        require(value.transferTokenSha256.size == KEY_BYTES) { "Invalid transfer token digest" }
+        require(value.challenge.size == KEY_BYTES) { "Invalid transfer enrollment challenge" }
+        runCatching { Instant.parse(value.validUntil) }
+            .onFailure { throw IllegalArgumentException("Invalid transfer enrollment validity") }
     }
 
     private fun message(domain: String, encoded: String): ByteArray =
