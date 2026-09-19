@@ -88,6 +88,11 @@ func (c *AuthorityClient) CancelSubmission(ctx context.Context, signed approval.
 	return result, c.call(ctx, MethodCancelSubmission, signed, &result)
 }
 
+func (c *AuthorityClient) EnrollDevice(ctx context.Context, submission approval.DeviceEnrollmentSubmission) (approval.SignedDeviceEnrollmentReceipt, error) {
+	var result approval.SignedDeviceEnrollmentReceipt
+	return result, c.call(ctx, MethodEnrollDevice, submission, &result)
+}
+
 func (c *AuthorityClient) call(ctx context.Context, method string, params, result any) error {
 	if err := ctx.Err(); err != nil {
 		return err

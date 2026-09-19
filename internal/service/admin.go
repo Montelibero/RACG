@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/itolstov/racg/internal/authority"
 	"github.com/itolstov/racg/internal/broker"
@@ -25,6 +26,7 @@ const (
 	AdminMethodListGrants   = "v1/admin.list-grants"
 	AdminMethodRevokeGrant  = "v1/admin.revoke-grant"
 	AdminMethodIdentity     = "v1/admin.identity"
+	AdminMethodCreateSetup  = "v1/admin.create-device-setup"
 )
 
 type AdminRequest struct {
@@ -64,6 +66,17 @@ type AdminIdentityResult struct {
 	PublicKey []byte `json:"public_key"`
 }
 
+type AdminDeviceSetupParams struct {
+	DeviceID        string `json:"device_id"`
+	ValiditySeconds int64  `json:"validity_seconds"`
+}
+
+type AdminDeviceSetupResult struct {
+	DeviceID  string `json:"device_id"`
+	Token     []byte `json:"token"`
+	ExpiresAt string `json:"expires_at"`
+}
+
 // AdminAuthority is the trusted local registry surface. It contains no
 // decision, execution or server-signing methods.
 type AdminAuthority interface {
@@ -76,6 +89,7 @@ type AdminAuthority interface {
 	ListGrantsTrusted(context.Context) ([]authority.TrustedGrant, error)
 	RevokeGrantTrusted(context.Context, string) error
 	IdentityTrusted() (int, string, []byte, error)
+	CreateDeviceSetupTrusted(context.Context, string, time.Duration) ([]byte, time.Time, error)
 }
 
 // AdminClient talks to the authority's peer-authenticated local admin socket.
@@ -142,6 +156,15 @@ func (c *AdminClient) RevokeGrant(ctx context.Context, grantID string) error {
 func (c *AdminClient) Identity(ctx context.Context) (AdminIdentityResult, error) {
 	var result AdminIdentityResult
 	return result, c.call(ctx, AdminMethodIdentity, nil, &result)
+}
+
+func (c *AdminClient) CreateDeviceSetup(ctx context.Context, deviceID string, validity time.Duration) (AdminDeviceSetupResult, error) {
+	var result AdminDeviceSetupResult
+	err := c.call(ctx, AdminMethodCreateSetup, AdminDeviceSetupParams{
+		DeviceID:        deviceID,
+		ValiditySeconds: int64(validity / time.Second),
+	}, &result)
+	return result, err
 }
 
 func (c *AdminClient) call(ctx context.Context, method string, params, result any) error {
@@ -273,6 +296,21 @@ func handleAdmin(ctx context.Context, backend AdminAuthority, request AdminReque
 	case AdminMethodIdentity:
 		version, serverID, publicKey, err := backend.IdentityTrusted()
 		return AdminIdentityResult{Version: version, ServerID: serverID, PublicKey: publicKey}, err
+	case AdminMethodCreateSetup:
+		var params AdminDeviceSetupParams
+		if len(request.Params) == 0 || json.Unmarshal(request.Params, &params) != nil || params.DeviceID == "" {
+			return nil, errors.New("invalid admin device setup request")
+		}
+		token, expiresAt, err := backend.CreateDeviceSetupTrusted(
+			ctx,
+			params.DeviceID,
+			time.Duration(params.ValiditySeconds)*time.Second,
+		)
+		return AdminDeviceSetupResult{
+			DeviceID:  params.DeviceID,
+			Token:     token,
+			ExpiresAt: expiresAt.UTC().Format(time.RFC3339Nano),
+		}, err
 	}
 	var params AdminCredentialParams
 	if len(request.Params) == 0 || json.Unmarshal(request.Params, &params) != nil || params.ID == "" {

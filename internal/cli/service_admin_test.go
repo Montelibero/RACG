@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -10,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"errors"
 
@@ -54,6 +56,14 @@ func (f *fakeAdminAuthority) RevokeGrantTrusted(context.Context, string) error {
 
 func (f *fakeAdminAuthority) IdentityTrusted() (int, string, []byte, error) {
 	return 1, "server", append([]byte(nil), f.public...), nil
+}
+
+func (f *fakeAdminAuthority) CreateDeviceSetupTrusted(context.Context, string, time.Duration) ([]byte, time.Time, error) {
+	token := make([]byte, 32)
+	if _, err := rand.Read(token); err != nil {
+		return nil, time.Time{}, err
+	}
+	return token, time.Now().Add(time.Minute), nil
 }
 
 func adminCommandFixture(t *testing.T) (*ServiceAdminCmd, string) {
@@ -110,6 +120,59 @@ func TestServiceAdminExportsVerifiedProfile(t *testing.T) {
 	}
 	if err := json.Unmarshal(data, &profile); err != nil || profile.ServerID != "server" || len(profile.PublicKey) != ed25519.PublicKeySize {
 		t.Fatalf("profile=%s err=%v", data, err)
+	}
+}
+
+func TestServiceAdminHelpDocumentsCreateSetup(t *testing.T) {
+	command, socket := adminCommandFixture(t)
+	var out, errOut strings.Builder
+	command.stdout = &out
+	command.stderr = &errOut
+	code := command.Run([]string{
+		"--socket", socket,
+		"--admin-uid", osGetuidString(),
+		"--admin-gid", osGetgidString(),
+		"--help",
+	})
+	if code != 0 || !strings.Contains(out.String(), "create-setup") {
+		t.Fatalf("code=%d help=%q stderr=%q", code, out.String(), errOut.String())
+	}
+}
+
+func TestServiceAdminCreatesProtectedSetupQR(t *testing.T) {
+	command, socket := adminCommandFixture(t)
+	outPath := filepath.Join(t.TempDir(), "setup.png")
+	var out, errOut strings.Builder
+	command.stdout = &out
+	command.stderr = &errOut
+	code := command.Run([]string{
+		"--socket", socket,
+		"--admin-uid", osGetuidString(),
+		"--admin-gid", osGetgidString(),
+		"create-setup",
+		"--endpoint", "tcp://127.0.0.1:40123",
+		"--device-id", "phone",
+		"--out", outPath,
+	})
+	if code != 0 {
+		t.Fatalf("create code=%d stderr=%q", code, errOut.String())
+	}
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(data, []byte{'\x89', 'P', 'N', 'G'}) {
+		t.Fatal("setup output is not PNG")
+	}
+	info, err := os.Lstat(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("setup QR mode=%v", got)
+	}
+	if strings.Contains(out.String(), "token=") {
+		t.Fatalf("token leaked to stdout: %q", out.String())
 	}
 }
 

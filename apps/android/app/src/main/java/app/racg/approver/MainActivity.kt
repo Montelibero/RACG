@@ -24,6 +24,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import androidx.fragment.app.FragmentActivity
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.net.URI
+import java.time.Instant
+import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
 
 private enum class Screen {
     Home,
@@ -70,20 +75,43 @@ private fun AppContent() {
                 scope.launch {
                     try {
                         val payload = SetupQrParser.parse(raw)
-                        val material = setup?.keyMaterial ?: run {
+                        val newSetup = withContext(Dispatchers.IO) {
                             val privateKey = DeviceKeyManager.generate()
-                            DeviceKeyMaterial(
+                            val material = DeviceKeyMaterial(
                                 publicKey = DeviceKeyManager.publicKey(privateKey).encoded,
                                 encryptedPrivateKey = DeviceKeyManager.protect(context, privateKey),
                             )
+                            var effectivePayload = payload
+                            payload.enrollmentToken?.let { token ->
+                                val serverKey = Ed25519PublicKeyParameters(payload.serverPublicKey, 0)
+                                val enrollment = ApprovalProtocol.newDeviceEnrollment(
+                                    serverId = payload.serverId,
+                                    deviceId = payload.approverId,
+                                    publicKey = material.publicKey,
+                                    token = token,
+                                    now = Instant.now(),
+                                )
+                                val signed = ApprovalProtocol.signDeviceEnrollment(enrollment, privateKey)
+                                val uri = URI(payload.endpoint)
+                                val receipt = BrokerClient(uri.host, uri.port).enrollDevice(
+                                    DeviceEnrollmentSubmission(signed, token),
+                                )
+                                ApprovalProtocol.verifyEnrollmentReceipt(
+                                    signed,
+                                    receipt,
+                                    serverKey,
+                                    Instant.now(),
+                                )
+                                effectivePayload = payload.copy(enrollmentToken = null)
+                            }
+                            StoredSetup(effectivePayload, material)
                         }
-                        val newSetup = StoredSetup(payload, material)
                         store.save(newSetup)
                         setup = newSetup
-                        status = "Connected to ${payload.serverId}"
+                        status = "Setup saved for ${payload.serverId}"
                         screen = Screen.Home
                     } catch (_: Exception) {
-                        status = "Setup QR was not valid"
+                        status = "Setup was not completed"
                         screen = Screen.Home
                     }
                 }

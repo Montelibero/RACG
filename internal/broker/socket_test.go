@@ -43,6 +43,10 @@ func (fakeAuthority) CancelSubmission(context.Context, approval.SignedCancellati
 	return approval.SignedCancellationResult{}, errSocketBoundary
 }
 
+func (fakeAuthority) EnrollDevice(context.Context, approval.DeviceEnrollmentSubmission) (approval.SignedDeviceEnrollmentReceipt, error) {
+	return approval.SignedDeviceEnrollmentReceipt{}, errSocketBoundary
+}
+
 var errSocketBoundary = errSentinel("socket boundary reached")
 
 type errSentinel string

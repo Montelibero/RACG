@@ -24,6 +24,11 @@ class BrokerClient(
             ApprovalProtocol.decodeSignedDecisionReceipt(it)
         }
 
+    fun enrollDevice(submission: DeviceEnrollmentSubmission): SignedDeviceEnrollmentReceipt =
+        call("v1/authority.enroll-device", ApprovalProtocol.encodeEnrollmentSubmission(submission)) {
+            ApprovalProtocol.decodeSignedEnrollmentReceipt(it)
+        }
+
     private fun <T> call(
         method: String,
         params: String,

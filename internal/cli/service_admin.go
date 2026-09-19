@@ -10,13 +10,18 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/itolstov/racg/internal/authority"
 	"github.com/itolstov/racg/internal/broker"
 	"github.com/itolstov/racg/internal/service"
+	qrcode "github.com/skip2/go-qrcode"
 )
 
 type ServiceAdminCmd struct {
@@ -63,6 +68,8 @@ func (c *ServiceAdminCmd) Run(args []string) int {
 		return c.runEnroll(ctx, client, fs.Args()[1:], subcommand == "rotate")
 	case "revoke":
 		return c.runRevoke(ctx, client, fs.Args()[1:])
+	case "create-setup":
+		return c.runCreateSetup(ctx, client, fs.Args()[1:])
 	default:
 		fmt.Fprintf(c.stderr, "unknown service-admin command %q\n", subcommand)
 		return 2
@@ -270,6 +277,105 @@ func (c *ServiceAdminCmd) runRevoke(ctx context.Context, client *service.AdminCl
 	return 0
 }
 
+// runCreateSetup renders a one-time mobile setup QR without exposing token
+// bytes on the terminal. The PNG uses the command's atomic 0600 file writer.
+func (c *ServiceAdminCmd) runCreateSetup(ctx context.Context, client *service.AdminClient, args []string) int {
+	fs := flag.NewFlagSet("racg service-admin create-setup", flag.ContinueOnError)
+	fs.SetOutput(c.stderr)
+	endpoint := fs.String("endpoint", "", "reachable broker URI (tcp://host:port)")
+	deviceID := fs.String("device-id", "", "permanent approver identity (default: generated)")
+	out := fs.String("out", "", "output setup-QR PNG path")
+	validFor := fs.Duration("valid-for", 10*time.Minute, "setup token lifetime")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *endpoint == "" || *out == "" {
+		fmt.Fprintln(c.stderr, "create-setup requires --endpoint and --out")
+		return 2
+	}
+	if *validFor < time.Second {
+		fmt.Fprintln(c.stderr, "create-setup requires a validity of at least one second")
+		return 2
+	}
+	if *deviceID == "" {
+		*deviceID = "approver-" + uuid.NewString()
+	}
+	if err := validateBrokerEndpoint(*endpoint); err != nil {
+		fmt.Fprintf(c.stderr, "endpoint invalid: %v\n", err)
+		return 2
+	}
+	identity, err := client.Identity(ctx)
+	if err != nil {
+		fmt.Fprintf(c.stderr, "create-setup failed: %v\n", err)
+		return 1
+	}
+	setup, err := client.CreateDeviceSetup(ctx, *deviceID, *validFor)
+	if err != nil {
+		fmt.Fprintf(c.stderr, "create-setup failed: %v\n", err)
+		return 1
+	}
+	payload, err := json.Marshal(struct {
+		Version         int    `json:"v"`
+		Kind            string `json:"kind"`
+		ServerID        string `json:"server_id"`
+		PublicKey       []byte `json:"server_public_key"`
+		ApproverID      string `json:"approver_id"`
+		Endpoint        string `json:"endpoint"`
+		EnrollmentToken []byte `json:"enrollment_token"`
+	}{
+		Version:         2,
+		Kind:            "racg.approver.setup",
+		ServerID:        identity.ServerID,
+		PublicKey:       identity.PublicKey,
+		ApproverID:      setup.DeviceID,
+		Endpoint:        *endpoint,
+		EnrollmentToken: setup.Token,
+	})
+	if err != nil {
+		fmt.Fprintf(c.stderr, "create-setup failed: %v\n", err)
+		return 1
+	}
+	code, err := qrcode.New(string(payload), qrcode.Highest)
+	if err != nil {
+		fmt.Fprintf(c.stderr, "create-setup failed: %v\n", err)
+		return 1
+	}
+	png, err := code.PNG(768)
+	if err != nil {
+		fmt.Fprintf(c.stderr, "create-setup failed: %v\n", err)
+		return 1
+	}
+	if err := writeAdminFileAtomic(*out, png, 0o600); err != nil {
+		fmt.Fprintf(c.stderr, "create-setup failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(c.stdout, "setup_created=true\nout=%s\nserver_id=%s\ndevice_id=%s\nexpires_at=%s\n",
+		*out, identity.ServerID, setup.DeviceID, setup.ExpiresAt)
+	return 0
+}
+
+func validateBrokerEndpoint(value string) error {
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return err
+	}
+	switch parsed.Scheme {
+	case "tcp", "tcp4", "tcp6":
+	default:
+		return errors.New("mobile setup requires tcp://, tcp4:// or tcp6://")
+	}
+	if parsed.Host == "" {
+		return errors.New("endpoint requires host and port")
+	}
+	if _, _, err := net.SplitHostPort(parsed.Host); err != nil {
+		return fmt.Errorf("endpoint requires host and port: %w", err)
+	}
+	if parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return errors.New("tcp endpoint accepts host and port only")
+	}
+	return nil
+}
+
 func listCredentials(ctx context.Context, client *service.AdminClient, kind string) ([]authority.TrustedCredential, error) {
 	if kind == "devices" {
 		return client.ListDevices(ctx)
@@ -384,6 +490,10 @@ commands:
       replace a credential; old pending signatures stop verifying
   revoke device|agent|grant --id ID
       revoke a credential or reusable grant
+  create-setup --endpoint tcp://HOST:PORT --out PATH [--device-id ID] [--valid-for 10m]
+      create a one-time mobile setup QR as a mode-0600 PNG; the phone generates
+      and signs its own approver key. Treat the PNG as secret until scanned and
+      keep the endpoint on a protected network such as Tailscale.
 
 Never run this command from an untrusted process, and never accept identity
 material from a broker message.

@@ -8,6 +8,8 @@ import org.junit.Test
 class SetupQrParserTest {
     private val key = ByteArray(32) { it.toByte() }
     private val encodedKey = Base64.getEncoder().encodeToString(key)
+    private val token = ByteArray(32) { (it + 1).toByte() }
+    private val encodedToken = Base64.getEncoder().encodeToString(token)
 
     @Test
     fun `parses trusted setup QR`() {
@@ -23,6 +25,21 @@ class SetupQrParserTest {
         assertEquals("phone", payload.approverId)
         assertEquals("tcp://127.0.0.1:40123", payload.endpoint)
         assertEquals(key.toList(), payload.serverPublicKey.toList())
+        assertEquals(null, payload.enrollmentToken)
+    }
+
+    @Test
+    fun `parses one-time enrollment setup QR`() {
+        val raw = """
+            {"v":2,"kind":"racg.approver.setup","server_id":"prod",
+             "server_public_key":"$encodedKey","approver_id":"phone",
+             "endpoint":"tcp://127.0.0.1:40123",
+             "enrollment_token":"$encodedToken"}
+        """.trimIndent()
+
+        val payload = SetupQrParser.parse(raw)
+
+        assertEquals(token.toList(), payload.enrollmentToken?.toList())
     }
 
     @Test

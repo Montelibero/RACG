@@ -22,6 +22,11 @@ requests, and send locally signed decisions. It cannot execute operations, and
 the standalone server has no GUI build dependency. See
 [preview instructions](apps/approver/README.md).
 
+An experimental native Android approver shell lives in `apps/android/`. Its
+Docker build needs no Android Studio. The phone scans a one-time setup QR,
+generates its own Ed25519 approver key, and uses the signed broker protocol for
+pending requests and one-shot decisions.
+
 Manual approval and denial are local to the server TUI. Agent bearer tokens cannot approve or deny requests: the legacy `POST /v1/requests/{id}/decision` endpoint returns `403 REMOTE_DECISION_DISABLED`. Existing authorized rules may still auto-approve matching requests. Standalone `racg serve` needs no installed service or desktop approver.
 
 Security upgrade: older server builds accepted decisions from agent tokens. Updating only the agent client does not fix those servers; install the corrected server binary and restart it. Legacy HTTP agent self-approval remains disabled.

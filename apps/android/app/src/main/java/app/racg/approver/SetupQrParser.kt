@@ -9,25 +9,31 @@ data class SetupPayload(
     val serverPublicKey: ByteArray,
     val approverId: String,
     val endpoint: String,
+    val enrollmentToken: ByteArray?,
 )
 
 /** Parses a QR produced by trusted desktop administration. It never accepts
  * identity data from broker traffic. */
 object SetupQrParser {
     const val KIND = "racg.approver.setup"
-    private const val SUPPORTED_VERSION = 1
+    private const val TOKEN_VERSION = 2
     private const val ED25519_KEY_BYTES = 32
 
     fun parse(raw: String): SetupPayload {
         val value = JSONObject(raw)
         val version = value.getInt("v")
-        require(version == SUPPORTED_VERSION) { "Unsupported setup QR version" }
+        require(version in 1..TOKEN_VERSION) { "Unsupported setup QR version" }
         require(value.getString("kind") == KIND) { "This QR code is not an approver setup" }
 
         val serverId = value.requireText("server_id")
         val approverId = value.requireText("approver_id")
         val endpoint = value.requireText("endpoint")
         val serverKey = decodeKey(value.requireText("server_public_key"))
+        val token = if (version == TOKEN_VERSION) {
+            decodeKey(value.requireText("enrollment_token"))
+        } else {
+            null
+        }
 
         val uri = try {
             URI(endpoint)
@@ -46,6 +52,7 @@ object SetupQrParser {
             serverPublicKey = serverKey,
             approverId = approverId,
             endpoint = endpoint,
+            enrollmentToken = token,
         )
     }
 

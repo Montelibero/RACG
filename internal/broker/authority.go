@@ -22,6 +22,7 @@ type Authority interface {
 	LookupDecision(context.Context, approval.SignedDecisionLookup) (approval.SignedDecisionLookupResult, error)
 	ListPending(context.Context, approval.SignedRequestList) (approval.SignedRequestListResult, error)
 	CancelSubmission(context.Context, approval.SignedCancellation) (approval.SignedCancellationResult, error)
+	EnrollDevice(context.Context, approval.DeviceEnrollmentSubmission) (approval.SignedDeviceEnrollmentReceipt, error)
 }
 
 // ServeAuthority reads sequential JSON protocol values from in and writes one
@@ -114,6 +115,12 @@ func handleAuthorityRequest(ctx context.Context, authority Authority, request Re
 			return nil, err
 		}
 		return authority.CancelSubmission(ctx, params)
+	case MethodEnrollDevice:
+		var params approval.DeviceEnrollmentSubmission
+		if err := decodeParams(request.Params, &params); err != nil {
+			return nil, err
+		}
+		return authority.EnrollDevice(ctx, params)
 	default:
 		return nil, errors.New("unknown authority method")
 	}

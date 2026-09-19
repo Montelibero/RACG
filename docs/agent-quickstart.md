@@ -39,6 +39,13 @@ responses against the pinned server key, wait for terminal results, and save
 verified `fs.download` artifacts. The desktop approver signs decisions; the
 agent key cannot approve anything.
 
+For the experimental Android approver, the server administrator creates a
+one-time setup QR with `racg service-admin create-setup --help`. The QR pins the
+authority key and broker endpoint, but does not carry a private key. The phone
+generates its own approver key, enrolls its public key with the one-time token,
+and verifies the authority receipt before saving the setup. Treat the QR file as
+secret until scanned.
+
 Use the skill when an agent should operate through RACG instead of direct shell execution. It covers login, command submission, live output, final logs, cancel/kill, safe diagnostics, and auto-approve rule boundaries.
 
 ## 1. Connect

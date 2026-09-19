@@ -28,6 +28,7 @@ class DataStoreApproverStore(private val context: Context) : ApproverStore {
         val serverPublicKey = stringPreferencesKey("server_public_key")
         val approverId = stringPreferencesKey("approver_id")
         val endpoint = stringPreferencesKey("endpoint")
+        val enrollmentToken = stringPreferencesKey("enrollment_token")
         val devicePublicKey = stringPreferencesKey("device_public_key")
         val encryptedDeviceKey = stringPreferencesKey("encrypted_device_key")
     }
@@ -47,6 +48,7 @@ class DataStoreApproverStore(private val context: Context) : ApproverStore {
                 serverPublicKey = decode(serverKey),
                 approverId = approverId,
                 endpoint = endpoint,
+                enrollmentToken = values[Keys.enrollmentToken]?.let(::decode),
             ),
             keyMaterial = DeviceKeyMaterial(
                 publicKey = decode(deviceKey),
@@ -61,6 +63,7 @@ class DataStoreApproverStore(private val context: Context) : ApproverStore {
             values[Keys.serverPublicKey] = encode(setup.payload.serverPublicKey)
             values[Keys.approverId] = setup.payload.approverId
             values[Keys.endpoint] = setup.payload.endpoint
+            setup.payload.enrollmentToken?.let { values[Keys.enrollmentToken] = encode(it) }
             values[Keys.devicePublicKey] = encode(setup.keyMaterial.publicKey)
             values[Keys.encryptedDeviceKey] = encode(setup.keyMaterial.encryptedPrivateKey)
         }

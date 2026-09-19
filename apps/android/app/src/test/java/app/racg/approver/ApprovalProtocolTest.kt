@@ -95,6 +95,26 @@ class ApprovalProtocolTest {
         )
     }
 
+    @Test
+    fun `verifies Go device enrollment fixture`() {
+        val signed = ApprovalProtocol.decodeSignedDeviceEnrollment(resource("signed-device-enrollment.json"))
+        val receipt = ApprovalProtocol.decodeSignedEnrollmentReceipt(
+            resource("signed-device-enrollment-receipt.json"),
+        )
+        ApprovalProtocol.verifyDeviceEnrollment(signed, "server", Instant.parse("2029-01-01T00:00:00Z"))
+        ApprovalProtocol.verifyEnrollmentReceipt(signed, receipt, serverKey, Instant.parse("2029-01-01T00:00:00Z"))
+    }
+
+    @Test
+    fun `produces Go-compatible signed device enrollment`() {
+        val signed = ApprovalProtocol.decodeSignedDeviceEnrollment(resource("signed-device-enrollment.json"))
+        val resigned = ApprovalProtocol.signDeviceEnrollment(signed.enrollment, devicePrivate)
+        assertEquals(
+            rawResource("signed-device-enrollment.json"),
+            ApprovalProtocol.encodeSignedDeviceEnrollment(resigned),
+        )
+    }
+
     private fun resource(name: String): JSONObject = JSONObject(
         javaClass.getResourceAsStream("/$name")!!.readBytes().toString(Charsets.UTF_8),
     )

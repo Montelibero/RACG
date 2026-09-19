@@ -95,6 +95,35 @@ data class DecisionSubmission(
     val challenge: ByteArray,
 )
 
+data class DeviceEnrollment(
+    val version: Int,
+    val serverId: String,
+    val deviceId: String,
+    val publicKey: ByteArray,
+    val tokenSha256: ByteArray,
+    val challenge: ByteArray,
+    val validUntil: String,
+)
+
+data class SignedDeviceEnrollment(val enrollment: DeviceEnrollment, val signature: ByteArray)
+
+data class DeviceEnrollmentSubmission(
+    val enrollment: SignedDeviceEnrollment,
+    val token: ByteArray,
+)
+
+data class DeviceEnrollmentReceipt(
+    val version: Int,
+    val serverId: String,
+    val deviceId: String,
+    val publicKey: ByteArray,
+    val enrollmentSha256: String,
+    val challenge: ByteArray,
+    val status: String,
+)
+
+data class SignedDeviceEnrollmentReceipt(val receipt: DeviceEnrollmentReceipt, val signature: ByteArray)
+
 /**
  * Byte-compatible codec for the Go approval protocol. Signatures cover exact
  * encoding/json output, including declaration field order and HTML escaping.
@@ -242,6 +271,78 @@ object ApprovalProtocol {
         ) { "Authority receipt signature is invalid" }
     }
 
+    fun newDeviceEnrollment(
+        serverId: String,
+        deviceId: String,
+        publicKey: ByteArray,
+        token: ByteArray,
+        now: Instant,
+        lifetimeSeconds: Long = 60,
+    ): DeviceEnrollment = DeviceEnrollment(
+        version = APPROVAL_VERSION,
+        serverId = serverId,
+        deviceId = deviceId,
+        publicKey = publicKey,
+        tokenSha256 = sha256(token),
+        challenge = randomBytes(),
+        validUntil = now.plusSeconds(lifetimeSeconds).toString(),
+    )
+
+    fun signDeviceEnrollment(
+        enrollment: DeviceEnrollment,
+        privateKey: Ed25519PrivateKeyParameters,
+    ): SignedDeviceEnrollment {
+        validateDeviceEnrollment(enrollment)
+        require(enrollment.publicKey.contentEquals(privateKey.generatePublicKey().encoded)) {
+            "Device enrollment key mismatch"
+        }
+        return SignedDeviceEnrollment(
+            enrollment = enrollment,
+            signature = sign(message("device-enrollment", encodeDeviceEnrollment(enrollment)), privateKey),
+        )
+    }
+
+    fun verifyDeviceEnrollment(
+        signed: SignedDeviceEnrollment,
+        serverId: String,
+        now: Instant,
+    ) {
+        val enrollment = signed.enrollment
+        validateDeviceEnrollment(enrollment)
+        require(enrollment.serverId == serverId) { "Enrollment server identity mismatch" }
+        verify(
+            Ed25519PublicKeyParameters(enrollment.publicKey, 0),
+            message("device-enrollment", encodeDeviceEnrollment(enrollment)),
+            signed.signature,
+        ) { "Device enrollment signature is invalid" }
+        require(now.isBefore(Instant.parse(enrollment.validUntil))) { "Device enrollment expired" }
+    }
+
+    fun verifyEnrollmentReceipt(
+        signed: SignedDeviceEnrollment,
+        signedReceipt: SignedDeviceEnrollmentReceipt,
+        serverKey: Ed25519PublicKeyParameters,
+        now: Instant,
+    ) {
+        verifyDeviceEnrollment(signed, signed.enrollment.serverId, now)
+        val digest = sha256Hex(message("device-enrollment", encodeDeviceEnrollment(signed.enrollment)))
+        val receipt = signedReceipt.receipt
+        require(receipt.version == APPROVAL_VERSION) { "Unsupported enrollment receipt version" }
+        require(
+            receipt.serverId == signed.enrollment.serverId &&
+                receipt.deviceId == signed.enrollment.deviceId &&
+                receipt.publicKey.contentEquals(signed.enrollment.publicKey) &&
+                receipt.enrollmentSha256 == digest &&
+                receipt.challenge.contentEquals(signed.enrollment.challenge) &&
+                receipt.status == "ENROLLED",
+        ) { "Enrollment receipt does not match the request" }
+        verify(
+            serverKey,
+            message("device-enrollment-receipt", encodeEnrollmentReceipt(receipt)),
+            signedReceipt.signature,
+        ) { "Enrollment receipt signature is invalid" }
+    }
+
     fun decodeSignedRequest(raw: JSONObject): SignedApprovalRequest {
         val body = requireObject(raw, "request")
         return SignedApprovalRequest(
@@ -312,6 +413,44 @@ object ApprovalProtocol {
                 action = receipt.requireString("action"),
                 status = receipt.requireString("status"),
                 challenge = receipt.decodeBase64("challenge"),
+            ),
+            signature = raw.decodeBase64("signature"),
+        )
+    }
+
+    fun decodeSignedDeviceEnrollment(raw: JSONObject): SignedDeviceEnrollment {
+        val enrollment = requireObject(raw, "enrollment")
+        return SignedDeviceEnrollment(
+            enrollment = DeviceEnrollment(
+                version = enrollment.getInt("version"),
+                serverId = enrollment.requireString("server_id"),
+                deviceId = enrollment.requireString("device_id"),
+                publicKey = enrollment.decodeBase64("public_key"),
+                tokenSha256 = enrollment.decodeBase64("token_sha256"),
+                challenge = enrollment.decodeBase64("challenge"),
+                validUntil = enrollment.requireString("valid_until"),
+            ),
+            signature = raw.decodeBase64("signature"),
+        )
+    }
+
+    fun decodeEnrollmentSubmission(raw: JSONObject): DeviceEnrollmentSubmission =
+        DeviceEnrollmentSubmission(
+            enrollment = decodeSignedDeviceEnrollment(requireObject(raw, "enrollment")),
+            token = raw.decodeBase64("token"),
+        )
+
+    fun decodeSignedEnrollmentReceipt(raw: JSONObject): SignedDeviceEnrollmentReceipt {
+        val receipt = requireObject(raw, "receipt")
+        return SignedDeviceEnrollmentReceipt(
+            receipt = DeviceEnrollmentReceipt(
+                version = receipt.getInt("version"),
+                serverId = receipt.requireString("server_id"),
+                deviceId = receipt.requireString("device_id"),
+                publicKey = receipt.decodeBase64("public_key"),
+                enrollmentSha256 = receipt.requireString("enrollment_sha256"),
+                challenge = receipt.decodeBase64("challenge"),
+                status = receipt.requireString("status"),
             ),
             signature = raw.decodeBase64("signature"),
         )
@@ -393,9 +532,46 @@ object ApprovalProtocol {
         base64("signature", value.signature)
     }
 
+    internal fun encodeDeviceEnrollment(value: DeviceEnrollment): String = jsonObject {
+        number("version", value.version)
+        text("server_id", value.serverId)
+        text("device_id", value.deviceId)
+        base64("public_key", value.publicKey)
+        base64("token_sha256", value.tokenSha256)
+        base64("challenge", value.challenge)
+        text("valid_until", value.validUntil)
+    }
+
+    internal fun encodeSignedDeviceEnrollment(value: SignedDeviceEnrollment): String = jsonObject {
+        raw("enrollment", encodeDeviceEnrollment(value.enrollment))
+        base64("signature", value.signature)
+    }
+
+    internal fun encodeEnrollmentSubmission(value: DeviceEnrollmentSubmission): String = jsonObject {
+        raw("enrollment", encodeSignedDeviceEnrollment(value.enrollment))
+        base64("token", value.token)
+    }
+
+    internal fun encodeEnrollmentReceipt(value: DeviceEnrollmentReceipt): String = jsonObject {
+        number("version", value.version)
+        text("server_id", value.serverId)
+        text("device_id", value.deviceId)
+        base64("public_key", value.publicKey)
+        text("enrollment_sha256", value.enrollmentSha256)
+        base64("challenge", value.challenge)
+        text("status", value.status)
+    }
+
+    internal fun encodeSignedEnrollmentReceipt(value: SignedDeviceEnrollmentReceipt): String = jsonObject {
+        raw("receipt", encodeEnrollmentReceipt(value.receipt))
+        base64("signature", value.signature)
+    }
+
     fun sha256Hex(value: ByteArray): String =
         MessageDigest.getInstance("SHA-256").digest(value)
             .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+
+    private fun sha256(value: ByteArray): ByteArray = MessageDigest.getInstance("SHA-256").digest(value)
 
     internal fun escape(value: String): String {
         val output = StringBuilder(value.length + 16)
@@ -441,6 +617,18 @@ object ApprovalProtocol {
         require(value.challenge.size == KEY_BYTES) { "Invalid pending list challenge" }
         runCatching { Instant.parse(value.validUntil) }
             .onFailure { throw IllegalArgumentException("Invalid pending list validity") }
+    }
+
+    private fun validateDeviceEnrollment(value: DeviceEnrollment) {
+        require(value.version == APPROVAL_VERSION) { "Unsupported enrollment version" }
+        require(value.serverId.isNotBlank() && value.deviceId.isNotBlank()) {
+            "Invalid enrollment identity"
+        }
+        require(value.publicKey.size == KEY_BYTES) { "Invalid enrollment public key" }
+        require(value.tokenSha256.size == KEY_BYTES) { "Invalid enrollment token digest" }
+        require(value.challenge.size == KEY_BYTES) { "Invalid enrollment challenge" }
+        runCatching { Instant.parse(value.validUntil) }
+            .onFailure { throw IllegalArgumentException("Invalid enrollment validity") }
     }
 
     private fun message(domain: String, encoded: String): ByteArray =
