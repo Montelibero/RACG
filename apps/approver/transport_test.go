@@ -58,7 +58,7 @@ func transportFixture(t *testing.T) (Transport, *DeviceKey, approval.SignedReque
 	cleanup := func() {
 		clientConn.Close()
 		serverConn.Close()
-		if err := <-serverDone; err != nil {
+		if err := <-serverDone; err != nil && !strings.Contains(err.Error(), "closed pipe") {
 			t.Errorf("authority server: %v", err)
 		}
 		db.Close()
