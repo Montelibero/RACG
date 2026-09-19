@@ -29,24 +29,40 @@ import java.net.URI
 import java.security.SecureRandom
 import java.time.Instant
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONTokener
 import org.json.JSONArray
 import org.json.JSONObject
+import org.json.JSONTokener
+
+data class PendingRequestItem(
+    val setup: StoredSetup,
+    val request: SignedApprovalRequest,
+) {
+    val key: String
+        get() = "${setup.payload.serverId}:${request.request.requestId}"
+}
+
+private data class AggregatePoll(
+    val requests: List<PendingRequestItem>,
+    val errors: List<String>,
+)
 
 @Composable
 fun ApprovalsScreen(
-    setup: StoredSetup,
+    setups: List<StoredSetup>,
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var loading by remember { mutableStateOf(true) }
     var deciding by remember { mutableStateOf(false) }
-    var status by remember { mutableStateOf("Loading verified approvals") }
-    var requests by remember { mutableStateOf<List<SignedApprovalRequest>>(emptyList()) }
-    var selected by remember { mutableStateOf<SignedApprovalRequest?>(null) }
+    var status by remember { mutableStateOf("Unlock to load verified approvals") }
+    var requests by remember { mutableStateOf<List<PendingRequestItem>>(emptyList()) }
+    var selected by remember { mutableStateOf<PendingRequestItem?>(null) }
 
     fun load() {
         scope.launch {
@@ -54,17 +70,32 @@ fun ApprovalsScreen(
             status = "Loading verified approvals"
             runCatching {
                 withContext(Dispatchers.IO) {
-                    val uri = URI(setup.payload.endpoint)
-                    val transport = ApproverTransport(setup, BrokerClient(uri.host, uri.port))
-                    transport.pendingRequests(DeviceKeyManager.signer(setup.keyMaterial.publicKey))
+                    coroutineScope {
+                        setups.map { setup ->
+                            async {
+                                try {
+                                    val transport = ApproverTransport(
+                                        setup,
+                                        BrokerClient(URI(setup.payload.endpoint).host, URI(setup.payload.endpoint).port),
+                                    )
+                                    transport.pendingRequests(DeviceKeyManager.signer(setup.keyMaterial.publicKey))
+                                        .map { PendingRequestItem(setup, it) } to null
+                                } catch (error: Exception) {
+                                    emptyList<PendingRequestItem>() to "${setup.payload.serverId}: ${error.message ?: "failed"}"
+                                }
+                            }
+                        }.awaitAll().fold(AggregatePoll(emptyList(), emptyList())) { result, pair ->
+                            AggregatePoll(result.requests + pair.first, result.errors + listOfNotNull(pair.second))
+                        }
+                    }
                 }
-            }.onSuccess { verified ->
-                requests = verified
-                if (verified.none { it.request.requestId == selected?.request?.requestId }) selected = null
-                status = if (verified.isEmpty()) {
-                    "No pending approvals"
-                } else {
-                    "${verified.size} verified pending approval(s)"
+            }.onSuccess { poll ->
+                requests = poll.requests
+                if (poll.requests.none { it.key == selected?.key }) selected = null
+                status = when {
+                    poll.errors.isNotEmpty() -> poll.errors.joinToString("; ")
+                    poll.requests.isEmpty() -> "No pending approvals"
+                    else -> "${poll.requests.size} verified pending approval(s)"
                 }
             }.onFailure { error ->
                 status = "Pending load failed: ${error.message ?: "unknown error"}"
@@ -74,23 +105,28 @@ fun ApprovalsScreen(
     }
 
     fun decide(action: String) {
-        val request = selected ?: return
+        val target = selected ?: return
         scope.launch {
             deciding = true
             status = "Signing $action"
             runCatching {
                 withContext(Dispatchers.IO) {
-                    val uri = URI(setup.payload.endpoint)
-                    val transport = ApproverTransport(setup, BrokerClient(uri.host, uri.port))
+                    val transport = ApproverTransport(
+                        target.setup,
+                        BrokerClient(
+                            URI(target.setup.payload.endpoint).host,
+                            URI(target.setup.payload.endpoint).port,
+                        ),
+                    )
                     transport.submitDecision(
-                        DeviceKeyManager.signer(setup.keyMaterial.publicKey),
-                        request,
+                        DeviceKeyManager.signer(target.setup.keyMaterial.publicKey),
+                        target.request,
                         action,
                         Instant.now(),
                     )
                 }
             }.onSuccess { receipt ->
-                status = "$action accepted. Receipt: ${receipt.receipt.status}"
+                status = "$action accepted by ${target.setup.payload.serverId}. Receipt: ${receipt.receipt.status}"
                 load()
             }.onFailure { error ->
                 status = "$action failed: ${error.message ?: "unknown error"}"
@@ -99,7 +135,7 @@ fun ApprovalsScreen(
         }
     }
 
-    LaunchedEffect(setup) {
+    LaunchedEffect(setups) {
         (context as? FragmentActivity)?.let { activity ->
             requestDeviceAuthentication(activity) { load() }
         }
@@ -133,31 +169,32 @@ fun ApprovalsScreen(
                 .weight(0.34f),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            items(requests, key = { it.request.requestId }) { request ->
+            items(requests, key = { it.key }) { request ->
                 Card(
                     onClick = { selected = request },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Text(
-                            request.request.clientId,
+                            request.request.request.clientId,
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
                         )
-                        Text(request.request.requestId, style = MaterialTheme.typography.bodySmall)
+                        Text(request.request.request.serverId, style = MaterialTheme.typography.bodySmall)
+                        Text(request.request.request.requestId, style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
         }
 
-        selected?.let { request ->
+        selected?.let { target ->
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(0.46f),
             ) {
                 RequestDetails(
-                    request = request,
+                    request = target.request,
                     busy = loading || deciding,
                     onAllow = {
                         val activity = context as? FragmentActivity

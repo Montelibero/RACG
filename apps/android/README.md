@@ -25,7 +25,9 @@ receipt before persisting setup. The token is not saved after enrollment.
 
 The approvals screen fetches an authority-signed pending snapshot, verifies every
 request, displays its digest and operation, and submits verified
-`ALLOW_ONCE`/`DENY` receipts.
+`ALLOW_ONCE`/`DENY` receipts. Multiple setup QRs can be added; their pending
+queues are polled independently and merged into one aggregate list. One server
+being offline does not hide verified approvals from other servers.
 
 The device key is a non-exportable ECDSA P-256 signing key in Android Keystore.
 It cannot be used until the user completes strong biometric or device-credential

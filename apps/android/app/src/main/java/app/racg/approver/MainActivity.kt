@@ -55,16 +55,16 @@ private fun AppContent() {
     val store = remember { DataStoreApproverStore(context) }
     val scope = rememberCoroutineScope()
     var screen by remember { mutableStateOf(Screen.Home) }
-    var setup by remember { mutableStateOf<StoredSetup?>(null) }
+    var setups by remember { mutableStateOf<List<StoredSetup>>(emptyList()) }
     var status by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(store) {
-        setup = store.load()
+        setups = store.loadAll()
     }
 
     when (screen) {
         Screen.Home -> HomeScreen(
-            setup = setup,
+            setups = setups,
             status = status,
             onShowApprovals = { screen = Screen.Approvals },
             onScanSetup = { screen = Screen.ScanSetup },
@@ -75,6 +75,11 @@ private fun AppContent() {
                 scope.launch {
                     try {
                         val payload = SetupQrParser.parse(raw)
+                        if (setups.any { it.payload.serverId == payload.serverId }) {
+                            status = "That server is already configured"
+                            screen = Screen.Home
+                            return@launch
+                        }
                         val newSetup = withContext(Dispatchers.IO) {
                             StoredSetup(payload, DeviceKeyManager.createOrLoad())
                         }
@@ -114,8 +119,7 @@ private fun AppContent() {
                                         }
                                         newSetup.copy(payload = payload.copy(enrollmentToken = null))
                                     }
-                                    store.save(completed)
-                                    setup = completed
+                                    setups = store.save(completed)
                                     status = "Setup saved for ${payload.serverId}"
                                     screen = Screen.Home
                                 } catch (_: Exception) {
@@ -133,9 +137,9 @@ private fun AppContent() {
             modifier = Modifier.fillMaxSize(),
         )
 
-        Screen.Approvals -> setup?.let { configured ->
+        Screen.Approvals -> if (setups.isNotEmpty()) {
             ApprovalsScreen(
-                setup = configured,
+                setups = setups,
                 onBack = { screen = Screen.Home },
             )
         }
@@ -144,7 +148,7 @@ private fun AppContent() {
 
 @Composable
 private fun HomeScreen(
-    setup: StoredSetup?,
+    setups: List<StoredSetup>,
     status: String?,
     onShowApprovals: () -> Unit,
     onScanSetup: () -> Unit,
@@ -158,7 +162,8 @@ private fun HomeScreen(
         Text("RACG Approver", style = MaterialTheme.typography.headlineMedium)
         Text(
             when {
-                setup != null -> "Setup saved for ${setup.payload.serverId}"
+                setups.isNotEmpty() -> "${setups.size} server(s) configured"
+                setups.isNotEmpty() -> "${setups.size} server(s) configured"
                 else -> "Set up this device with a QR code."
             },
             style = MaterialTheme.typography.bodyLarge,
@@ -168,13 +173,13 @@ private fun HomeScreen(
         }
         Button(
             onClick = onShowApprovals,
-            enabled = setup != null,
+            enabled = setups.isNotEmpty(),
         ) {
             Text("Show approvals")
         }
         OutlinedButton(
             onClick = onScanSetup,
-            enabled = setup == null,
+            enabled = true,
         ) {
             Text("Scan setup QR")
         }
