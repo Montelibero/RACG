@@ -2,8 +2,11 @@ package approval
 
 import (
 	"bytes"
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/x509"
 	"testing"
 	"time"
 )
@@ -19,7 +22,15 @@ func TestDeviceEnrollmentAndReceiptBinding(t *testing.T) {
 	}
 	now := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
 	token := bytes.Repeat([]byte{9}, 32)
-	enrollment, err := NewDeviceEnrollment("server", "phone", devicePublic, token, now.Add(time.Minute))
+	pollPrivate, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pollSPKI, err := x509.MarshalPKIXPublicKey(&pollPrivate.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enrollment, err := NewDeviceEnrollment("server", "phone", KeyTypeEd25519, devicePublic, pollSPKI, token, now.Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}

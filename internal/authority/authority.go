@@ -44,7 +44,7 @@ func New(ctx context.Context, db *sql.DB, serverID string, key ed25519.PrivateKe
 	defer tx.Rollback()
 	for _, statement := range []string{
 		"CREATE TABLE IF NOT EXISTS authority_identity (singleton INTEGER PRIMARY KEY CHECK(singleton=1), server_id TEXT NOT NULL, public_key BLOB NOT NULL)",
-		"CREATE TABLE IF NOT EXISTS authority_devices (device_id TEXT PRIMARY KEY, public_key BLOB NOT NULL, revoked INTEGER NOT NULL DEFAULT 0, key_type TEXT NOT NULL DEFAULT 'ed25519')",
+		"CREATE TABLE IF NOT EXISTS authority_devices (device_id TEXT PRIMARY KEY, public_key BLOB NOT NULL, revoked INTEGER NOT NULL DEFAULT 0, key_type TEXT NOT NULL DEFAULT 'ed25519', poll_public_key BLOB)",
 		"CREATE TABLE IF NOT EXISTS authority_agents (client_id TEXT PRIMARY KEY, public_key BLOB NOT NULL, revoked INTEGER NOT NULL DEFAULT 0)",
 		"CREATE TABLE IF NOT EXISTS authority_submissions (client_id TEXT NOT NULL, nonce BLOB NOT NULL, digest BLOB NOT NULL, request_id TEXT NOT NULL UNIQUE, PRIMARY KEY(client_id,nonce))",
 		"CREATE TABLE IF NOT EXISTS authority_requests (request_id TEXT PRIMARY KEY, envelope BLOB NOT NULL, status TEXT NOT NULL, signed_decision BLOB, consumed_at TEXT)",
@@ -67,6 +67,15 @@ func New(ctx context.Context, db *sql.DB, serverID string, key ed25519.PrivateKe
 	}
 	if !hasDeviceKeyType {
 		if _, err := tx.ExecContext(ctx, "ALTER TABLE authority_devices ADD COLUMN key_type TEXT NOT NULL DEFAULT 'ed25519'"); err != nil {
+			return nil, err
+		}
+	}
+	hasPollKey, err := columnExists(ctx, tx, "authority_devices", "poll_public_key")
+	if err != nil {
+		return nil, err
+	}
+	if !hasPollKey {
+		if _, err := tx.ExecContext(ctx, "ALTER TABLE authority_devices ADD COLUMN poll_public_key BLOB"); err != nil {
 			return nil, err
 		}
 	}

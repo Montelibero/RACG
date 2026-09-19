@@ -78,7 +78,7 @@ fun ApprovalsScreen(
                                         setup,
                                         BrokerClient(URI(setup.payload.endpoint).host, URI(setup.payload.endpoint).port),
                                     )
-                                    transport.pendingRequests(DeviceKeyManager.signer(setup.keyMaterial.publicKey))
+                                    transport.pendingRequests(DeviceKeyManager.pollSigner(setup.pollKeyMaterial.publicKey))
                                         .map { PendingRequestItem(setup, it) } to null
                                 } catch (error: Exception) {
                                     emptyList<PendingRequestItem>() to "${setup.payload.serverId}: ${error.message ?: "failed"}"
@@ -119,7 +119,7 @@ fun ApprovalsScreen(
                         ),
                     )
                     transport.submitDecision(
-                        DeviceKeyManager.signer(target.setup.keyMaterial.publicKey),
+                        DeviceKeyManager.approvalSigner(target.setup.approvalKeyMaterial.publicKey),
                         target.request,
                         action,
                         Instant.now(),

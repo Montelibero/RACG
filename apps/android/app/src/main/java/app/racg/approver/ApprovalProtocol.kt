@@ -112,6 +112,7 @@ data class DeviceEnrollment(
     val deviceId: String,
     val keyType: String,
     val publicKey: ByteArray,
+    val pollKey: ByteArray,
     val tokenSha256: ByteArray,
     val challenge: ByteArray,
     val validUntil: String,
@@ -130,6 +131,7 @@ data class DeviceEnrollmentReceipt(
     val deviceId: String,
     val keyType: String,
     val publicKey: ByteArray,
+    val pollKey: ByteArray,
     val enrollmentSha256: String,
     val challenge: ByteArray,
     val status: String,
@@ -345,6 +347,7 @@ object ApprovalProtocol {
         serverId: String,
         deviceId: String,
         publicKey: ByteArray,
+        pollKey: ByteArray,
         token: ByteArray,
         now: Instant,
         lifetimeSeconds: Long = 60,
@@ -354,6 +357,7 @@ object ApprovalProtocol {
         deviceId = deviceId,
         keyType = KEY_TYPE_ED25519,
         publicKey = publicKey,
+        pollKey = pollKey,
         tokenSha256 = sha256(token),
         challenge = randomBytes(),
         validUntil = now.plusSeconds(lifetimeSeconds).toString(),
@@ -364,6 +368,7 @@ object ApprovalProtocol {
         deviceId: String,
         keyType: String,
         publicKey: ByteArray,
+        pollKey: ByteArray,
         token: ByteArray,
         now: Instant,
         lifetimeSeconds: Long = 60,
@@ -373,6 +378,7 @@ object ApprovalProtocol {
         deviceId = deviceId,
         keyType = keyType,
         publicKey = publicKey,
+        pollKey = pollKey,
         tokenSha256 = sha256(token),
         challenge = randomBytes(),
         validUntil = now.plusSeconds(lifetimeSeconds).toString(),
@@ -438,6 +444,7 @@ object ApprovalProtocol {
                 receipt.deviceId == signed.enrollment.deviceId &&
                 receipt.keyType == signed.enrollment.keyType &&
                 receipt.publicKey.contentEquals(signed.enrollment.publicKey) &&
+                receipt.pollKey.contentEquals(signed.enrollment.pollKey) &&
                 receipt.enrollmentSha256 == digest &&
                 receipt.challenge.contentEquals(signed.enrollment.challenge) &&
                 receipt.status == "ENROLLED",
@@ -533,6 +540,7 @@ object ApprovalProtocol {
                 deviceId = enrollment.requireString("device_id"),
                 keyType = enrollment.requireString("key_type"),
                 publicKey = enrollment.decodeBase64("public_key"),
+                pollKey = enrollment.decodeBase64("poll_public_key"),
                 tokenSha256 = enrollment.decodeBase64("token_sha256"),
                 challenge = enrollment.decodeBase64("challenge"),
                 validUntil = enrollment.requireString("valid_until"),
@@ -556,6 +564,7 @@ object ApprovalProtocol {
                 deviceId = receipt.requireString("device_id"),
                 keyType = receipt.requireString("key_type"),
                 publicKey = receipt.decodeBase64("public_key"),
+                pollKey = receipt.decodeBase64("poll_public_key"),
                 enrollmentSha256 = receipt.requireString("enrollment_sha256"),
                 challenge = receipt.decodeBase64("challenge"),
                 status = receipt.requireString("status"),
@@ -646,6 +655,7 @@ object ApprovalProtocol {
         text("device_id", value.deviceId)
         text("key_type", value.keyType)
         base64("public_key", value.publicKey)
+        base64("poll_public_key", value.pollKey)
         base64("token_sha256", value.tokenSha256)
         base64("challenge", value.challenge)
         text("valid_until", value.validUntil)
@@ -667,6 +677,7 @@ object ApprovalProtocol {
         text("device_id", value.deviceId)
         text("key_type", value.keyType)
         base64("public_key", value.publicKey)
+        base64("poll_public_key", value.pollKey)
         text("enrollment_sha256", value.enrollmentSha256)
         base64("challenge", value.challenge)
         text("status", value.status)
@@ -738,6 +749,7 @@ object ApprovalProtocol {
             "Unsupported enrollment key type"
         }
         require(value.publicKey.isNotEmpty()) { "Invalid enrollment public key" }
+        require(value.pollKey.isNotEmpty()) { "Invalid enrollment poll key" }
         require(value.tokenSha256.size == KEY_BYTES) { "Invalid enrollment token digest" }
         require(value.challenge.size == KEY_BYTES) { "Invalid enrollment challenge" }
         runCatching { Instant.parse(value.validUntil) }

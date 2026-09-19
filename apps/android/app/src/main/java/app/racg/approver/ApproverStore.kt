@@ -1,6 +1,7 @@
 package app.racg.approver
 
 import android.content.Context
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -14,7 +15,8 @@ private val Context.approverDataStore by preferencesDataStore(name = "racg_appro
 
 data class StoredSetup(
     val payload: SetupPayload,
-    val keyMaterial: DeviceKeyMaterial,
+    val approvalKeyMaterial: DeviceKeyMaterial,
+    val pollKeyMaterial: DeviceKeyMaterial,
 )
 
 interface ApproverStore {
@@ -24,7 +26,8 @@ interface ApproverStore {
 
 class DataStoreApproverStore(private val context: Context) : ApproverStore {
     private object Keys {
-        val setups = stringPreferencesKey("setups_v1")
+        val setups = stringPreferencesKey("setups_v2")
+        val legacySetups = stringPreferencesKey("setups_v1")
         val legacyServerId = stringPreferencesKey("server_id")
         val legacyServerPublicKey = stringPreferencesKey("server_public_key")
         val legacyApproverId = stringPreferencesKey("approver_id")
@@ -37,6 +40,7 @@ class DataStoreApproverStore(private val context: Context) : ApproverStore {
     override suspend fun loadAll(): List<StoredSetup> {
         val values = context.approverDataStore.data.first()
         values[Keys.setups]?.let { return decodeSetups(it) }
+        values[Keys.legacySetups]?.let { raw -> return decodeLegacySetups(raw) }
         return listOfNotNull(loadLegacy(values))
     }
 
@@ -57,7 +61,7 @@ class DataStoreApproverStore(private val context: Context) : ApproverStore {
         val endpoint = values[Keys.legacyEndpoint] ?: return null
         val deviceKey = values[Keys.legacyDevicePublicKey] ?: return null
         val deviceKeyType = values[Keys.legacyDeviceKeyType] ?: return null
-
+        val material = DeviceKeyMaterial(decode(deviceKey), deviceKeyType)
         return StoredSetup(
             payload = SetupPayload(
                 serverId = serverId,
@@ -66,11 +70,36 @@ class DataStoreApproverStore(private val context: Context) : ApproverStore {
                 endpoint = endpoint,
                 enrollmentToken = values[Keys.legacyEnrollmentToken]?.let(::decode),
             ),
-            keyMaterial = DeviceKeyMaterial(decode(deviceKey), deviceKeyType),
+            approvalKeyMaterial = material,
+            pollKeyMaterial = DeviceKeyManager.createOrLoadPair().poll,
         )
     }
 
-    private suspend fun clearLegacy(values: androidx.datastore.preferences.core.MutablePreferences) {
+    private fun decodeLegacySetups(raw: String): List<StoredSetup> {
+        val array = JSONArray(raw)
+        val poll = DeviceKeyManager.createOrLoadPair().poll
+        return List(array.length()) { index ->
+            val value = array.getJSONObject(index)
+            StoredSetup(
+                payload = SetupPayload(
+                    serverId = value.getString("server_id"),
+                    serverPublicKey = decode(value.getString("server_public_key")),
+                    approverId = value.getString("approver_id"),
+                    endpoint = value.getString("endpoint"),
+                    enrollmentToken = value.optString("enrollment_token", "")
+                        .takeIf { it.isNotEmpty() }?.let(::decode),
+                ),
+                approvalKeyMaterial = DeviceKeyMaterial(
+                    decode(value.getString("device_public_key")),
+                    value.getString("device_key_type"),
+                ),
+                pollKeyMaterial = poll,
+            )
+        }
+    }
+
+    private fun clearLegacy(values: MutablePreferences) {
+        values.remove(Keys.legacySetups)
         values.remove(Keys.legacyServerId)
         values.remove(Keys.legacyServerPublicKey)
         values.remove(Keys.legacyApproverId)
@@ -89,8 +118,10 @@ class DataStoreApproverStore(private val context: Context) : ApproverStore {
                 put("approver_id", setup.payload.approverId)
                 put("endpoint", setup.payload.endpoint)
                 setup.payload.enrollmentToken?.let { put("enrollment_token", encode(it)) }
-                put("device_public_key", encode(setup.keyMaterial.publicKey))
-                put("device_key_type", setup.keyMaterial.keyType)
+                put("approval_public_key", encode(setup.approvalKeyMaterial.publicKey))
+                put("approval_key_type", setup.approvalKeyMaterial.keyType)
+                put("poll_public_key", encode(setup.pollKeyMaterial.publicKey))
+                put("poll_key_type", setup.pollKeyMaterial.keyType)
             })
         }
         return array.toString()
@@ -109,9 +140,13 @@ class DataStoreApproverStore(private val context: Context) : ApproverStore {
                     enrollmentToken = value.optString("enrollment_token", "")
                         .takeIf { it.isNotEmpty() }?.let(::decode),
                 ),
-                keyMaterial = DeviceKeyMaterial(
-                    publicKey = decode(value.getString("device_public_key")),
-                    keyType = value.getString("device_key_type"),
+                approvalKeyMaterial = DeviceKeyMaterial(
+                    decode(value.getString("approval_public_key")),
+                    value.getString("approval_key_type"),
+                ),
+                pollKeyMaterial = DeviceKeyMaterial(
+                    decode(value.getString("poll_public_key")),
+                    value.getString("poll_key_type"),
                 ),
             )
         }

@@ -19,11 +19,16 @@ func (a *Authority) ListPending(ctx context.Context, signed approval.SignedReque
 	var key []byte
 	var revoked int
 	var keyType string
-	if err := a.db.QueryRowContext(ctx, "SELECT public_key,revoked,key_type FROM authority_devices WHERE device_id=?", list.DeviceID).Scan(&key, &revoked, &keyType); err != nil {
+	var pollKey []byte
+	if err := a.db.QueryRowContext(ctx, "SELECT public_key,revoked,key_type,poll_public_key FROM authority_devices WHERE device_id=?", list.DeviceID).Scan(&key, &revoked, &keyType, &pollKey); err != nil {
 		return approval.SignedRequestListResult{}, fmt.Errorf("device is not enrolled: %w", err)
 	}
 	if revoked != 0 {
 		return approval.SignedRequestListResult{}, errors.New("device revoked")
+	}
+	if len(pollKey) != 0 {
+		key = pollKey
+		keyType = approval.KeyTypeECDSAP256
 	}
 	if err := approval.VerifyRequestListWithKeyType(signed, a.serverID, list.DeviceID, keyType, key, a.now().UTC()); err != nil {
 		return approval.SignedRequestListResult{}, err

@@ -24,6 +24,7 @@ type DeviceEnrollment struct {
 	DeviceID    string `json:"device_id"`
 	KeyType     string `json:"key_type"`
 	PublicKey   []byte `json:"public_key"`
+	PollKey     []byte `json:"poll_public_key"`
 	TokenSHA256 []byte `json:"token_sha256"`
 	Challenge   []byte `json:"challenge"`
 	ValidUntil  string `json:"valid_until"`
@@ -47,6 +48,7 @@ type DeviceEnrollmentReceipt struct {
 	DeviceID         string `json:"device_id"`
 	KeyType          string `json:"key_type"`
 	PublicKey        []byte `json:"public_key"`
+	PollKey          []byte `json:"poll_public_key"`
 	EnrollmentSHA256 string `json:"enrollment_sha256"`
 	Challenge        []byte `json:"challenge"`
 	Status           string `json:"status"`
@@ -57,17 +59,18 @@ type SignedDeviceEnrollmentReceipt struct {
 	Signature []byte                  `json:"signature"`
 }
 
-func NewDeviceEnrollment(serverID, deviceID string, publicKey, token []byte, validUntil time.Time) (DeviceEnrollment, error) {
-	return NewDeviceEnrollmentWithKeyType(serverID, deviceID, KeyTypeEd25519, publicKey, token, validUntil)
+func NewDeviceEnrollment(serverID, deviceID, keyType string, publicKey, pollKey, token []byte, validUntil time.Time) (DeviceEnrollment, error) {
+	return NewDeviceEnrollmentWithKeyType(serverID, deviceID, keyType, publicKey, pollKey, token, validUntil)
 }
 
-func NewDeviceEnrollmentWithKeyType(serverID, deviceID, keyType string, publicKey, token []byte, validUntil time.Time) (DeviceEnrollment, error) {
+func NewDeviceEnrollmentWithKeyType(serverID, deviceID, keyType string, publicKey, pollKey, token []byte, validUntil time.Time) (DeviceEnrollment, error) {
 	enrollment := DeviceEnrollment{
 		Version:     Version,
 		ServerID:    serverID,
 		DeviceID:    deviceID,
 		KeyType:     keyType,
 		PublicKey:   append([]byte(nil), publicKey...),
+		PollKey:     append([]byte(nil), pollKey...),
 		TokenSHA256: tokenDigest(token),
 		Challenge:   make([]byte, 32),
 		ValidUntil:  validUntil.UTC().Format(time.RFC3339Nano),
@@ -166,6 +169,7 @@ func SignDeviceEnrollmentReceipt(signed SignedDeviceEnrollment, now time.Time, k
 		DeviceID:         signed.Enrollment.DeviceID,
 		KeyType:          signed.Enrollment.KeyType,
 		PublicKey:        append([]byte(nil), signed.Enrollment.PublicKey...),
+		PollKey:          append([]byte(nil), signed.Enrollment.PollKey...),
 		EnrollmentSHA256: digest,
 		Challenge:        append([]byte(nil), signed.Enrollment.Challenge...),
 		Status:           "ENROLLED",
@@ -196,6 +200,8 @@ func VerifyDeviceEnrollmentReceipt(signed SignedDeviceEnrollment, signedReceipt 
 		err = errors.New("device enrollment receipt identity mismatch")
 	case !bytes.Equal(receipt.PublicKey, signed.Enrollment.PublicKey):
 		err = errors.New("device enrollment receipt key mismatch")
+	case !bytes.Equal(receipt.PollKey, signed.Enrollment.PollKey):
+		err = errors.New("device enrollment receipt poll key mismatch")
 	case receipt.KeyType != signed.Enrollment.KeyType:
 		err = errors.New("device enrollment receipt key type mismatch")
 	case receipt.EnrollmentSHA256 != digest:
@@ -229,6 +235,8 @@ func validateDeviceEnrollment(enrollment DeviceEnrollment) error {
 		return ValidateDeviceKeyType(enrollment.KeyType)
 	case len(enrollment.PublicKey) == 0:
 		return errors.New("invalid device enrollment public key")
+	case validateECDSAP256PublicKey(enrollment.PollKey) != nil:
+		return fmt.Errorf("invalid device poll key: %w", validateECDSAP256PublicKey(enrollment.PollKey))
 	case len(enrollment.TokenSHA256) != sha256.Size:
 		return errors.New("invalid device enrollment token digest")
 	case len(enrollment.Challenge) != 32:

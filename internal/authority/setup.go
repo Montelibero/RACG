@@ -2,7 +2,6 @@ package authority
 
 import (
 	"context"
-	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
@@ -116,16 +115,17 @@ func (a *Authority) EnrollDevice(ctx context.Context, submission approval.Device
 		return approval.SignedDeviceEnrollmentReceipt{}, err
 	}
 
-	publicKey := ed25519.PublicKey(submission.Enrollment.Enrollment.PublicKey)
+	publicKey := submission.Enrollment.Enrollment.PublicKey
+	pollKey := submission.Enrollment.Enrollment.PollKey
 	if _, err := tx.ExecContext(ctx,
-		"INSERT INTO authority_devices(device_id,public_key,revoked,key_type) VALUES(?,?,0,?)",
-		storedDeviceID, []byte(publicKey), submission.Enrollment.Enrollment.KeyType,
+		"INSERT INTO authority_devices(device_id,public_key,revoked,key_type,poll_public_key) VALUES(?,?,0,?,?)",
+		storedDeviceID, publicKey, submission.Enrollment.Enrollment.KeyType, pollKey,
 	); err != nil {
 		return approval.SignedDeviceEnrollmentReceipt{}, err
 	}
 	result, err := tx.ExecContext(ctx,
 		"UPDATE authority_device_setups SET used_at=?,enrolled_public_key=? WHERE token_hash=? AND used_at IS NULL",
-		now.Format(time.RFC3339Nano), []byte(publicKey), tokenHash[:],
+		now.Format(time.RFC3339Nano), publicKey, tokenHash[:],
 	)
 	if err != nil {
 		return approval.SignedDeviceEnrollmentReceipt{}, err

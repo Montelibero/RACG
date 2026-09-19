@@ -29,8 +29,13 @@ request, displays its digest and operation, and submits verified
 queues are polled independently and merged into one aggregate list. One server
 being offline does not hide verified approvals from other servers.
 
-The device key is a non-exportable ECDSA P-256 signing key in Android Keystore.
-It cannot be used until the user completes strong biometric or device-credential
-authentication; successful unlock opens a short signing window. This build still
-supports one saved server and foreground refresh rather than an aggregate
-background queue.
+The approval key is a non-exportable ECDSA P-256 signing key in Android
+Keystore. It cannot be used until the user completes strong biometric or
+device-credential authentication; successful unlock opens a short signing
+window.
+
+Android can also run a foreground watcher. It uses a separate non-exportable
+poll key that authorizes signed pending-list reads only and cannot submit
+decisions. The service aggregates all configured servers, posts per-request
+notifications, clears notifications that are no longer pending, and opens the
+app when tapped.

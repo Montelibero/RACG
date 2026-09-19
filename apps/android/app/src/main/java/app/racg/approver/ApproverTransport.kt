@@ -12,7 +12,7 @@ class ApproverTransport(
     private val serverKey = Ed25519PublicKeyParameters(setup.payload.serverPublicKey, 0)
 
     fun pendingRequests(key: DeviceSigner, now: Instant = Instant.now()): List<SignedApprovalRequest> {
-        requireKeyMatchesSetup(key)
+        requireKeyMatchesSetup(key, setup.pollKeyMaterial)
         val list = ApprovalProtocol.newRequestList(
             serverId = setup.payload.serverId,
             deviceId = setup.payload.approverId,
@@ -29,7 +29,7 @@ class ApproverTransport(
         action: String,
         now: Instant = Instant.now(),
     ): SignedApprovalDecisionReceipt {
-        requireKeyMatchesSetup(key)
+        requireKeyMatchesSetup(key, setup.approvalKeyMaterial)
         val challenge = ByteArray(32).also { SecureRandom().nextBytes(it) }
         val decision = ApprovalProtocol.signDecision(
             request = request.request,
@@ -58,8 +58,8 @@ class ApproverTransport(
         return receipt
     }
 
-    private fun requireKeyMatchesSetup(key: DeviceSigner) {
-        require(key.publicKey.contentEquals(setup.keyMaterial.publicKey)) {
+    private fun requireKeyMatchesSetup(key: DeviceSigner, material: DeviceKeyMaterial) {
+        require(key.publicKey.contentEquals(material.publicKey) && key.keyType == material.keyType) {
             "Unlocked device key does not match stored setup"
         }
     }

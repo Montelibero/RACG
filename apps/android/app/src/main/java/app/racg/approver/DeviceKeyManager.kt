@@ -37,14 +37,31 @@ class AndroidKeystoreDeviceSigner(
 }
 
 object DeviceKeyManager {
-    private const val KEY_ALIAS = "racg_approver_p256_v1"
+    private const val APPROVAL_KEY_ALIAS = "racg_approver_p256_v1"
+    private const val POLL_KEY_ALIAS = "racg_approver_poll_p256_v1"
     private const val ANDROID_KEY_STORE = "AndroidKeyStore"
     private const val AUTH_WINDOW_SECONDS = 30
 
     /** Creates, or reuses, a non-exportable ECDSA P-256 user-auth key. */
-    fun createOrLoad(): DeviceKeyMaterial {
+    data class KeyPair(
+        val approval: DeviceKeyMaterial,
+        val poll: DeviceKeyMaterial,
+    )
+
+    fun createOrLoadPair(): KeyPair = KeyPair(
+        approval = createOrLoad(APPROVAL_KEY_ALIAS, authRequired = true),
+        poll = createOrLoad(POLL_KEY_ALIAS, authRequired = false),
+    )
+
+    fun approvalSigner(publicKey: ByteArray): AndroidKeystoreDeviceSigner =
+        signer(APPROVAL_KEY_ALIAS, publicKey)
+
+    fun pollSigner(publicKey: ByteArray): AndroidKeystoreDeviceSigner =
+        signer(POLL_KEY_ALIAS, publicKey)
+
+    private fun createOrLoad(alias: String, authRequired: Boolean): DeviceKeyMaterial {
         val keyStore = KeyStore.getInstance(ANDROID_KEY_STORE).apply { load(null) }
-        (keyStore.getEntry(KEY_ALIAS, null) as? KeyStore.PrivateKeyEntry)?.let { entry ->
+        (keyStore.getEntry(alias, null) as? KeyStore.PrivateKeyEntry)?.let { entry ->
             return DeviceKeyMaterial(entry.certificate.publicKey.encoded, KEY_TYPE_ECDSA_P256)
         }
 
@@ -53,33 +70,39 @@ object DeviceKeyManager {
             ANDROID_KEY_STORE,
         )
         val builder = KeyGenParameterSpec.Builder(
-            KEY_ALIAS,
+            alias,
             KeyProperties.PURPOSE_SIGN,
         )
             .setAlgorithmParameterSpec(ECGenParameterSpec("secp256r1"))
             .setDigests(KeyProperties.DIGEST_SHA256)
-            .setUserAuthenticationRequired(true)
             .setInvalidatedByBiometricEnrollment(false)
 
+        if (authRequired) {
+            builder.setUserAuthenticationRequired(true)
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            builder.setUserAuthenticationParameters(
-                AUTH_WINDOW_SECONDS,
-                KeyProperties.AUTH_BIOMETRIC_STRONG or KeyProperties.AUTH_DEVICE_CREDENTIAL,
-            )
+            if (authRequired) {
+                builder.setUserAuthenticationParameters(
+                    AUTH_WINDOW_SECONDS,
+                    KeyProperties.AUTH_BIOMETRIC_STRONG or KeyProperties.AUTH_DEVICE_CREDENTIAL,
+                )
+            }
         } else {
-            builder.setUserAuthenticationValidityDurationSeconds(AUTH_WINDOW_SECONDS)
+            if (authRequired) {
+                builder.setUserAuthenticationValidityDurationSeconds(AUTH_WINDOW_SECONDS)
+            }
         }
         generator.initialize(builder.build())
         val keyPair = generator.generateKeyPair()
         return DeviceKeyMaterial(keyPair.public.encoded, KEY_TYPE_ECDSA_P256)
     }
 
-    fun signer(publicKey: ByteArray): AndroidKeystoreDeviceSigner {
-        require(publicKey.contentEquals(createOrLoad().publicKey)) {
+    private fun signer(alias: String, publicKey: ByteArray): AndroidKeystoreDeviceSigner {
+        require(publicKey.contentEquals(createOrLoad(alias, alias == APPROVAL_KEY_ALIAS).publicKey)) {
             "Stored approver key does not match Android Keystore"
         }
         val keyStore = KeyStore.getInstance(ANDROID_KEY_STORE).apply { load(null) }
-        val entry = keyStore.getEntry(KEY_ALIAS, null) as? KeyStore.PrivateKeyEntry
+        val entry = keyStore.getEntry(alias, null) as? KeyStore.PrivateKeyEntry
             ?: throw IllegalStateException("Approver key is unavailable")
         return AndroidKeystoreDeviceSigner(entry.privateKey, publicKey, KEY_TYPE_ECDSA_P256)
     }

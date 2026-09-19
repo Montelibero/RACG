@@ -1,9 +1,16 @@
 package app.racg.approver
 
+import android.Manifest
+import android.os.Build
 import android.os.Bundle
+import android.content.Context
+import android.content.pm.PackageManager
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
@@ -22,6 +29,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.launch
 import androidx.fragment.app.FragmentActivity
 import kotlinx.coroutines.Dispatchers
@@ -57,6 +65,24 @@ private fun AppContent() {
     var screen by remember { mutableStateOf(Screen.Home) }
     var setups by remember { mutableStateOf<List<StoredSetup>>(emptyList()) }
     var status by remember { mutableStateOf<String?>(null) }
+    val notificationPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) ApproverPollService.start(context) else status = "Notifications are disabled"
+    }
+
+    fun startWatching() {
+        val granted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.POST_NOTIFICATIONS,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (granted || Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            ApproverPollService.start(context)
+            status = "Background watching started"
+        } else {
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
 
     LaunchedEffect(store) {
         setups = store.loadAll()
@@ -68,6 +94,11 @@ private fun AppContent() {
             status = status,
             onShowApprovals = { screen = Screen.Approvals },
             onScanSetup = { screen = Screen.ScanSetup },
+            onStartWatching = { startWatching() },
+            onStopWatching = {
+                ApproverPollService.stop(context)
+                status = "Background watching stopped"
+            },
         )
 
         Screen.ScanSetup -> BarcodeScannerView(
@@ -81,7 +112,8 @@ private fun AppContent() {
                             return@launch
                         }
                         val newSetup = withContext(Dispatchers.IO) {
-                            StoredSetup(payload, DeviceKeyManager.createOrLoad())
+                            val keys = DeviceKeyManager.createOrLoadPair()
+                            StoredSetup(payload, keys.approval, keys.poll)
                         }
                         val activity = context as? FragmentActivity
                         if (activity == null) {
@@ -98,13 +130,14 @@ private fun AppContent() {
                                                 serverId = payload.serverId,
                                                 deviceId = payload.approverId,
                                                 keyType = KEY_TYPE_ECDSA_P256,
-                                                publicKey = newSetup.keyMaterial.publicKey,
+                                                publicKey = newSetup.approvalKeyMaterial.publicKey,
+                                                pollKey = newSetup.pollKeyMaterial.publicKey,
                                                 token = token,
                                                 now = Instant.now(),
                                             )
                                             val signed = ApprovalProtocol.signDeviceEnrollment(
                                                 enrollment,
-                                                DeviceKeyManager.signer(newSetup.keyMaterial.publicKey),
+                                                DeviceKeyManager.approvalSigner(newSetup.approvalKeyMaterial.publicKey),
                                             )
                                             val uri = URI(payload.endpoint)
                                             val receipt = BrokerClient(uri.host, uri.port).enrollDevice(
@@ -152,6 +185,8 @@ private fun HomeScreen(
     status: String?,
     onShowApprovals: () -> Unit,
     onScanSetup: () -> Unit,
+    onStartWatching: () -> Unit,
+    onStopWatching: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -162,7 +197,6 @@ private fun HomeScreen(
         Text("RACG Approver", style = MaterialTheme.typography.headlineMedium)
         Text(
             when {
-                setups.isNotEmpty() -> "${setups.size} server(s) configured"
                 setups.isNotEmpty() -> "${setups.size} server(s) configured"
                 else -> "Set up this device with a QR code."
             },
@@ -182,6 +216,10 @@ private fun HomeScreen(
             enabled = true,
         ) {
             Text("Scan setup QR")
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedButton(onClick = onStartWatching) { Text("Start watching") }
+            OutlinedButton(onClick = onStopWatching) { Text("Stop watching") }
         }
         Text(
             "Approvals use the signed broker protocol. Release packaging is not ready yet.",
