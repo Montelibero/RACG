@@ -27,4 +27,8 @@ The approvals screen fetches an authority-signed pending snapshot, verifies ever
 request, displays its digest and operation, and submits verified
 `ALLOW_ONCE`/`DENY` receipts.
 
-This is not release-ready. It currently supports one saved server and foreground refresh rather than an aggregate background queue. Biometric/device-credential confirmation is a UI gate; the software Ed25519 key is not yet hardware-backed or cryptographically bound to the authentication ceremony.
+The device key is a non-exportable ECDSA P-256 signing key in Android Keystore.
+It cannot be used until the user completes strong biometric or device-credential
+authentication; successful unlock opens a short signing window. This build still
+supports one saved server and foreground refresh rather than an aggregate
+background queue.

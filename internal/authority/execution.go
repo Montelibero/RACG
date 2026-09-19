@@ -114,13 +114,14 @@ func (a *Authority) claimExecution(ctx context.Context, id string) (approval.Req
 		}
 		var key []byte
 		var revoked int
-		if err := tx.QueryRowContext(ctx, "SELECT public_key,revoked FROM authority_devices WHERE device_id=?", decision.Decision.DeviceID).Scan(&key, &revoked); err != nil {
+		var keyType string
+		if err := tx.QueryRowContext(ctx, "SELECT public_key,revoked,key_type FROM authority_devices WHERE device_id=?", decision.Decision.DeviceID).Scan(&key, &revoked, &keyType); err != nil {
 			return approval.Request{}, err
 		}
 		if revoked != 0 {
 			return approval.Request{}, errors.New("approver revoked before dispatch")
 		}
-		if err := approval.VerifyDecision(request.Request, decision, decision.Decision.DeviceID, ed25519.PublicKey(key), now); err != nil {
+		if err := approval.VerifyDecisionWithKeyType(request.Request, decision, decision.Decision.DeviceID, keyType, key, now); err != nil {
 			return approval.Request{}, err
 		}
 	}

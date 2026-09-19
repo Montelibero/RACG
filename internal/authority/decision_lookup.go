@@ -20,7 +20,8 @@ func (a *Authority) LookupDecision(ctx context.Context, signed approval.SignedDe
 	q := signed.Lookup
 	var key []byte
 	var revoked int
-	if err := a.db.QueryRowContext(ctx, "SELECT public_key,revoked FROM authority_devices WHERE device_id=?", q.DeviceID).Scan(&key, &revoked); err != nil {
+	var keyType string
+	if err := a.db.QueryRowContext(ctx, "SELECT public_key,revoked,key_type FROM authority_devices WHERE device_id=?", q.DeviceID).Scan(&key, &revoked, &keyType); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return approval.SignedDecisionLookupResult{}, fmt.Errorf("device is not enrolled: %w", err)
 		}
@@ -29,7 +30,7 @@ func (a *Authority) LookupDecision(ctx context.Context, signed approval.SignedDe
 	if revoked != 0 {
 		return approval.SignedDecisionLookupResult{}, errors.New("device revoked")
 	}
-	if err := approval.VerifyDecisionLookupCredentials(signed, a.serverID, q.DeviceID, ed25519.PublicKey(key), a.now().UTC()); err != nil {
+	if err := approval.VerifyDecisionLookupCredentialsWithKeyType(signed, a.serverID, q.DeviceID, keyType, key, a.now().UTC()); err != nil {
 		return approval.SignedDecisionLookupResult{}, err
 	}
 	var envelope, decisionData []byte
@@ -48,7 +49,7 @@ func (a *Authority) LookupDecision(ctx context.Context, signed approval.SignedDe
 	if err := approval.VerifyRequest(request, a.serverID, a.key.Public().(ed25519.PublicKey)); err != nil {
 		return approval.SignedDecisionLookupResult{}, err
 	}
-	if err := approval.VerifyDecisionLookup(signed, a.serverID, q.DeviceID, request.Request, ed25519.PublicKey(key), a.now().UTC()); err != nil {
+	if err := approval.VerifyDecisionLookupWithKeyType(signed, a.serverID, q.DeviceID, keyType, key, request.Request, a.now().UTC()); err != nil {
 		return approval.SignedDecisionLookupResult{}, err
 	}
 	var action, decisionDevice string

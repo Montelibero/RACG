@@ -23,6 +23,7 @@ RUN yes | sdkmanager --licenses >/dev/null \
 
 FROM android-sdk AS build
 WORKDIR /workspace
+ARG SOURCE_REVISION=local
 
 COPY gradlew gradlew
 COPY gradle/wrapper gradle/wrapper

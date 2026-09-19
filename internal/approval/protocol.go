@@ -4,6 +4,7 @@ package approval
 
 import (
 	"bytes"
+	"crypto"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -129,13 +130,17 @@ func SignDecisionReceipt(request Request, decision SignedDecision, challenge []b
 // authority's response. The authority signature authenticates durable
 // acceptance; it does not mean execution started or finished.
 func VerifyDecisionReceipt(request Request, decision SignedDecision, signed SignedDecisionReceipt, challenge []byte, deviceKey, serverKey ed25519.PublicKey, now time.Time) error {
+	return VerifyDecisionReceiptWithKeyType(request, decision, signed, challenge, KeyTypeEd25519, deviceKey, serverKey, now)
+}
+
+func VerifyDecisionReceiptWithKeyType(request Request, decision SignedDecision, signed SignedDecisionReceipt, challenge []byte, keyType string, deviceKey []byte, serverKey ed25519.PublicKey, now time.Time) error {
 	if err := validateRequest(request); err != nil {
 		return err
 	}
 	if err := validateDecision(decision.Decision); err != nil {
 		return err
 	}
-	if err := VerifyDecision(request, decision, decision.Decision.DeviceID, deviceKey, now); err != nil {
+	if err := VerifyDecisionWithKeyType(request, decision, decision.Decision.DeviceID, keyType, deviceKey, now); err != nil {
 		return err
 	}
 	digest, err := RequestDigest(request)
@@ -254,12 +259,13 @@ func VerifyRequest(s SignedRequest, serverID string, key ed25519.PublicKey) erro
 }
 
 func SignDecision(r Request, deviceID, action string, grant *Grant, validUntil time.Time, key ed25519.PrivateKey) (SignedDecision, error) {
+	return SignDecisionWithKeyType(r, deviceID, action, grant, validUntil, KeyTypeEd25519, key)
+}
+
+func SignDecisionWithKeyType(r Request, deviceID, action string, grant *Grant, validUntil time.Time, keyType string, key crypto.Signer) (SignedDecision, error) {
 	digest, err := RequestDigest(r)
 	if err != nil {
 		return SignedDecision{}, err
-	}
-	if len(key) != ed25519.PrivateKeySize {
-		return SignedDecision{}, errors.New("invalid signing key")
 	}
 	if grant != nil {
 		g := *grant
@@ -274,7 +280,11 @@ func SignDecision(r Request, deviceID, action string, grant *Grant, validUntil t
 	if err != nil {
 		return SignedDecision{}, err
 	}
-	return SignedDecision{Decision: d, Signature: ed25519.Sign(key, b)}, nil
+	signature, err := SignWithDeviceKey(keyType, key, b)
+	if err != nil {
+		return SignedDecision{}, err
+	}
+	return SignedDecision{Decision: d, Signature: signature}, nil
 }
 
 func validateDecision(d Decision) error {
@@ -310,6 +320,10 @@ func validateDecision(d Decision) error {
 // check current device enrollment/revocation, validate scope semantics and
 // durably consume the pending request exactly once before dispatching execution.
 func VerifyDecision(r Request, s SignedDecision, deviceID string, key ed25519.PublicKey, now time.Time) error {
+	return VerifyDecisionWithKeyType(r, s, deviceID, KeyTypeEd25519, key, now)
+}
+
+func VerifyDecisionWithKeyType(r Request, s SignedDecision, deviceID, keyType string, key []byte, now time.Time) error {
 	if err := validateDecision(s.Decision); err != nil {
 		return err
 	}
@@ -327,8 +341,8 @@ func VerifyDecision(r Request, s SignedDecision, deviceID string, key ed25519.Pu
 	if err != nil {
 		return err
 	}
-	if len(key) != ed25519.PublicKeySize || !ed25519.Verify(key, b, s.Signature) {
-		return errors.New("invalid device signature")
+	if err := VerifyDeviceKeySignature(keyType, key, b, s.Signature); err != nil {
+		return err
 	}
 	until, _ := time.Parse(time.RFC3339Nano, s.Decision.ValidUntil)
 	if !now.Before(until) {

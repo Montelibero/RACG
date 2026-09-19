@@ -102,6 +102,10 @@ func SignDecisionLookup(q DecisionLookup, key ed25519.PrivateKey) (SignedDecisio
 // and authority binding without requiring the request bytes. A transport can
 // use it before deciding whether an unknown request ID may return not-found.
 func VerifyDecisionLookupCredentials(s SignedDecisionLookup, serverID, deviceID string, key ed25519.PublicKey, now time.Time) error {
+	return VerifyDecisionLookupCredentialsWithKeyType(s, serverID, deviceID, KeyTypeEd25519, key, now)
+}
+
+func VerifyDecisionLookupCredentialsWithKeyType(s SignedDecisionLookup, serverID, deviceID, keyType string, key []byte, now time.Time) error {
 	q := s.Lookup
 	if err := validateDecisionLookup(q); err != nil {
 		return err
@@ -113,8 +117,8 @@ func VerifyDecisionLookupCredentials(s SignedDecisionLookup, serverID, deviceID 
 	if err != nil {
 		return err
 	}
-	if len(key) != ed25519.PublicKeySize || !ed25519.Verify(key, data, s.Signature) {
-		return errors.New("invalid decision lookup signature")
+	if err := VerifyDeviceKeySignature(keyType, key, data, s.Signature); err != nil {
+		return err
 	}
 	until, _ := time.Parse(time.RFC3339Nano, q.ValidUntil)
 	if !now.Before(until) {
@@ -124,7 +128,11 @@ func VerifyDecisionLookupCredentials(s SignedDecisionLookup, serverID, deviceID 
 }
 
 func VerifyDecisionLookup(s SignedDecisionLookup, serverID, deviceID string, request Request, key ed25519.PublicKey, now time.Time) error {
-	if err := VerifyDecisionLookupCredentials(s, serverID, deviceID, key, now); err != nil {
+	return VerifyDecisionLookupWithKeyType(s, serverID, deviceID, KeyTypeEd25519, key, request, now)
+}
+
+func VerifyDecisionLookupWithKeyType(s SignedDecisionLookup, serverID, deviceID, keyType string, key []byte, request Request, now time.Time) error {
+	if err := VerifyDecisionLookupCredentialsWithKeyType(s, serverID, deviceID, keyType, key, now); err != nil {
 		return err
 	}
 	q := s.Lookup

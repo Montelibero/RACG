@@ -1,6 +1,5 @@
 package app.racg.approver
 
-import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -25,7 +24,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import java.net.URI
 import java.security.SecureRandom
@@ -56,10 +54,9 @@ fun ApprovalsScreen(
             status = "Loading verified approvals"
             runCatching {
                 withContext(Dispatchers.IO) {
-                    val key = DeviceKeyManager.unlock(context, setup.keyMaterial.encryptedPrivateKey)
                     val uri = URI(setup.payload.endpoint)
                     val transport = ApproverTransport(setup, BrokerClient(uri.host, uri.port))
-                    transport.pendingRequests(key)
+                    transport.pendingRequests(DeviceKeyManager.signer(setup.keyMaterial.publicKey))
                 }
             }.onSuccess { verified ->
                 requests = verified
@@ -83,10 +80,14 @@ fun ApprovalsScreen(
             status = "Signing $action"
             runCatching {
                 withContext(Dispatchers.IO) {
-                    val key = DeviceKeyManager.unlock(context, setup.keyMaterial.encryptedPrivateKey)
                     val uri = URI(setup.payload.endpoint)
                     val transport = ApproverTransport(setup, BrokerClient(uri.host, uri.port))
-                    transport.submitDecision(key, request, action, Instant.now())
+                    transport.submitDecision(
+                        DeviceKeyManager.signer(setup.keyMaterial.publicKey),
+                        request,
+                        action,
+                        Instant.now(),
+                    )
                 }
             }.onSuccess { receipt ->
                 status = "$action accepted. Receipt: ${receipt.receipt.status}"
@@ -99,7 +100,9 @@ fun ApprovalsScreen(
     }
 
     LaunchedEffect(setup) {
-        load()
+        (context as? FragmentActivity)?.let { activity ->
+            requestDeviceAuthentication(activity) { load() }
+        }
     }
 
     Column(
@@ -113,7 +116,14 @@ fun ApprovalsScreen(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             OutlinedButton(onClick = onBack) { Text("Back") }
-            OutlinedButton(onClick = { load() }, enabled = !loading) { Text("Refresh") }
+            OutlinedButton(
+                onClick = {
+                    (context as? FragmentActivity)?.let { activity ->
+                        requestDeviceAuthentication(activity) { load() }
+                    }
+                },
+                enabled = !loading,
+            ) { Text("Refresh") }
         }
         Text(status, style = MaterialTheme.typography.bodyMedium)
 
@@ -151,13 +161,13 @@ fun ApprovalsScreen(
                     busy = loading || deciding,
                     onAllow = {
                         val activity = context as? FragmentActivity
-                        if (activity == null) decide("ALLOW_ONCE") else authenticate(activity) {
+                        if (activity == null) decide("ALLOW_ONCE") else requestDeviceAuthentication(activity) {
                             decide("ALLOW_ONCE")
                         }
                     },
                     onDeny = {
                         val activity = context as? FragmentActivity
-                        if (activity == null) decide("DENY") else authenticate(activity) {
+                        if (activity == null) decide("DENY") else requestDeviceAuthentication(activity) {
                             decide("DENY")
                         }
                     },
@@ -207,26 +217,4 @@ private fun RequestDetails(
             OutlinedButton(onClick = onDeny, enabled = !busy) { Text("Deny") }
         }
     }
-}
-
-private fun authenticate(activity: FragmentActivity, onSuccess: () -> Unit) {
-    val executor = ContextCompat.getMainExecutor(activity)
-    val prompt = BiometricPrompt(
-        activity,
-        executor,
-        object : BiometricPrompt.AuthenticationCallback() {
-            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                onSuccess()
-            }
-        },
-    )
-    val info = BiometricPrompt.PromptInfo.Builder()
-        .setTitle("Confirm this decision")
-        .setSubtitle("Device unlock signs the selected action")
-        .setAllowedAuthenticators(
-            androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK or
-                androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL,
-        )
-        .build()
-    prompt.authenticate(info)
 }

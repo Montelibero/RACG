@@ -11,20 +11,20 @@ class ApproverTransport(
 ) {
     private val serverKey = Ed25519PublicKeyParameters(setup.payload.serverPublicKey, 0)
 
-    fun pendingRequests(key: UnlockedDeviceKey, now: Instant = Instant.now()): List<SignedApprovalRequest> {
+    fun pendingRequests(key: DeviceSigner, now: Instant = Instant.now()): List<SignedApprovalRequest> {
         requireKeyMatchesSetup(key)
         val list = ApprovalProtocol.newRequestList(
             serverId = setup.payload.serverId,
             deviceId = setup.payload.approverId,
             now = now,
         )
-        val signedList = ApprovalProtocol.signRequestList(list, key.privateKey)
+        val signedList = ApprovalProtocol.signRequestList(list, key)
         val result = connection.listPending(signedList)
         return ApprovalProtocol.verifyRequestListResult(list, result, serverKey, now)
     }
 
     fun submitDecision(
-        key: UnlockedDeviceKey,
+        key: DeviceSigner,
         request: SignedApprovalRequest,
         action: String,
         now: Instant = Instant.now(),
@@ -36,7 +36,7 @@ class ApproverTransport(
             deviceId = setup.payload.approverId,
             action = action,
             validUntil = now.plusSeconds(300),
-            privateKey = key.privateKey,
+            signer = key,
         )
         val receipt = connection.submitDecision(
             DecisionSubmission(
@@ -45,19 +45,20 @@ class ApproverTransport(
                 challenge = challenge,
             ),
         )
-        ApprovalProtocol.verifyDecisionReceipt(
+        ApprovalProtocol.verifyDecisionReceiptWithKeyType(
             request = request.request,
             decision = decision,
             signedReceipt = receipt,
             challenge = challenge,
-            deviceKey = Ed25519PublicKeyParameters(key.publicKey, 0),
+            deviceKey = key.publicKey,
+            keyType = key.keyType,
             serverKey = serverKey,
             now = now,
         )
         return receipt
     }
 
-    private fun requireKeyMatchesSetup(key: UnlockedDeviceKey) {
+    private fun requireKeyMatchesSetup(key: DeviceSigner) {
         require(key.publicKey.contentEquals(setup.keyMaterial.publicKey)) {
             "Unlocked device key does not match stored setup"
         }

@@ -1,6 +1,7 @@
 package approval
 
 import (
+	"crypto"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -62,21 +63,30 @@ func validateRequestList(list RequestList) error {
 }
 
 func SignRequestList(list RequestList, key ed25519.PrivateKey) (SignedRequestList, error) {
+	return SignRequestListWithKeyType(list, KeyTypeEd25519, key)
+}
+
+func SignRequestListWithKeyType(list RequestList, keyType string, key crypto.Signer) (SignedRequestList, error) {
 	if err := validateRequestList(list); err != nil {
 		return SignedRequestList{}, err
-	}
-	if len(key) != ed25519.PrivateKeySize {
-		return SignedRequestList{}, errors.New("invalid device signing key")
 	}
 	list.Challenge = append([]byte(nil), list.Challenge...)
 	data, err := message("request-list", list)
 	if err != nil {
 		return SignedRequestList{}, err
 	}
-	return SignedRequestList{List: list, Signature: ed25519.Sign(key, data)}, nil
+	signature, err := SignWithDeviceKey(keyType, key, data)
+	if err != nil {
+		return SignedRequestList{}, err
+	}
+	return SignedRequestList{List: list, Signature: signature}, nil
 }
 
 func VerifyRequestList(s SignedRequestList, serverID, deviceID string, key ed25519.PublicKey, now time.Time) error {
+	return VerifyRequestListWithKeyType(s, serverID, deviceID, KeyTypeEd25519, key, now)
+}
+
+func VerifyRequestListWithKeyType(s SignedRequestList, serverID, deviceID, keyType string, key []byte, now time.Time) error {
 	list := s.List
 	if err := validateRequestList(list); err != nil {
 		return err
@@ -88,10 +98,13 @@ func VerifyRequestList(s SignedRequestList, serverID, deviceID string, key ed255
 	if err != nil {
 		return err
 	}
-	if len(key) != ed25519.PublicKeySize || !ed25519.Verify(key, data, s.Signature) {
-		return errors.New("invalid request list signature")
+	if err := VerifyDeviceKeySignature(keyType, key, data, s.Signature); err != nil {
+		return err
 	}
-	until, _ := time.Parse(time.RFC3339Nano, list.ValidUntil)
+	until, err := time.Parse(time.RFC3339Nano, list.ValidUntil)
+	if err != nil {
+		return errors.New("request list expired")
+	}
 	if !now.Before(until) {
 		return errors.New("request list expired")
 	}

@@ -2,6 +2,9 @@ package app.racg.approver
 
 import java.io.ByteArrayOutputStream
 import java.security.MessageDigest
+import java.security.KeyFactory
+import java.security.Signature
+import java.security.spec.X509EncodedKeySpec
 import java.security.SecureRandom
 import java.time.Instant
 import java.util.Base64
@@ -13,6 +16,14 @@ import org.json.JSONObject
 import org.json.JSONTokener
 
 const val APPROVAL_VERSION = 1
+const val KEY_TYPE_ED25519 = "ed25519"
+const val KEY_TYPE_ECDSA_P256 = "ecdsa-p256"
+
+interface DeviceSigner {
+    val publicKey: ByteArray
+    val keyType: String
+    fun sign(message: ByteArray): ByteArray
+}
 
 data class ApprovalRequest(
     val version: Int,
@@ -99,6 +110,7 @@ data class DeviceEnrollment(
     val version: Int,
     val serverId: String,
     val deviceId: String,
+    val keyType: String,
     val publicKey: ByteArray,
     val tokenSha256: ByteArray,
     val challenge: ByteArray,
@@ -116,6 +128,7 @@ data class DeviceEnrollmentReceipt(
     val version: Int,
     val serverId: String,
     val deviceId: String,
+    val keyType: String,
     val publicKey: ByteArray,
     val enrollmentSha256: String,
     val challenge: ByteArray,
@@ -150,10 +163,24 @@ object ApprovalProtocol {
         list: ApprovalRequestList,
         privateKey: Ed25519PrivateKeyParameters,
     ): SignedApprovalRequestList {
+        return signRequestList(
+            list,
+            object : DeviceSigner {
+                override val publicKey = privateKey.generatePublicKey().encoded
+                override val keyType = KEY_TYPE_ED25519
+                override fun sign(message: ByteArray) = sign(message, privateKey)
+            },
+        )
+    }
+
+    fun signRequestList(
+        list: ApprovalRequestList,
+        signer: DeviceSigner,
+    ): SignedApprovalRequestList {
         validateRequestList(list)
         return SignedApprovalRequestList(
             list = list,
-            signature = sign(message("request-list", encodeRequestList(list)), privateKey),
+            signature = signer.sign(message("request-list", encodeRequestList(list))),
         )
     }
 
@@ -183,6 +210,26 @@ object ApprovalProtocol {
         validUntil: Instant,
         privateKey: Ed25519PrivateKeyParameters,
     ): SignedApprovalDecision {
+        return signDecision(
+            request,
+            deviceId,
+            action,
+            validUntil,
+            object : DeviceSigner {
+                override val publicKey = privateKey.generatePublicKey().encoded
+                override val keyType = KEY_TYPE_ED25519
+                override fun sign(message: ByteArray) = sign(message, privateKey)
+            },
+        )
+    }
+
+    fun signDecision(
+        request: ApprovalRequest,
+        deviceId: String,
+        action: String,
+        validUntil: Instant,
+        signer: DeviceSigner,
+    ): SignedApprovalDecision {
         validateRequest(request)
         require(deviceId.isNotBlank()) { "Decision device identity is required" }
         require(action == "ALLOW_ONCE" || action == "DENY") { "Unsupported mobile decision action" }
@@ -195,7 +242,7 @@ object ApprovalProtocol {
         )
         return SignedApprovalDecision(
             decision = decision,
-            signature = sign(message("decision", encodeDecision(decision)), privateKey),
+            signature = signer.sign(message("decision", encodeDecision(decision))),
         )
     }
 
@@ -234,6 +281,28 @@ object ApprovalProtocol {
         serverKey: Ed25519PublicKeyParameters,
         now: Instant,
     ) {
+        return verifyDecisionReceiptWithKeyType(
+            request,
+            decision,
+            signedReceipt,
+            challenge,
+            KEY_TYPE_ED25519,
+            deviceKey.encoded,
+            serverKey,
+            now,
+        )
+    }
+
+    fun verifyDecisionReceiptWithKeyType(
+        request: ApprovalRequest,
+        decision: SignedApprovalDecision,
+        signedReceipt: SignedApprovalDecisionReceipt,
+        challenge: ByteArray,
+        keyType: String,
+        deviceKey: ByteArray,
+        serverKey: Ed25519PublicKeyParameters,
+        now: Instant,
+    ) {
         validateRequest(request)
         require(
             decision.decision.version == APPROVAL_VERSION && decision.decision.deviceId.isNotBlank(),
@@ -244,7 +313,8 @@ object ApprovalProtocol {
         require(now.isBefore(Instant.parse(decision.decision.validUntil))) {
             "Decision expired before sending"
         }
-        verify(
+        verifyDeviceSignature(
+            keyType,
             deviceKey,
             message("decision", encodeDecision(decision.decision)),
             decision.signature,
@@ -282,6 +352,26 @@ object ApprovalProtocol {
         version = APPROVAL_VERSION,
         serverId = serverId,
         deviceId = deviceId,
+        keyType = KEY_TYPE_ED25519,
+        publicKey = publicKey,
+        tokenSha256 = sha256(token),
+        challenge = randomBytes(),
+        validUntil = now.plusSeconds(lifetimeSeconds).toString(),
+    )
+
+    fun newDeviceEnrollmentWithKeyType(
+        serverId: String,
+        deviceId: String,
+        keyType: String,
+        publicKey: ByteArray,
+        token: ByteArray,
+        now: Instant,
+        lifetimeSeconds: Long = 60,
+    ): DeviceEnrollment = DeviceEnrollment(
+        version = APPROVAL_VERSION,
+        serverId = serverId,
+        deviceId = deviceId,
+        keyType = keyType,
         publicKey = publicKey,
         tokenSha256 = sha256(token),
         challenge = randomBytes(),
@@ -292,13 +382,27 @@ object ApprovalProtocol {
         enrollment: DeviceEnrollment,
         privateKey: Ed25519PrivateKeyParameters,
     ): SignedDeviceEnrollment {
+        return signDeviceEnrollment(
+            enrollment,
+            object : DeviceSigner {
+                override val publicKey = privateKey.generatePublicKey().encoded
+                override val keyType = KEY_TYPE_ED25519
+                override fun sign(message: ByteArray) = sign(message, privateKey)
+            },
+        )
+    }
+
+    fun signDeviceEnrollment(
+        enrollment: DeviceEnrollment,
+        signer: DeviceSigner,
+    ): SignedDeviceEnrollment {
         validateDeviceEnrollment(enrollment)
-        require(enrollment.publicKey.contentEquals(privateKey.generatePublicKey().encoded)) {
+        require(enrollment.publicKey.contentEquals(signer.publicKey)) {
             "Device enrollment key mismatch"
         }
         return SignedDeviceEnrollment(
             enrollment = enrollment,
-            signature = sign(message("device-enrollment", encodeDeviceEnrollment(enrollment)), privateKey),
+            signature = signer.sign(message("device-enrollment", encodeDeviceEnrollment(enrollment))),
         )
     }
 
@@ -310,8 +414,9 @@ object ApprovalProtocol {
         val enrollment = signed.enrollment
         validateDeviceEnrollment(enrollment)
         require(enrollment.serverId == serverId) { "Enrollment server identity mismatch" }
-        verify(
-            Ed25519PublicKeyParameters(enrollment.publicKey, 0),
+        verifyDeviceSignature(
+            enrollment.keyType,
+            enrollment.publicKey,
             message("device-enrollment", encodeDeviceEnrollment(enrollment)),
             signed.signature,
         ) { "Device enrollment signature is invalid" }
@@ -331,6 +436,7 @@ object ApprovalProtocol {
         require(
             receipt.serverId == signed.enrollment.serverId &&
                 receipt.deviceId == signed.enrollment.deviceId &&
+                receipt.keyType == signed.enrollment.keyType &&
                 receipt.publicKey.contentEquals(signed.enrollment.publicKey) &&
                 receipt.enrollmentSha256 == digest &&
                 receipt.challenge.contentEquals(signed.enrollment.challenge) &&
@@ -425,6 +531,7 @@ object ApprovalProtocol {
                 version = enrollment.getInt("version"),
                 serverId = enrollment.requireString("server_id"),
                 deviceId = enrollment.requireString("device_id"),
+                keyType = enrollment.requireString("key_type"),
                 publicKey = enrollment.decodeBase64("public_key"),
                 tokenSha256 = enrollment.decodeBase64("token_sha256"),
                 challenge = enrollment.decodeBase64("challenge"),
@@ -447,6 +554,7 @@ object ApprovalProtocol {
                 version = receipt.getInt("version"),
                 serverId = receipt.requireString("server_id"),
                 deviceId = receipt.requireString("device_id"),
+                keyType = receipt.requireString("key_type"),
                 publicKey = receipt.decodeBase64("public_key"),
                 enrollmentSha256 = receipt.requireString("enrollment_sha256"),
                 challenge = receipt.decodeBase64("challenge"),
@@ -536,6 +644,7 @@ object ApprovalProtocol {
         number("version", value.version)
         text("server_id", value.serverId)
         text("device_id", value.deviceId)
+        text("key_type", value.keyType)
         base64("public_key", value.publicKey)
         base64("token_sha256", value.tokenSha256)
         base64("challenge", value.challenge)
@@ -556,6 +665,7 @@ object ApprovalProtocol {
         number("version", value.version)
         text("server_id", value.serverId)
         text("device_id", value.deviceId)
+        text("key_type", value.keyType)
         base64("public_key", value.publicKey)
         text("enrollment_sha256", value.enrollmentSha256)
         base64("challenge", value.challenge)
@@ -624,7 +734,10 @@ object ApprovalProtocol {
         require(value.serverId.isNotBlank() && value.deviceId.isNotBlank()) {
             "Invalid enrollment identity"
         }
-        require(value.publicKey.size == KEY_BYTES) { "Invalid enrollment public key" }
+        require(value.keyType == KEY_TYPE_ED25519 || value.keyType == KEY_TYPE_ECDSA_P256) {
+            "Unsupported enrollment key type"
+        }
+        require(value.publicKey.isNotEmpty()) { "Invalid enrollment public key" }
         require(value.tokenSha256.size == KEY_BYTES) { "Invalid enrollment token digest" }
         require(value.challenge.size == KEY_BYTES) { "Invalid enrollment challenge" }
         runCatching { Instant.parse(value.validUntil) }
@@ -640,6 +753,32 @@ object ApprovalProtocol {
         signer.init(true, privateKey)
         signer.update(message, 0, message.size)
         return signer.generateSignature()
+    }
+
+    private fun verifyDeviceSignature(
+        keyType: String,
+        publicKey: ByteArray,
+        message: ByteArray,
+        signature: ByteArray,
+        failure: () -> String,
+    ) {
+        when (keyType) {
+            KEY_TYPE_ED25519 -> {
+                require(signature.size == SIGNATURE_BYTES) { failure() }
+                val verifier = Ed25519Signer()
+                verifier.init(false, Ed25519PublicKeyParameters(publicKey, 0))
+                verifier.update(message, 0, message.size)
+                require(verifier.verifySignature(signature)) { failure() }
+            }
+            KEY_TYPE_ECDSA_P256 -> {
+                val public = KeyFactory.getInstance("EC").generatePublic(X509EncodedKeySpec(publicKey))
+                val verifier = Signature.getInstance("SHA256withECDSA")
+                verifier.initVerify(public)
+                verifier.update(message)
+                require(verifier.verify(signature)) { failure() }
+            }
+            else -> throw IllegalArgumentException("Unsupported enrollment key type")
+        }
     }
 
     private fun verify(

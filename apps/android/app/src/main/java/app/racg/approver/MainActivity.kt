@@ -76,40 +76,54 @@ private fun AppContent() {
                     try {
                         val payload = SetupQrParser.parse(raw)
                         val newSetup = withContext(Dispatchers.IO) {
-                            val privateKey = DeviceKeyManager.generate()
-                            val material = DeviceKeyMaterial(
-                                publicKey = DeviceKeyManager.publicKey(privateKey).encoded,
-                                encryptedPrivateKey = DeviceKeyManager.protect(context, privateKey),
-                            )
-                            var effectivePayload = payload
-                            payload.enrollmentToken?.let { token ->
-                                val serverKey = Ed25519PublicKeyParameters(payload.serverPublicKey, 0)
-                                val enrollment = ApprovalProtocol.newDeviceEnrollment(
-                                    serverId = payload.serverId,
-                                    deviceId = payload.approverId,
-                                    publicKey = material.publicKey,
-                                    token = token,
-                                    now = Instant.now(),
-                                )
-                                val signed = ApprovalProtocol.signDeviceEnrollment(enrollment, privateKey)
-                                val uri = URI(payload.endpoint)
-                                val receipt = BrokerClient(uri.host, uri.port).enrollDevice(
-                                    DeviceEnrollmentSubmission(signed, token),
-                                )
-                                ApprovalProtocol.verifyEnrollmentReceipt(
-                                    signed,
-                                    receipt,
-                                    serverKey,
-                                    Instant.now(),
-                                )
-                                effectivePayload = payload.copy(enrollmentToken = null)
-                            }
-                            StoredSetup(effectivePayload, material)
+                            StoredSetup(payload, DeviceKeyManager.createOrLoad())
                         }
-                        store.save(newSetup)
-                        setup = newSetup
-                        status = "Setup saved for ${payload.serverId}"
-                        screen = Screen.Home
+                        val activity = context as? FragmentActivity
+                        if (activity == null) {
+                            status = "Approver key authentication is unavailable"
+                            return@launch
+                        }
+                        requestDeviceAuthentication(activity) {
+                            scope.launch {
+                                try {
+                                    val completed = withContext(Dispatchers.IO) {
+                                        payload.enrollmentToken?.let { token ->
+                                            val serverKey = Ed25519PublicKeyParameters(payload.serverPublicKey, 0)
+                                            val enrollment = ApprovalProtocol.newDeviceEnrollmentWithKeyType(
+                                                serverId = payload.serverId,
+                                                deviceId = payload.approverId,
+                                                keyType = KEY_TYPE_ECDSA_P256,
+                                                publicKey = newSetup.keyMaterial.publicKey,
+                                                token = token,
+                                                now = Instant.now(),
+                                            )
+                                            val signed = ApprovalProtocol.signDeviceEnrollment(
+                                                enrollment,
+                                                DeviceKeyManager.signer(newSetup.keyMaterial.publicKey),
+                                            )
+                                            val uri = URI(payload.endpoint)
+                                            val receipt = BrokerClient(uri.host, uri.port).enrollDevice(
+                                                DeviceEnrollmentSubmission(signed, token),
+                                            )
+                                            ApprovalProtocol.verifyEnrollmentReceipt(
+                                                signed,
+                                                receipt,
+                                                serverKey,
+                                                Instant.now(),
+                                            )
+                                        }
+                                        newSetup.copy(payload = payload.copy(enrollmentToken = null))
+                                    }
+                                    store.save(completed)
+                                    setup = completed
+                                    status = "Setup saved for ${payload.serverId}"
+                                    screen = Screen.Home
+                                } catch (_: Exception) {
+                                    status = "Setup was not completed"
+                                    screen = Screen.Home
+                                }
+                            }
+                        }
                     } catch (_: Exception) {
                         status = "Setup was not completed"
                         screen = Screen.Home

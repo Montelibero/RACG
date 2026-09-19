@@ -30,7 +30,7 @@ class DataStoreApproverStore(private val context: Context) : ApproverStore {
         val endpoint = stringPreferencesKey("endpoint")
         val enrollmentToken = stringPreferencesKey("enrollment_token")
         val devicePublicKey = stringPreferencesKey("device_public_key")
-        val encryptedDeviceKey = stringPreferencesKey("encrypted_device_key")
+        val deviceKeyType = stringPreferencesKey("device_key_type")
     }
 
     override suspend fun load(): StoredSetup? {
@@ -40,7 +40,7 @@ class DataStoreApproverStore(private val context: Context) : ApproverStore {
         val approverId = values[Keys.approverId] ?: return null
         val endpoint = values[Keys.endpoint] ?: return null
         val deviceKey = values[Keys.devicePublicKey] ?: return null
-        val encryptedKey = values[Keys.encryptedDeviceKey] ?: return null
+        val deviceKeyType = values[Keys.deviceKeyType] ?: return null
 
         return StoredSetup(
             payload = SetupPayload(
@@ -52,7 +52,7 @@ class DataStoreApproverStore(private val context: Context) : ApproverStore {
             ),
             keyMaterial = DeviceKeyMaterial(
                 publicKey = decode(deviceKey),
-                encryptedPrivateKey = decode(encryptedKey),
+                keyType = deviceKeyType,
             ),
         )
     }
@@ -65,7 +65,7 @@ class DataStoreApproverStore(private val context: Context) : ApproverStore {
             values[Keys.endpoint] = setup.payload.endpoint
             setup.payload.enrollmentToken?.let { values[Keys.enrollmentToken] = encode(it) }
             values[Keys.devicePublicKey] = encode(setup.keyMaterial.publicKey)
-            values[Keys.encryptedDeviceKey] = encode(setup.keyMaterial.encryptedPrivateKey)
+            values[Keys.deviceKeyType] = setup.keyMaterial.keyType
         }
     }
 

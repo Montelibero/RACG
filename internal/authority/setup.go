@@ -61,6 +61,9 @@ func (a *Authority) CreateDeviceSetupTrusted(ctx context.Context, deviceID strin
 // without a signature from the submitted new public key.
 func (a *Authority) EnrollDevice(ctx context.Context, submission approval.DeviceEnrollmentSubmission) (approval.SignedDeviceEnrollmentReceipt, error) {
 	now := a.now().UTC()
+	if submission.Enrollment.Enrollment.KeyType != approval.KeyTypeECDSAP256 {
+		return approval.SignedDeviceEnrollmentReceipt{}, errors.New("mobile setup requires an ECDSA P-256 device key")
+	}
 	if err := approval.VerifyDeviceEnrollment(submission.Enrollment, a.serverID, now); err != nil {
 		return approval.SignedDeviceEnrollmentReceipt{}, err
 	}
@@ -115,8 +118,8 @@ func (a *Authority) EnrollDevice(ctx context.Context, submission approval.Device
 
 	publicKey := ed25519.PublicKey(submission.Enrollment.Enrollment.PublicKey)
 	if _, err := tx.ExecContext(ctx,
-		"INSERT INTO authority_devices(device_id,public_key,revoked) VALUES(?,?,0)",
-		storedDeviceID, []byte(publicKey),
+		"INSERT INTO authority_devices(device_id,public_key,revoked,key_type) VALUES(?,?,0,?)",
+		storedDeviceID, []byte(publicKey), submission.Enrollment.Enrollment.KeyType,
 	); err != nil {
 		return approval.SignedDeviceEnrollmentReceipt{}, err
 	}

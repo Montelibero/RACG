@@ -44,7 +44,7 @@ func New(ctx context.Context, db *sql.DB, serverID string, key ed25519.PrivateKe
 	defer tx.Rollback()
 	for _, statement := range []string{
 		"CREATE TABLE IF NOT EXISTS authority_identity (singleton INTEGER PRIMARY KEY CHECK(singleton=1), server_id TEXT NOT NULL, public_key BLOB NOT NULL)",
-		"CREATE TABLE IF NOT EXISTS authority_devices (device_id TEXT PRIMARY KEY, public_key BLOB NOT NULL, revoked INTEGER NOT NULL DEFAULT 0)",
+		"CREATE TABLE IF NOT EXISTS authority_devices (device_id TEXT PRIMARY KEY, public_key BLOB NOT NULL, revoked INTEGER NOT NULL DEFAULT 0, key_type TEXT NOT NULL DEFAULT 'ed25519')",
 		"CREATE TABLE IF NOT EXISTS authority_agents (client_id TEXT PRIMARY KEY, public_key BLOB NOT NULL, revoked INTEGER NOT NULL DEFAULT 0)",
 		"CREATE TABLE IF NOT EXISTS authority_submissions (client_id TEXT NOT NULL, nonce BLOB NOT NULL, digest BLOB NOT NULL, request_id TEXT NOT NULL UNIQUE, PRIMARY KEY(client_id,nonce))",
 		"CREATE TABLE IF NOT EXISTS authority_requests (request_id TEXT PRIMARY KEY, envelope BLOB NOT NULL, status TEXT NOT NULL, signed_decision BLOB, consumed_at TEXT)",
@@ -58,6 +58,15 @@ func New(ctx context.Context, db *sql.DB, serverID string, key ed25519.PrivateKe
 		"CREATE INDEX IF NOT EXISTS authority_device_setups_device_id ON authority_device_setups(device_id)",
 	} {
 		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return nil, err
+		}
+	}
+	hasDeviceKeyType, err := columnExists(ctx, tx, "authority_devices", "key_type")
+	if err != nil {
+		return nil, err
+	}
+	if !hasDeviceKeyType {
+		if _, err := tx.ExecContext(ctx, "ALTER TABLE authority_devices ADD COLUMN key_type TEXT NOT NULL DEFAULT 'ed25519'"); err != nil {
 			return nil, err
 		}
 	}
@@ -79,6 +88,28 @@ func New(ctx context.Context, db *sql.DB, serverID string, key ed25519.PrivateKe
 	return a, nil
 }
 
+func columnExists(ctx context.Context, tx *sql.Tx, table, column string) (bool, error) {
+	rows, err := tx.QueryContext(ctx, "PRAGMA table_info("+table+")")
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, dataType string
+		var notNull int
+		var defaultValue any
+		var primaryKey int
+		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
+
 // EnrollTrusted is an administrative operation for a trusted local/SSH path.
 // It must not be exposed to the broker or authenticated by an agent token.
 // Re-enrollment is explicit trusted key rotation; pending signatures from the
@@ -89,7 +120,7 @@ func (a *Authority) EnrollTrusted(ctx context.Context, deviceID string, key ed25
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	_, err := a.db.ExecContext(ctx, "INSERT INTO authority_devices(device_id,public_key,revoked) VALUES(?,?,0) ON CONFLICT(device_id) DO UPDATE SET public_key=excluded.public_key, revoked=0", deviceID, []byte(key))
+	_, err := a.db.ExecContext(ctx, "INSERT INTO authority_devices(device_id,public_key,revoked,key_type) VALUES(?,?,0,?) ON CONFLICT(device_id) DO UPDATE SET public_key=excluded.public_key, revoked=0, key_type='ed25519'", deviceID, []byte(key), approval.KeyTypeEd25519)
 	return err
 }
 
@@ -218,14 +249,15 @@ func (a *Authority) Consume(ctx context.Context, id string, decision approval.Si
 	}
 	var key []byte
 	var revoked int
-	if err := tx.QueryRowContext(ctx, "SELECT public_key,revoked FROM authority_devices WHERE device_id=?", decision.Decision.DeviceID).Scan(&key, &revoked); err != nil {
+	var keyType string
+	if err := tx.QueryRowContext(ctx, "SELECT public_key,revoked,key_type FROM authority_devices WHERE device_id=?", decision.Decision.DeviceID).Scan(&key, &revoked, &keyType); err != nil {
 		return approval.Request{}, fmt.Errorf("device is not enrolled: %w", err)
 	}
 	if revoked != 0 {
 		return approval.Request{}, errors.New("device revoked")
 	}
 	now := a.now().UTC()
-	if err := approval.VerifyDecision(request.Request, decision, decision.Decision.DeviceID, ed25519.PublicKey(key), now); err != nil {
+	if err := approval.VerifyDecisionWithKeyType(request.Request, decision, decision.Decision.DeviceID, keyType, key, now); err != nil {
 		return approval.Request{}, err
 	}
 	encoded, err := json.Marshal(decision)

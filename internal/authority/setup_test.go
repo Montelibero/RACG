@@ -2,8 +2,11 @@ package authority
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/x509"
 	"database/sql"
 	"path/filepath"
 	"testing"
@@ -33,15 +36,26 @@ func TestDeviceSetupTokenIsSingleUse(t *testing.T) {
 	if err != nil || len(token) != 32 || !expiresAt.Equal(time.Unix(1060, 0).UTC()) {
 		t.Fatalf("setup token=%x expires=%v err=%v", token, expiresAt, err)
 	}
-	devicePublic, deviceKey, err := ed25519.GenerateKey(rand.Reader)
+	devicePrivate, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	enrollment, err := approval.NewDeviceEnrollment("server", "phone", devicePublic, token, now.Add(time.Minute))
+	devicePublic, err := x509.MarshalPKIXPublicKey(&devicePrivate.PublicKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	signed, err := approval.SignDeviceEnrollment(enrollment, deviceKey)
+	enrollment, err := approval.NewDeviceEnrollmentWithKeyType(
+		"server",
+		"phone",
+		approval.KeyTypeECDSAP256,
+		devicePublic,
+		token,
+		now.Add(time.Minute),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signed, err := approval.SignDeviceEnrollment(enrollment, devicePrivate)
 	if err != nil {
 		t.Fatal(err)
 	}

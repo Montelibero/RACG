@@ -13,14 +13,15 @@ type TrustedCredential struct {
 	ID        string `json:"id"`
 	PublicKey []byte `json:"public_key"`
 	Revoked   bool   `json:"revoked"`
+	KeyType   string `json:"key_type"`
 }
 
 func (a *Authority) ListDevicesTrusted(ctx context.Context) ([]TrustedCredential, error) {
-	return listCredentials(ctx, a, "SELECT device_id,public_key,revoked FROM authority_devices ORDER BY device_id")
+	return listCredentials(ctx, a, "SELECT device_id,public_key,revoked,key_type FROM authority_devices ORDER BY device_id")
 }
 
 func (a *Authority) ListAgentsTrusted(ctx context.Context) ([]TrustedCredential, error) {
-	return listCredentials(ctx, a, "SELECT client_id,public_key,revoked FROM authority_agents ORDER BY client_id")
+	return listCredentials(ctx, a, "SELECT client_id,public_key,revoked,'ed25519' FROM authority_agents ORDER BY client_id")
 }
 
 // IdentityTrusted returns the authority identity over the local trusted admin
@@ -55,7 +56,7 @@ func listCredentials(ctx context.Context, a *Authority, query string) ([]Trusted
 	credentials := []TrustedCredential{}
 	for rows.Next() {
 		var credential TrustedCredential
-		if err := rows.Scan(&credential.ID, &credential.PublicKey, &credential.Revoked); err != nil {
+		if err := rows.Scan(&credential.ID, &credential.PublicKey, &credential.Revoked, &credential.KeyType); err != nil {
 			return nil, err
 		}
 		credentials = append(credentials, credential)

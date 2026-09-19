@@ -2,9 +2,13 @@ package approval
 
 import (
 	"bytes"
+	"crypto"
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -18,6 +22,7 @@ type DeviceEnrollment struct {
 	Version     int    `json:"version"`
 	ServerID    string `json:"server_id"`
 	DeviceID    string `json:"device_id"`
+	KeyType     string `json:"key_type"`
 	PublicKey   []byte `json:"public_key"`
 	TokenSHA256 []byte `json:"token_sha256"`
 	Challenge   []byte `json:"challenge"`
@@ -40,6 +45,7 @@ type DeviceEnrollmentReceipt struct {
 	Version          int    `json:"version"`
 	ServerID         string `json:"server_id"`
 	DeviceID         string `json:"device_id"`
+	KeyType          string `json:"key_type"`
 	PublicKey        []byte `json:"public_key"`
 	EnrollmentSHA256 string `json:"enrollment_sha256"`
 	Challenge        []byte `json:"challenge"`
@@ -52,10 +58,15 @@ type SignedDeviceEnrollmentReceipt struct {
 }
 
 func NewDeviceEnrollment(serverID, deviceID string, publicKey, token []byte, validUntil time.Time) (DeviceEnrollment, error) {
+	return NewDeviceEnrollmentWithKeyType(serverID, deviceID, KeyTypeEd25519, publicKey, token, validUntil)
+}
+
+func NewDeviceEnrollmentWithKeyType(serverID, deviceID, keyType string, publicKey, token []byte, validUntil time.Time) (DeviceEnrollment, error) {
 	enrollment := DeviceEnrollment{
 		Version:     Version,
 		ServerID:    serverID,
 		DeviceID:    deviceID,
+		KeyType:     keyType,
 		PublicKey:   append([]byte(nil), publicKey...),
 		TokenSHA256: tokenDigest(token),
 		Challenge:   make([]byte, 32),
@@ -70,24 +81,47 @@ func NewDeviceEnrollment(serverID, deviceID string, publicKey, token []byte, val
 	return enrollment, nil
 }
 
-func SignDeviceEnrollment(enrollment DeviceEnrollment, key ed25519.PrivateKey) (SignedDeviceEnrollment, error) {
+func SignDeviceEnrollment(enrollment DeviceEnrollment, key crypto.Signer) (SignedDeviceEnrollment, error) {
 	if err := validateDeviceEnrollment(enrollment); err != nil {
 		return SignedDeviceEnrollment{}, err
-	}
-	if len(key) != ed25519.PrivateKeySize {
-		return SignedDeviceEnrollment{}, errors.New("invalid device enrollment signing key")
-	}
-	if !bytes.Equal(key.Public().(ed25519.PublicKey), enrollment.PublicKey) {
-		return SignedDeviceEnrollment{}, errors.New("device enrollment key mismatch")
 	}
 	data, err := message("device-enrollment", enrollment)
 	if err != nil {
 		return SignedDeviceEnrollment{}, err
 	}
-	return SignedDeviceEnrollment{
-		Enrollment: enrollment,
-		Signature:  ed25519.Sign(key, data),
-	}, nil
+	var signature []byte
+	switch enrollment.KeyType {
+	case KeyTypeEd25519:
+		private, ok := key.(ed25519.PrivateKey)
+		if !ok || len(private) != ed25519.PrivateKeySize {
+			return SignedDeviceEnrollment{}, errors.New("invalid Ed25519 enrollment signer")
+		}
+		if !bytes.Equal(private.Public().(ed25519.PublicKey), enrollment.PublicKey) {
+			return SignedDeviceEnrollment{}, errors.New("device enrollment key mismatch")
+		}
+		signature = ed25519.Sign(private, data)
+	case KeyTypeECDSAP256:
+		private, ok := key.(*ecdsa.PrivateKey)
+		if !ok || private.Curve != elliptic.P256() {
+			return SignedDeviceEnrollment{}, errors.New("invalid ECDSA P-256 enrollment signer")
+		}
+		public, err := x509.MarshalPKIXPublicKey(&private.PublicKey)
+		if err != nil {
+			return SignedDeviceEnrollment{}, err
+		}
+		if !bytes.Equal(public, enrollment.PublicKey) {
+			return SignedDeviceEnrollment{}, errors.New("device enrollment key mismatch")
+		}
+		hash := crypto.SHA256.New()
+		hash.Write(data)
+		signature, err = ecdsa.SignASN1(rand.Reader, private, hash.Sum(nil))
+		if err != nil {
+			return SignedDeviceEnrollment{}, err
+		}
+	default:
+		return SignedDeviceEnrollment{}, errors.New("unsupported device enrollment key type")
+	}
+	return SignedDeviceEnrollment{Enrollment: enrollment, Signature: signature}, nil
 }
 
 func VerifyDeviceEnrollment(signed SignedDeviceEnrollment, serverID string, now time.Time) error {
@@ -102,9 +136,8 @@ func VerifyDeviceEnrollment(signed SignedDeviceEnrollment, serverID string, now 
 	if err != nil {
 		return err
 	}
-	if len(enrollment.PublicKey) != ed25519.PublicKeySize ||
-		!ed25519.Verify(ed25519.PublicKey(enrollment.PublicKey), data, signed.Signature) {
-		return errors.New("invalid device enrollment signature")
+	if err := VerifyDeviceKeySignature(enrollment.KeyType, enrollment.PublicKey, data, signed.Signature); err != nil {
+		return err
 	}
 	validUntil, err := time.Parse(time.RFC3339Nano, enrollment.ValidUntil)
 	if err != nil {
@@ -131,6 +164,7 @@ func SignDeviceEnrollmentReceipt(signed SignedDeviceEnrollment, now time.Time, k
 		Version:          Version,
 		ServerID:         signed.Enrollment.ServerID,
 		DeviceID:         signed.Enrollment.DeviceID,
+		KeyType:          signed.Enrollment.KeyType,
 		PublicKey:        append([]byte(nil), signed.Enrollment.PublicKey...),
 		EnrollmentSHA256: digest,
 		Challenge:        append([]byte(nil), signed.Enrollment.Challenge...),
@@ -162,6 +196,8 @@ func VerifyDeviceEnrollmentReceipt(signed SignedDeviceEnrollment, signedReceipt 
 		err = errors.New("device enrollment receipt identity mismatch")
 	case !bytes.Equal(receipt.PublicKey, signed.Enrollment.PublicKey):
 		err = errors.New("device enrollment receipt key mismatch")
+	case receipt.KeyType != signed.Enrollment.KeyType:
+		err = errors.New("device enrollment receipt key type mismatch")
 	case receipt.EnrollmentSHA256 != digest:
 		err = errors.New("device enrollment receipt digest mismatch")
 	case !bytes.Equal(receipt.Challenge, signed.Enrollment.Challenge):
@@ -189,7 +225,9 @@ func validateDeviceEnrollment(enrollment DeviceEnrollment) error {
 		return errors.New("unsupported device enrollment version")
 	case enrollment.ServerID == "" || enrollment.DeviceID == "":
 		return errors.New("invalid device enrollment identity")
-	case len(enrollment.PublicKey) != ed25519.PublicKeySize:
+	case ValidateDeviceKeyType(enrollment.KeyType) != nil:
+		return ValidateDeviceKeyType(enrollment.KeyType)
+	case len(enrollment.PublicKey) == 0:
 		return errors.New("invalid device enrollment public key")
 	case len(enrollment.TokenSHA256) != sha256.Size:
 		return errors.New("invalid device enrollment token digest")
