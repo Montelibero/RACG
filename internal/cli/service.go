@@ -71,6 +71,8 @@ func (c *ServiceAuthorityCmd) run(ctx context.Context, args []string) int {
 	applyIntOverride(changed, "execution-max-output-bytes", &cfg.Authority.Execution.MaxOutputBytes, *maxOutput)
 	applyIntOverride(changed, "execution-kill-grace-sec", &cfg.Authority.Execution.KillGraceSec, *killGrace)
 	applyInt64Override(changed, "execution-max-transfer-bytes", &cfg.Authority.Execution.MaxTransferBytes, *maxTransfer)
+	cfg.Broker.SocketPath = cfg.Authority.SocketPath
+	cfg.Broker = cfg.Broker.Normalized()
 	if err := cfg.Validate(); err != nil {
 		fmt.Fprintf(c.stderr, "service config failed: %v\n", err)
 		return 2
@@ -185,6 +187,12 @@ func (c *ServiceBrokerCmd) run(ctx context.Context, args []string) int {
 	applyIntOverride(changed, "listen-gid", &cfg.Broker.ListenGID, *listenGID)
 	applyIntOverride(changed, "authority-uid", &cfg.Broker.AuthorityUID, *authorityUID)
 	applyIntOverride(changed, "authority-gid", &cfg.Broker.AuthorityGID, *authorityGID)
+	if cfg.Authority.ServerID == "" {
+		// The relay does not use authority identity; full Config validation only
+		// needs a non-empty value for separation checks.
+		cfg.Authority.ServerID = "local-relay"
+	}
+	cfg.Authority.SocketPath = cfg.Broker.SocketPath
 	cfg.Broker = cfg.Broker.Normalized()
 	if err := cfg.Validate(); err != nil {
 		fmt.Fprintf(c.stderr, "service config failed: %v\n", err)

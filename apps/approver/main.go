@@ -20,6 +20,48 @@ import (
 	"github.com/itolstov/racg/internal/approval"
 )
 
+func runAppCommand(args []string, stdout, stderr io.Writer) (bool, int) {
+	if len(args) == 0 || (args[0] != "keygen" && args[0] != "public-key") {
+		return false, 0
+	}
+	command := args[0]
+	fs := flag.NewFlagSet("racg-approver "+command, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	keyPath := fs.String("key", "", "passphrase-encrypted device key")
+	deviceID := fs.String("device-id", "", "device identity to enroll (keygen only)")
+	passphrase := fs.String("passphrase", os.Getenv("RACG_DEVICE_PASSPHRASE"), "device key passphrase")
+	if err := fs.Parse(args[1:]); err != nil {
+		return true, 2
+	}
+	if *keyPath == "" {
+		fmt.Fprintln(stderr, "key path required")
+		return true, 2
+	}
+	if *passphrase == "" {
+		fmt.Fprintln(stderr, "passphrase required")
+		return true, 2
+	}
+	var key *DeviceKey
+	var err error
+	if command == "keygen" {
+		key, err = newDeviceKey()
+		if err == nil && *deviceID != "" {
+			key.ID = *deviceID
+		}
+		if err == nil {
+			err = saveDeviceKey(*keyPath, key.ID, key.Private, *passphrase)
+		}
+	} else {
+		key, err = loadDeviceKey(*keyPath, *passphrase)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "%s failed: %v\n", command, err)
+		return true, 1
+	}
+	fmt.Fprintf(stdout, "device_id=%s\npublic_key=%s\n", key.ID, key.publicKeyText())
+	return true, 0
+}
+
 const helpText = `usage: racg-approver [--key path] [--server-profile path] [--request path]
                    [--connect URI] [--poll-interval duration]
 
@@ -30,6 +72,12 @@ When --connect is supplied, it polls a broker/service protocol endpoint and can
 send locally signed decisions. It never receives an authority signing key and
 cannot execute operations. Without --connect, no network connection is made.
 The existing racg serve and its local TUI do not require this application.
+
+headless commands:
+  keygen --key PATH --device-id ID [--passphrase VALUE | RACG_DEVICE_PASSPHRASE]
+      create a mode-0600 encrypted device key and print its public key
+  public-key --key PATH [--passphrase VALUE | RACG_DEVICE_PASSPHRASE]
+      decrypt a local device key and print its identity and public key
 
 --key             optional passphrase-encrypted Ed25519 signing key; created with
                   a passphrase and kept on this device, never sent anywhere
@@ -109,6 +157,7 @@ type previewUI struct {
 	verify            *widget.Button
 	allow             *widget.Button
 	deny              *widget.Button
+	tabs              *container.AppTabs
 
 	app             fyne.App
 	profileValue    ServerProfile
@@ -225,12 +274,12 @@ func (u *previewUI) canvas() fyne.CanvasObject {
 		keyForm, keyButtons,
 		u.status,
 	)
-	tabs := container.NewAppTabs(
+	u.tabs = container.NewAppTabs(
 		container.NewTabItem("Request", u.preview),
 		container.NewTabItem("Decision", u.decision),
 		container.NewTabItem("Service", container.NewVBox(serviceButtons, u.requestList)),
 	)
-	return container.NewBorder(top, nil, nil, nil, tabs)
+	return container.NewBorder(top, nil, nil, nil, u.tabs)
 }
 
 func buildContent(o options, application fyne.App) fyne.CanvasObject {
@@ -527,6 +576,7 @@ func (u *previewUI) inspectServiceRequest() {
 	}
 	u.request = u.selectedRequest.Request
 	u.preview.SetText(text)
+	u.tabs.Select(u.tabs.Items[0])
 	u.updateSigningButtons()
 	u.status.SetText("Verified service request. Use Service actions to send a decision.")
 }
@@ -614,7 +664,11 @@ func parseFlexibleDuration(value string) (time.Duration, error) {
 }
 
 func main() {
-	o, err := parseOptions(os.Args[1:], os.Stdout)
+	args := os.Args[1:]
+	if handled, code := runAppCommand(args, os.Stdout, os.Stderr); handled {
+		os.Exit(code)
+	}
+	o, err := parseOptions(args, os.Stdout)
 	if err == flag.ErrHelp {
 		return
 	}
@@ -623,8 +677,12 @@ func main() {
 		os.Exit(2)
 	}
 	application := app.NewWithID("io.racg.approver.preview")
-	window := application.NewWindow("RACG Approver — offline signing preview")
+	window := application.NewWindow("RACG Approver")
 	window.Resize(fyne.NewSize(1080, 820))
-	window.SetContent(buildContent(o, application))
+	if o.connect != "" {
+		window.SetContent(buildServiceUI(o, application))
+	} else {
+		window.SetContent(buildContent(o, application))
+	}
 	window.ShowAndRun()
 }

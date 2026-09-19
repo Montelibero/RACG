@@ -62,6 +62,8 @@ func (r *Root) Run(args []string) int {
 		return NewServiceBrokerCmd(r.stdout, r.stderr).Run(rest[1:])
 	case "service-admin":
 		return NewServiceAdminCmd(r.stdout, r.stderr).Run(rest[1:])
+	case "service-agent":
+		return NewServiceAgentCmdWithInput(r.stdin, r.stdout, r.stderr).Run(rest[1:])
 	case "login":
 		return NewAuthCmd(r.stdout, r.stderr).RunLogin(rest[1:])
 	case "logout":
