@@ -83,6 +83,14 @@ object DeviceKeyManager {
         return Ed25519PrivateKeyParameters(seed, 0)
     }
 
+    fun unlock(context: Context, protectedKey: ByteArray): UnlockedDeviceKey {
+        val privateKey = unprotect(context, protectedKey)
+        return UnlockedDeviceKey(
+            publicKey = publicKey(privateKey).encoded,
+            privateKey = privateKey,
+        )
+    }
+
     private fun masterKey(context: Context): SecretKey {
         val keyStore = KeyStore.getInstance(ANDROID_KEY_STORE).apply { load(null) }
         (keyStore.getEntry(MASTER_ALIAS, null) as? KeyStore.SecretKeyEntry)?.let { return it.secretKey }

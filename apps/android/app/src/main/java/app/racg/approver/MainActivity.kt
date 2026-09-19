@@ -1,7 +1,6 @@
 package app.racg.approver
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -24,13 +23,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import androidx.fragment.app.FragmentActivity
 
 private enum class Screen {
     Home,
     ScanSetup,
+    Approvals,
 }
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -60,6 +61,7 @@ private fun AppContent() {
         Screen.Home -> HomeScreen(
             setup = setup,
             status = status,
+            onShowApprovals = { screen = Screen.Approvals },
             onScanSetup = { screen = Screen.ScanSetup },
         )
 
@@ -88,6 +90,13 @@ private fun AppContent() {
             },
             modifier = Modifier.fillMaxSize(),
         )
+
+        Screen.Approvals -> setup?.let { configured ->
+            ApprovalsScreen(
+                setup = configured,
+                onBack = { screen = Screen.Home },
+            )
+        }
     }
 }
 
@@ -95,6 +104,7 @@ private fun AppContent() {
 private fun HomeScreen(
     setup: StoredSetup?,
     status: String?,
+    onShowApprovals: () -> Unit,
     onScanSetup: () -> Unit,
 ) {
     Column(
@@ -106,7 +116,7 @@ private fun HomeScreen(
         Text("RACG Approver", style = MaterialTheme.typography.headlineMedium)
         Text(
             when {
-                setup != null -> "Connected to ${setup.payload.serverId}"
+                setup != null -> "Setup saved for ${setup.payload.serverId}"
                 else -> "Set up this device with a QR code."
             },
             style = MaterialTheme.typography.bodyLarge,
@@ -115,40 +125,21 @@ private fun HomeScreen(
             Text(it, style = MaterialTheme.typography.bodyMedium)
         }
         Button(
+            onClick = onShowApprovals,
+            enabled = setup != null,
+        ) {
+            Text("Show approvals")
+        }
+        OutlinedButton(
             onClick = onScanSetup,
             enabled = setup == null,
         ) {
-            Text(if (setup == null) "Scan setup QR" else "Already set up")
-        }
-        OutlinedButton(
-            onClick = {},
-            enabled = false,
-        ) {
-            Text("Transfer to another phone")
+            Text("Scan setup QR")
         }
         Text(
-            "This build stores setup and creates a device key. It cannot approve anything yet.",
+            "Approvals use the signed broker protocol. Release packaging is not ready yet.",
             style = MaterialTheme.typography.bodyMedium,
             textAlign = TextAlign.Start,
         )
-    }
-}
-
-@Composable
-private fun SetupReadScreen(onBack: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Text("QR code read", style = MaterialTheme.typography.headlineMedium)
-        Text(
-            "Setup storage and secure key creation will be connected next.",
-            style = MaterialTheme.typography.bodyLarge,
-        )
-        OutlinedButton(onClick = onBack) {
-            Text("Back")
-        }
     }
 }

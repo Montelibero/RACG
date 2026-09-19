@@ -12,9 +12,11 @@ Status: file execution extracted; shared UI contracts, signed protocol primitive
 - Service agents are registered once through trusted SSH administration with a permanent key until explicit revocation/rotation. Service restart requires no new pairing. This credential authorizes request submission, never approval. The user confirmed this onboarding model; interactive pairing remains unchanged.
 - Desktop: multiple servers, background connection, sound, notifications, request details, decisions and results. Tray support must be optional.
 - Desktop UI is native only. Browser-based UI, browser extensions, WebCrypto signing, Electron/Tauri/Wails-style browser shells and local web approval endpoints are explicitly rejected.
-- Mobile is native Android Kotlin + Jetpack Compose. The Docker build produces an installable debug APK without Android Studio; protocol and approval integration are not added yet.
-- The mobile shell includes the camera QR import flow. The next mobile stage is enrollment persistence, secure device-key creation, and connection of the signed approval protocol.
-- The mobile QR import now validates the trusted setup schema, persists the server profile, and creates an Ed25519 device key encrypted with an Android Keystore wrapping key. It intentionally remains offline until biometric unlock and the signed broker client are added.
+- Mobile is native Android Kotlin + Jetpack Compose. The Docker build produces an installable debug APK without Android Studio.
+- The mobile shell includes the camera QR import flow.
+- The mobile QR import now validates the trusted setup schema, persists the server profile, and creates an Ed25519 device key encrypted with an Android Keystore wrapping key.
+- The mobile client implements the signed sequential-JSON broker methods for pending snapshots and one-shot decisions. Kotlin is byte-compatible with the Go canonical signing encoding, validated with generated cross-language fixtures for requests, signed empty/non-empty queue semantics, decisions and receipts. The current foreground screen supports one saved server and manual refresh.
+- Biometric/device-credential confirmation is currently a UI gate, not a hardware-backed signing ceremony. Android release requires either an auth-bound key path or an equivalent reviewed secure unlock boundary, plus aggregate multi-server handling and background notifications.
 - Docker debug APKs use a repository-local debug signing key so local updates preserve application data and no longer require uninstall/reinstall.
 - Telegram notifications are a later stage. They do not grant execution authority.
 - No arbitrary new request, server or device caps. Protocol safety requirements must be explained and distinguished from product policy.
