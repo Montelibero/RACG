@@ -83,8 +83,55 @@ jobs:
             dist/*.tar.gz
             dist/*.sha256
 
+  android:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Resolve source revision
+        id: rev
+        shell: bash
+        run: echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare release signing material
+        env:
+          RACG_RELEASE_KEYSTORE_B64: ${{ secrets.RACG_RELEASE_KEYSTORE_B64 }}
+          RACG_RELEASE_PROPERTIES: ${{ secrets.RACG_RELEASE_PROPERTIES }}
+        run: |
+          set -euo pipefail
+          mkdir -p apps/android/docker
+          if [[ -n "${RACG_RELEASE_KEYSTORE_B64}" && -n "${RACG_RELEASE_PROPERTIES}" ]]; then
+            printf '%s' "${RACG_RELEASE_KEYSTORE_B64}" | base64 -d > apps/android/docker/release.keystore
+            printf '%s\n' "${RACG_RELEASE_PROPERTIES}" > apps/android/docker/release.properties
+            chmod 600 apps/android/docker/release.keystore apps/android/docker/release.properties
+            echo "Release keystore: provided"
+          else
+            echo "::warning::RACG_RELEASE_KEYSTORE_B64 / RACG_RELEASE_PROPERTIES secrets are missing; the release APK will be unsigned"
+          fi
+
+      - name: Build APK (tests + debug + release)
+        env:
+          SOURCE_REVISION: ${{ steps.rev.outputs.revision }}
+        run: bash apps/android/build-docker.sh apps/android/dist
+
+      - name: Verify release signature
+        run: bash apps/android/verify-release.sh apps/android/dist/racg-approver-release.apk
+
+      - name: Upload android artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: |
+            apps/android/dist/racg-approver-debug.apk
+            apps/android/dist/racg-approver-release.apk
+            apps/android/dist/SHA256SUMS
+          if-no-files-found: error
+
   release:
-    needs: build
+    needs: [build, android]
     runs-on: ubuntu-latest
     steps:
       - name: Resolve tag
@@ -104,6 +151,13 @@ jobs:
         with:
           path: release
 
+      - name: Collect android release files
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp release/android-apk/racg-approver-release.apk release/
+          cp release/android-apk/SHA256SUMS release/racg-approver-apk.sha256
+
       - name: Collect checksums
         shell: bash
         run: |
@@ -117,4 +171,6 @@ jobs:
           generate_release_notes: true
           files: |
             release/**/*.tar.gz
+            release/racg-approver-release.apk
+            release/racg-approver-apk.sha256
             release/checksums.txt

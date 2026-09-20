@@ -24,6 +24,20 @@ The identity files are ignored by git and created with mode `0600`. Back them up
 before relying on the release APK; without the original identity, Android will
 not accept an update as the same app.
 
+## CI: signed release APK on git tags
+
+`.github/workflows/release.yml` builds the APK through the same Docker pipeline
+on every `v*` tag. To sign it in CI, add two repository secrets
+(Settings → Secrets and variables → Actions):
+
+- `RACG_RELEASE_KEYSTORE_B64` — `base64 -w0 apps/android/docker/release.keystore`
+- `RACG_RELEASE_PROPERTIES` — the full contents of `apps/android/docker/release.properties`
+
+With the secrets present, the release job publishes the signed
+`racg-approver-release.apk` (verified with `verify-release.sh`) together with
+the server archives. Without them the workflow still runs and attaches an
+unsigned APK.
+
 The build writes `SHA256SUMS` beside the artifacts. Verify a signed release with:
 
 ```sh
