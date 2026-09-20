@@ -14,12 +14,18 @@ import (
 type Config struct {
 	ListenAddr            string
 	Port                  int
+	SocketPath            string
 	DBPath                string
 	DefaultTimeoutSec     int
 	MaxOutputBytes        int
 	MaxTransferBytes      int64
 	MaxConcurrency        int
 	PairingCodeTTLSeconds int
+
+	// ServerID is the stable server identity bound into approver signing
+	// messages and setup QR payloads. Changing it invalidates enrolled
+	// approver devices; they must re-pair.
+	ServerID string
 
 	LockFirstClientAddr     bool
 	AllowAlwaysForDangerous bool
@@ -36,6 +42,7 @@ func Defaults() Config {
 		MaxTransferBytes:        0,
 		MaxConcurrency:          3,
 		PairingCodeTTLSeconds:   180,
+		ServerID:                defaultServerID(),
 		LockFirstClientAddr:     false,
 		AllowAlwaysForDangerous: false,
 		KillGraceSec:            5,
@@ -44,6 +51,15 @@ func Defaults() Config {
 
 func defaultDBPath() string {
 	return filepath.Join(stateDir(), "racg.db")
+}
+
+func defaultServerID() string {
+	hostname, err := os.Hostname()
+	hostname = strings.TrimSpace(hostname)
+	if err != nil || hostname == "" {
+		return "racg"
+	}
+	return hostname
 }
 
 func ProfileDBPath(profile string) string {
@@ -133,6 +149,12 @@ func ApplyTOMLSimple(cfg *Config, r io.Reader) error {
 				return fmt.Errorf("line %d: db_path: %w", lineNo, err)
 			}
 			cfg.DBPath = str
+		case "server_id":
+			str, err := parseTOMLString(val)
+			if err != nil {
+				return fmt.Errorf("line %d: server_id: %w", lineNo, err)
+			}
+			cfg.ServerID = str
 		case "max_concurrency":
 			n, err := strconv.Atoi(val)
 			if err != nil {

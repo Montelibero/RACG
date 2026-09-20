@@ -64,8 +64,10 @@ func (r *Root) Run(args []string) int {
 		return NewServiceAdminCmd(r.stdout, r.stderr).Run(rest[1:])
 	case "service-agent":
 		return NewServiceAgentCmdWithInput(r.stdin, r.stdout, r.stderr).Run(rest[1:])
-	case "phone-service":
-		return NewPhoneServiceCmd(r.stdout, r.stderr).Run(rest[1:])
+	case "remote-approver":
+		return NewRemoteApproverCmd(r.stdout, r.stderr).Run(rest[1:])
+	case "approver-devices":
+		return NewApproverDevicesCmd(r.stdout, r.stderr, config.Defaults().DBPath).Run(rest[1:])
 	case "login":
 		return NewAuthCmd(r.stdout, r.stderr).RunLogin(rest[1:])
 	case "logout":
@@ -98,7 +100,11 @@ func usage() string {
 	return `usage: racg [--version] <command>
 
 commands:
-  serve      start RACG server and TUI
+  serve      start the server: interactive TUI, or --headless privileged pipeline on --socket
+  remote-approver
+             unprivileged public facade; the only public port, proxies to the pipeline socket
+  approver-devices
+             list, enable, or revoke enrolled remote approver devices
   service-authority
              start the privileged service authority/executor
   service-broker
@@ -107,8 +113,6 @@ commands:
              administer trusted service devices, agents and grants
   service-agent
              submit service operations and receive signed results
-  phone-service
-             internal phone approval gateway daemon
   login      save client auth from a pairing code
   logout     remove saved client auth
   session    inspect saved/current session
@@ -134,6 +138,9 @@ approval:
 quick start:
   sudo racg serve -listen-addr 127.0.0.1 -port 8777
   sudo racg serve --profile docker -listen-addr 127.0.0.1 -port 8777
+  sudo racg serve --headless --socket /run/racg/pipeline.sock
+  racg remote-approver --listen 0.0.0.0:8777 --socket /run/racg/pipeline.sock
+  racg serve --approver-setup-out /tmp/approver-qr.png --public-url http://server:8777
   racg login --host server --pairing-code ABC123
   export RACG_CLIENT_NAME=server
 

@@ -2,10 +2,12 @@ package httpapi
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
 	"embed"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -66,6 +68,11 @@ func WithStore(s *store.Store) Option {
 	return func(a *API) { a.st = s }
 }
 
+// WithApproverPairingToken sets the raw one-time approver enrollment token.
+func WithApproverPairingToken(token []byte) Option {
+	return func(a *API) { a.approverPairingToken = token }
+}
+
 type CmdRunner interface {
 	Run(ctx context.Context, s executor.Spec) executor.Result
 }
@@ -94,6 +101,11 @@ type API struct {
 	live   map[string]*liveOutput
 
 	transferMu sync.Mutex
+
+	approverMu           sync.Mutex
+	approverChallenges   map[string]time.Time
+	approverPairingToken []byte
+	serverName           string
 }
 
 type requestRecord struct {
@@ -265,11 +277,17 @@ func (a *API) RehydrateFromStore(ctx context.Context) error {
 }
 
 func New(cfg config.Config, opts ...Option) *API {
+	serverName := strings.TrimSpace(cfg.ServerID)
+	if serverName == "" {
+		serverName, _ = os.Hostname()
+	}
 	a := &API{
-		cfg:     cfg,
-		reqs:    map[string]requestRecord{},
-		running: map[string]context.CancelFunc{},
-		live:    map[string]*liveOutput{},
+		cfg:                cfg,
+		reqs:               map[string]requestRecord{},
+		running:            map[string]context.CancelFunc{},
+		live:               map[string]*liveOutput{},
+		serverName:         serverName,
+		approverChallenges: map[string]time.Time{},
 	}
 
 	a.pairing = auth.NewPairing(6, time.Duration(cfg.PairingCodeTTLSeconds)*time.Second, auth.RealClock{})
@@ -292,6 +310,32 @@ func (a *API) PairingCode() string {
 	return a.pairing.Code()
 }
 
+// ApproverPairingToken returns the one-time enrollment token encoded for the
+// setup QR payload (standard base64 of 32 raw bytes; the Android parser
+// requires exactly that shape).
+func (a *API) ApproverPairingToken() string {
+	return base64.StdEncoding.EncodeToString(a.approverTokenBytes())
+}
+
+// approverTokenBytes lazily generates the enrollment token. An empty token
+// disables approver pairing.
+func (a *API) approverTokenBytes() []byte {
+	a.approverMu.Lock()
+	defer a.approverMu.Unlock()
+	if a.approverPairingToken == nil {
+		a.approverPairingToken, _ = randomTokenBytes()
+	}
+	return a.approverPairingToken
+}
+
+func randomTokenBytes() ([]byte, error) {
+	token := make([]byte, 32)
+	if _, err := rand.Read(token); err != nil {
+		return nil, err
+	}
+	return token, nil
+}
+
 // ListPendingForTUI returns pending requests for display/approval.
 func (a *API) ListPendingForTUI() []TUIRequest {
 	a.reqsMu.Lock()
@@ -311,7 +355,7 @@ func (a *API) DecideForTUI(requestID string, decision string) error {
 	return a.decideInternal(context.Background(), requestID, decision, claims)
 }
 
-type PhoneRequest struct {
+type ApproverRequest struct {
 	ID        string          `json:"id"`
 	Status    string          `json:"status"`
 	ClientID  string          `json:"client_id,omitempty"`
@@ -320,7 +364,7 @@ type PhoneRequest struct {
 	CreatedAt string          `json:"created_at,omitempty"`
 }
 
-func (r PhoneRequest) Summary() string {
+func (r ApproverRequest) Summary() string {
 	var op rules.Op
 	_ = json.Unmarshal(r.Op, &op)
 	switch op.Type {
@@ -350,39 +394,39 @@ func (r PhoneRequest) Summary() string {
 	return op.Type
 }
 
-func phoneRequestFromRecord(rec requestRecord) PhoneRequest {
+func approverRequestFromRecord(rec requestRecord) ApproverRequest {
 	copy := rec
 	copy.SessionID = ""
 	sum := sha256.Sum256(rec.Op)
-	return PhoneRequest{ID: copy.ID, Status: copy.Status, ClientID: copy.ClientID, Op: copy.Op, OpSHA256: hex.EncodeToString(sum[:]), CreatedAt: copy.CreatedAt}
+	return ApproverRequest{ID: copy.ID, Status: copy.Status, ClientID: copy.ClientID, Op: copy.Op, OpSHA256: hex.EncodeToString(sum[:]), CreatedAt: copy.CreatedAt}
 }
 
-func (a *API) PendingForPhone() []PhoneRequest {
+func (a *API) PendingForApprover() []ApproverRequest {
 	a.reqsMu.Lock()
 	defer a.reqsMu.Unlock()
-	out := make([]PhoneRequest, 0)
+	out := make([]ApproverRequest, 0)
 	for _, rec := range a.reqs {
 		if rec.Status != "PENDING_APPROVAL" {
 			continue
 		}
-		out = append(out, phoneRequestFromRecord(rec))
+		out = append(out, approverRequestFromRecord(rec))
 	}
 	return out
 }
 
-func (a *API) RequestForPhone(requestID string) (PhoneRequest, bool) {
+func (a *API) RequestForApprover(requestID string) (ApproverRequest, bool) {
 	a.reqsMu.Lock()
 	defer a.reqsMu.Unlock()
 	rec, ok := a.reqs[requestID]
 	if !ok || rec.Status != "PENDING_APPROVAL" {
-		return PhoneRequest{}, false
+		return ApproverRequest{}, false
 	}
-	return phoneRequestFromRecord(rec), true
+	return approverRequestFromRecord(rec), true
 }
 
-func (a *API) DecideForPhone(requestID, decision, deviceID string) error {
-	claims := auth.Claims{SessionID: "phone", ClientID: deviceID}
-	return a.decideInternalWithSource(context.Background(), requestID, decision, claims, nil, "phone:"+deviceID)
+func (a *API) DecideForApprover(requestID, decision, deviceID string) error {
+	claims := auth.Claims{SessionID: "approver", ClientID: deviceID}
+	return a.decideInternalWithSource(context.Background(), requestID, decision, claims, nil, "approver:"+deviceID)
 }
 
 func (a *API) DecideWithRuleForTUI(requestID string, decision string, rule rules.Rule) error {
@@ -1015,6 +1059,7 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("/v1/requests", a.withAuth(a.handleRequests))
 	mux.HandleFunc("/v1/requests/", a.withAuth(a.handleRequestByID))
 	mux.HandleFunc("/v1/events", a.handleEventsWS)
+	a.registerApproverRoutes(mux)
 
 	if !a.cfg.LockFirstClientAddr {
 		return mux
@@ -2274,12 +2319,31 @@ func bearerToken(v string) string {
 	return strings.TrimSpace(v[len(p):])
 }
 
+// remoteIP returns the client IP for IP-locking purposes. Over a unix socket
+// (the facade->pipeline hop) every connection shares the same peer address, so
+// the facade-forwarded X-Forwarded-For value is used instead. Direct TCP
+// connections ignore forwarded headers entirely: a client cannot spoof its IP.
 func remoteIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	remote := strings.TrimSpace(r.RemoteAddr)
+	if _, _, err := net.SplitHostPort(remote); err != nil && isUnixRemoteAddr(remote) {
+		if xf := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xf != "" {
+			if i := strings.IndexByte(xf, ','); i >= 0 {
+				xf = xf[:i]
+			}
+			if ip := strings.TrimSpace(xf); ip != "" {
+				return ip
+			}
+		}
+	}
+	host, _, err := net.SplitHostPort(remote)
 	if err != nil {
-		return strings.TrimSpace(r.RemoteAddr)
+		return remote
 	}
 	return host
+}
+
+func isUnixRemoteAddr(remote string) bool {
+	return remote == "@" || strings.HasPrefix(remote, "/") || strings.HasPrefix(remote, "@")
 }
 
 func decodeJSON(r io.Reader, dst any) error {

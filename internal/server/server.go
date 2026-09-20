@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/itolstov/racg/internal/config"
@@ -24,8 +26,8 @@ type Server struct {
 }
 
 func New(cfg config.Config) (*Server, error) {
-	if cfg.ListenAddr == "" {
-		return nil, fmt.Errorf("listen_addr is required")
+	if cfg.ListenAddr == "" && cfg.SocketPath == "" {
+		return nil, fmt.Errorf("listen_addr or socket is required")
 	}
 	if cfg.Port < 0 || cfg.Port > 65535 {
 		return nil, fmt.Errorf("invalid port: %d", cfg.Port)
@@ -96,8 +98,22 @@ func (s *Server) Run(ctx context.Context, ready chan<- struct{}) error {
 		defer func() { _ = s.st.Close() }()
 	}
 
-	addr := fmt.Sprintf("%s:%d", s.cfg.ListenAddr, s.cfg.Port)
-	ln, err := net.Listen("tcp", addr)
+	var ln net.Listener
+	var err error
+	if s.cfg.SocketPath != "" {
+		// Privileged pipeline mode: the only listener is a permission-
+		// restricted unix socket; the facade connects here, the network does not.
+		ln, err = net.Listen("unix", s.cfg.SocketPath)
+		if err == nil {
+			if err := os.Chmod(s.cfg.SocketPath, 0o660); err != nil {
+				_ = ln.Close()
+				return err
+			}
+		}
+	} else {
+		addr := net.JoinHostPort(s.cfg.ListenAddr, strconv.Itoa(s.cfg.Port))
+		ln, err = net.Listen("tcp", addr)
+	}
 	if err != nil {
 		return err
 	}
