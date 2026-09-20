@@ -22,7 +22,6 @@ func (h *phoneHandler) Run(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/pair", h.pair)
 	mux.HandleFunc("/v1/challenge", h.challenge)
-	mux.HandleFunc("/v1/challenge", h.challenge)
 	mux.HandleFunc("/v1/requests", h.requests)
 	mux.HandleFunc("/v1/request", h.request)
 	mux.HandleFunc("/v1/decision", h.decision)

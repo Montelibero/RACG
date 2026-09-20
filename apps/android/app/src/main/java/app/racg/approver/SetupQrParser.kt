@@ -20,23 +20,27 @@ data class SetupPayload(
 object SetupQrParser {
     const val KIND = "racg.approver.setup"
     private const val TOKEN_VERSION = 2
+    private const val COMPAT_VERSION = 4
     private const val TRANSFER_VERSION = 3
     private const val ED25519_KEY_BYTES = 32
 
     fun parse(raw: String): SetupPayload {
         val value = JSONObject(raw)
         val version = value.getInt("v")
-        require(version in 1..TRANSFER_VERSION) { "Unsupported setup QR version" }
+        require(version in 1..COMPAT_VERSION) { "Unsupported setup QR version" }
         require(value.getString("kind") == KIND) { "This QR code is not an approver setup" }
 
         val serverId = value.requireText("server_id")
         val approverId = value.requireText("approver_id")
         val endpoint = value.requireText("endpoint")
-        val serverKey = decodeKey(value.requireText("server_public_key"))
-        val token = if (version == TOKEN_VERSION) {
-            decodeKey(value.requireText("enrollment_token"))
+        val serverKey = if (version >= COMPAT_VERSION) {
+            if (value.has("server_public_key")) decodeKey(value.getString("server_public_key")) else ByteArray(ED25519_KEY_BYTES)
         } else {
-            null
+            decodeKey(value.requireText("server_public_key"))
+        }
+        val token = when (version) {
+            COMPAT_VERSION, TOKEN_VERSION -> decodeKey(value.requireText("enrollment_token"))
+            else -> null
         }
         val transferToken = if (version == TRANSFER_VERSION) {
             decodeKey(value.requireText("transfer_token"))
@@ -59,7 +63,9 @@ object SetupQrParser {
         } catch (_: Exception) {
             throw IllegalArgumentException("Setup QR endpoint is invalid")
         }
-        require(uri.scheme == "tcp") { "Setup QR requires a TCP endpoint" }
+        require(uri.scheme == "tcp" || uri.scheme == "http" || uri.scheme == "https") {
+            "Setup QR endpoint scheme is not supported"
+        }
         require(!uri.host.isNullOrBlank()) { "Setup QR endpoint has no host" }
         require(uri.port != -1) { "Setup QR endpoint has no port" }
         require(uri.rawQuery == null && uri.rawFragment == null) {

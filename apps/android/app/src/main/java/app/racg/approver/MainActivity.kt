@@ -36,6 +36,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.net.URI
 import java.time.Instant
+import java.util.Base64
 import java.security.SecureRandom
 import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
 
@@ -178,40 +179,51 @@ private fun AppContent() {
                             scope.launch {
                                 try {
                                     val completed = withContext(Dispatchers.IO) {
-                                        payload.transferToken?.let { transferToken ->
-                                            val transferDeviceId = payload.transferDeviceId
-                                                ?: throw IllegalArgumentException("Transfer identity is missing")
-                                            val serverKey = Ed25519PublicKeyParameters(payload.serverPublicKey, 0)
-                                            val enrollment = ApprovalProtocol.newDeviceTransferEnrollment(
-                                                serverId = payload.serverId,
-                                                newDeviceId = transferDeviceId,
-                                                signer = DeviceKeyManager.approvalSigner(newSetup.approvalKeyMaterial.publicKey),
-                                                pollKey = newSetup.pollKeyMaterial.publicKey,
-                                                grantChallenge = payload.transferGrantChallenge
-                                                    ?: throw IllegalArgumentException("Transfer grant is missing"),
-                                                token = transferToken,
-                                                now = Instant.now(),
+                                        val endpoint = URI(payload.endpoint)
+                                        if (endpoint.scheme == "http" || endpoint.scheme == "https") {
+                                            val token = payload.enrollmentToken
+                                                ?: throw IllegalArgumentException("Enrollment token is missing")
+                                            PhoneClient(payload.endpoint).pair(
+                                                code = Base64.getEncoder().encodeToString(token),
+                                                deviceId = payload.approverId,
+                                                publicKey = newSetup.approvalKeyMaterial.publicKey,
                                             )
-                                            val signed = ApprovalProtocol.signDeviceTransferEnrollment(
-                                                enrollment,
-                                                DeviceKeyManager.approvalSigner(newSetup.approvalKeyMaterial.publicKey),
-                                            )
-                                            val uri = URI(payload.endpoint)
-                                            val receipt = BrokerClient(uri.host, uri.port).enrollTransfer(
-                                                DeviceTransferSubmission(
-                                                    enrollment = signed,
+                                        } else {
+                                            payload.transferToken?.let { transferToken ->
+                                                val serverKey = Ed25519PublicKeyParameters(payload.serverPublicKey, 0)
+                                                val enrollment = ApprovalProtocol.newDeviceTransferEnrollment(
+                                                    serverId = payload.serverId,
+                                                    newDeviceId = payload.transferDeviceId
+                                                        ?: throw IllegalArgumentException("Transfer identity is missing"),
+                                                    signer = DeviceKeyManager.approvalSigner(newSetup.approvalKeyMaterial.publicKey),
+                                                    pollKey = newSetup.pollKeyMaterial.publicKey,
+                                                    grantChallenge = payload.transferGrantChallenge
+                                                        ?: throw IllegalArgumentException("Transfer grant is missing"),
                                                     token = transferToken,
-                                                ),
-                                            )
-                                            ApprovalProtocol.verifyTransferReceipt(
-                                                signed,
-                                                receipt,
-                                                serverKey,
-                                                Instant.now(),
-                                            )
+                                                    now = Instant.now(),
+                                                )
+                                                val signed = ApprovalProtocol.signDeviceTransferEnrollment(
+                                                    enrollment,
+                                                    DeviceKeyManager.approvalSigner(newSetup.approvalKeyMaterial.publicKey),
+                                                )
+                                                val uri = URI(payload.endpoint)
+                                                val receipt = BrokerClient(uri.host, uri.port).enrollTransfer(
+                                                    DeviceTransferSubmission(
+                                                        enrollment = signed,
+                                                        token = transferToken,
+                                                    ),
+                                                )
+                                                ApprovalProtocol.verifyTransferReceipt(
+                                                    signed,
+                                                    receipt,
+                                                    serverKey,
+                                                    Instant.now(),
+                                                )
+                                            }
                                         }
                                         newSetup.copy(
                                             payload = payload.copy(
+                                                enrollmentToken = null,
                                                 transferToken = null,
                                                 transferGrantChallenge = null,
                                             ),

@@ -9,6 +9,7 @@ import (
 type PhoneRequest struct {
 	ID        string          `json:"id"`
 	Status    string          `json:"status"`
+	ClientID  string          `json:"client_id,omitempty"`
 	Op        json.RawMessage `json:"op"`
 	OpSHA256  string          `json:"op_sha256"`
 	CreatedAt string          `json:"created_at,omitempty"`

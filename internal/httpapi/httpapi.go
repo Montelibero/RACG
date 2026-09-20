@@ -314,6 +314,7 @@ func (a *API) DecideForTUI(requestID string, decision string) error {
 type PhoneRequest struct {
 	ID        string          `json:"id"`
 	Status    string          `json:"status"`
+	ClientID  string          `json:"client_id,omitempty"`
 	Op        json.RawMessage `json:"op"`
 	OpSHA256  string          `json:"op_sha256"`
 	CreatedAt string          `json:"created_at,omitempty"`
@@ -352,9 +353,8 @@ func (r PhoneRequest) Summary() string {
 func phoneRequestFromRecord(rec requestRecord) PhoneRequest {
 	copy := rec
 	copy.SessionID = ""
-	copy.ClientID = ""
 	sum := sha256.Sum256(rec.Op)
-	return PhoneRequest{ID: copy.ID, Status: copy.Status, Op: copy.Op, OpSHA256: hex.EncodeToString(sum[:]), CreatedAt: copy.CreatedAt}
+	return PhoneRequest{ID: copy.ID, Status: copy.Status, ClientID: copy.ClientID, Op: copy.Op, OpSHA256: hex.EncodeToString(sum[:]), CreatedAt: copy.CreatedAt}
 }
 
 func (a *API) PendingForPhone() []PhoneRequest {

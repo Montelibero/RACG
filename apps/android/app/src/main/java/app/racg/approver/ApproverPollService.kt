@@ -74,10 +74,23 @@ class ApproverPollService : Service() {
                 setups.map { setup ->
                     async {
                         try {
-                            val uri = URI(setup.payload.endpoint)
-                            val transport = ApproverTransport(setup, BrokerClient(uri.host, uri.port))
-                            transport.pendingRequests(DeviceKeyManager.pollSigner(setup.pollKeyMaterial.publicKey))
-                                .map { PendingRequestItem(setup, it) }
+                            if (usesCompatibilityApi(setup.payload.endpoint)) {
+                                PhoneClient(setup.payload.endpoint).pending().map {
+                                    PendingRequestItem(setup, it.id, it.clientId, it.operation, it.operationSha256)
+                                }
+                            } else {
+                                val uri = URI(setup.payload.endpoint)
+                                val transport = ApproverTransport(setup, BrokerClient(uri.host, uri.port))
+                                transport.pendingRequests(DeviceKeyManager.pollSigner(setup.pollKeyMaterial.publicKey)).map {
+                                    PendingRequestItem(
+                                        setup = setup,
+                                        requestId = it.request.requestId,
+                                        clientId = it.request.clientId,
+                                        operation = String(it.request.operation),
+                                        operationSha256 = ApprovalProtocol.requestDigest(it.request),
+                                    )
+                                }
+                            }
                         } catch (_: Exception) {
                             emptyList()
                         }
@@ -99,9 +112,9 @@ class ApproverPollService : Service() {
             val notification = NotificationCompat.Builder(this, CHANNEL_APPROVALS)
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
                 .setContentTitle("Approval needed")
-                .setContentText("${item.setup.payload.serverId} • ${item.request.request.clientId}")
+                .setContentText("${item.setup.payload.serverId} • ${item.clientId}")
                 .setStyle(NotificationCompat.BigTextStyle()
-                    .bigText("${item.setup.payload.serverId}\n${item.request.request.clientId}\n${item.request.request.requestId}"))
+                    .bigText("${item.setup.payload.serverId}\n${item.clientId}\n${item.requestId}"))
                 .setGroup(GROUP_APPROVALS)
                 .setAutoCancel(true)
                 .setContentIntent(mainIntent())
@@ -130,7 +143,7 @@ class ApproverPollService : Service() {
     }
 
     private fun notificationId(item: PendingRequestItem): Int =
-        notificationId(item.setup.payload.serverId + ":" + item.request.request.requestId)
+        notificationId(item.setup.payload.serverId + ":" + item.requestId)
 
     private fun notificationId(key: String): Int = key.hashCode()
 

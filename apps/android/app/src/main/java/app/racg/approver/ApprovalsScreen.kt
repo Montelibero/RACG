@@ -40,10 +40,14 @@ import org.json.JSONTokener
 
 data class PendingRequestItem(
     val setup: StoredSetup,
-    val request: SignedApprovalRequest,
+    val requestId: String,
+    val clientId: String,
+    val operation: String,
+    val operationSha256: String,
+    val legacyRequest: SignedApprovalRequest? = null,
 ) {
     val key: String
-        get() = "${setup.payload.serverId}:${request.request.requestId}"
+        get() = "${setup.payload.serverId}:$requestId"
 }
 
 private data class AggregatePoll(
@@ -74,12 +78,25 @@ fun ApprovalsScreen(
                         setups.map { setup ->
                             async {
                                 try {
-                                    val transport = ApproverTransport(
-                                        setup,
-                                        BrokerClient(URI(setup.payload.endpoint).host, URI(setup.payload.endpoint).port),
-                                    )
-                                    transport.pendingRequests(DeviceKeyManager.pollSigner(setup.pollKeyMaterial.publicKey))
-                                        .map { PendingRequestItem(setup, it) } to null
+                                    if (usesCompatibilityApi(setup.payload.endpoint)) {
+                                        pendingCompatibilityRequests(setup).map {
+                                            PendingRequestItem(setup, it.id, it.clientId, it.operation, it.operationSha256)
+                                        } to null
+                                    } else {
+                                        val transport = ApproverTransport(
+                                            setup,
+                                            BrokerClient(URI(setup.payload.endpoint).host, URI(setup.payload.endpoint).port),
+                                        )
+                                        transport.pendingRequests(DeviceKeyManager.pollSigner(setup.pollKeyMaterial.publicKey)).map {
+                                            PendingRequestItem(
+                                                setup = setup,
+                                                requestId = it.request.requestId,
+                                                clientId = it.request.clientId,
+                                                operation = String(it.request.operation),
+                                                operationSha256 = ApprovalProtocol.requestDigest(it.request),
+                                            )
+                                        } to null
+                                    }
                                 } catch (error: Exception) {
                                     emptyList<PendingRequestItem>() to "${setup.payload.serverId}: ${error.message ?: "failed"}"
                                 }
@@ -111,22 +128,34 @@ fun ApprovalsScreen(
             status = "Signing $action"
             runCatching {
                 withContext(Dispatchers.IO) {
-                    val transport = ApproverTransport(
-                        target.setup,
-                        BrokerClient(
-                            URI(target.setup.payload.endpoint).host,
-                            URI(target.setup.payload.endpoint).port,
-                        ),
-                    )
-                    transport.submitDecision(
-                        DeviceKeyManager.approvalSigner(target.setup.approvalKeyMaterial.publicKey),
-                        target.request,
-                        action,
-                        Instant.now(),
-                    )
+                    if (usesCompatibilityApi(target.setup.payload.endpoint)) {
+                        decideCompatibilityRequest(
+                            target.setup,
+                            target.requestId,
+                            action,
+                            target.operationSha256,
+                        )
+                    } else {
+                        val transport = ApproverTransport(
+                            target.setup,
+                            BrokerClient(
+                                URI(target.setup.payload.endpoint).host,
+                                URI(target.setup.payload.endpoint).port,
+                            ),
+                        )
+                        transport.submitDecision(
+	                        DeviceKeyManager.approvalSigner(target.setup.approvalKeyMaterial.publicKey),
+	                        target.legacyRequest ?: throw IllegalStateException("Legacy request unavailable"),
+                            action,
+                            Instant.now(),
+                        )
+                    }
                 }
-            }.onSuccess { receipt ->
-                status = "$action accepted by ${target.setup.payload.serverId}. Receipt: ${receipt.receipt.status}"
+            }.onSuccess { result ->
+                status = when (result) {
+                    is SignedApprovalDecisionReceipt -> "$action accepted by ${target.setup.payload.serverId}. Receipt: ${result.receipt.status}"
+                    else -> "$action accepted by ${target.setup.payload.serverId}"
+                }
                 load()
             }.onFailure { error ->
                 status = "$action failed: ${error.message ?: "unknown error"}"
@@ -176,12 +205,12 @@ fun ApprovalsScreen(
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Text(
-                            request.request.request.clientId,
+                            request.clientId,
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
                         )
-                        Text(request.request.request.serverId, style = MaterialTheme.typography.bodySmall)
-                        Text(request.request.request.requestId, style = MaterialTheme.typography.bodySmall)
+                        Text(request.setup.payload.serverId, style = MaterialTheme.typography.bodySmall)
+                        Text(request.requestId, style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
@@ -194,7 +223,7 @@ fun ApprovalsScreen(
                     .weight(0.46f),
             ) {
                 RequestDetails(
-                    request = target.request,
+                    request = target,
                     busy = loading || deciding,
                     onAllow = {
                         val activity = context as? FragmentActivity
@@ -218,30 +247,30 @@ fun ApprovalsScreen(
 
 @Composable
 private fun RequestDetails(
-    request: SignedApprovalRequest,
+    request: PendingRequestItem,
     busy: Boolean,
     onAllow: () -> Unit,
     onDeny: () -> Unit,
 ) {
     val operation = remember(request) {
         runCatching {
-            val value = JSONTokener(String(request.request.operation, Charsets.UTF_8)).nextValue()
+            val value = JSONTokener(request.operation).nextValue()
             when (value) {
                 is JSONObject -> value.toString(2)
                 is JSONArray -> value.toString(2)
                 else -> value.toString()
             }
-        }.getOrElse { String(request.request.operation, Charsets.UTF_8) }
+        }.getOrElse { request.operation }
     }
-    val digest = remember(request) { ApprovalProtocol.requestDigest(request.request) }
+    val digest = remember(request) { request.operationSha256 }
 
     Column(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text("Verified request", style = MaterialTheme.typography.titleMedium)
-        Text("Server: ${request.request.serverId}")
-        Text("Agent: ${request.request.clientId}")
-        Text("Request: ${request.request.requestId}")
+        Text("Server: ${request.setup.payload.serverId}")
+        Text("Agent: ${request.clientId}")
+        Text("Request: ${request.requestId}")
         Text("Digest: $digest")
         Text("Signed operation:", style = MaterialTheme.typography.titleSmall)
         Text(
