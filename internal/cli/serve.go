@@ -117,7 +117,7 @@ func (c *ServeCmd) run(parent context.Context, args []string) int {
 	fmt.Fprintf(c.stdout, "pairing_code=%s\n", s.PairingCode())
 	if phone {
 		fmt.Fprintf(c.stdout, "phone_mode=true\nphone_bridge=%s\n", phoneBridge)
-		if err := c.runPhoneBridge(ctx, s.API()); err != nil {
+		if err := c.runPhoneBridge(ctx, s.API(), phoneBridge); err != nil {
 			fmt.Fprintf(c.stderr, "phone bridge error: %v\n", err)
 			return 1
 		}

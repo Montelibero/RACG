@@ -9,10 +9,10 @@ import (
 	"github.com/itolstov/racg/internal/httpapi"
 )
 
-func (c *ServeCmd) runPhoneBridge(ctx context.Context, api *httpapi.API) error {
-	if err := os.MkdirAll(filepath.Dir(c.phoneBridge), 0o750); err != nil {
+func (c *ServeCmd) runPhoneBridge(ctx context.Context, api *httpapi.API, phoneBridge string) error {
+	if err := os.MkdirAll(filepath.Dir(phoneBridge), 0o750); err != nil {
 		return err
 	}
-	backend := approvalbridge.NewServer(api, approvalbridge.NewDeviceRegistry(c.phoneBridge+".devices.json"))
-	return approvalbridge.Serve(ctx, c.phoneBridge, backend)
+	backend := approvalbridge.NewServer(api, approvalbridge.NewDeviceRegistry(phoneBridge+".devices.json"))
+	return approvalbridge.Serve(ctx, phoneBridge, backend)
 }
