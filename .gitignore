@@ -6,3 +6,4 @@ belief_map.sexp
 .belief-map/
 .codespaces/
 .codespaces-cache/
+.tmp/
