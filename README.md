@@ -26,7 +26,10 @@ An experimental native Android approver shell lives in `apps/android/`. Its
 Docker build needs no Android Studio. The phone scans a one-time setup QR,
 generates its own ECDSA P-256 approver key in Android Keystore, enrolls through
 the signed `/v1/approver` API, and submits device-signed one-shot decisions
-bound to the exact operation digest.
+bound to the exact operation digest. The app talks plain HTTP by design:
+transport encryption is provided by the tailnet (Tailscale/WireGuard), and the
+manifest allows cleartext for exactly that reason. TLS to arbitrary tailnet
+IPs is out of scope until a certificate story exists.
 
 Manual approval and denial are local to the server TUI. Agent bearer tokens cannot approve or deny requests: the legacy `POST /v1/requests/{id}/decision` endpoint returns `403 REMOTE_DECISION_DISABLED`. Existing authorized rules may still auto-approve matching requests. Standalone `racg serve` needs no installed service or desktop approver.
 
