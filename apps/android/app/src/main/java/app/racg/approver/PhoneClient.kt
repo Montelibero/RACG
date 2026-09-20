@@ -14,24 +14,39 @@ data class PhonePendingRequest(
     val createdAt: String,
 )
 
+/** Client for the server's signed /v1/approver API. Reads and decisions are
+ * authenticated by the device's non-exportable approval key; the one-time
+ * enrollment token is used during pairing and never stored afterwards. */
 class PhoneClient(private val endpoint: String, private val timeoutMillis: Int = 10_000) {
     private val baseUrl = endpoint.trimEnd('/')
 
-    fun pair(code: String, deviceId: String, publicKey: ByteArray) {
-        val input = JSONObject()
-            .put("code", code)
-            .put("device_id", deviceId)
-            .put("public_key", Base64.encodeToString(publicKey, Base64.NO_WRAP))
-        call("POST", "/v1/pair", input)
-    }
-
     fun challenge(): String {
-        val response = call("GET", "/v1/challenge")
+        val response = call("GET", "/v1/approver/challenge")
         return response.getString("challenge")
     }
 
-    fun pending(): List<PhonePendingRequest> {
-        val response = call("GET", "/v1/requests")
+    fun pair(
+        deviceId: String,
+        publicKey: ByteArray,
+        tokenSha256Hex: String,
+        challenge: String,
+        signature: String,
+    ) {
+        val input = JSONObject()
+            .put("device_id", deviceId)
+            .put("public_key", Base64.encodeToString(publicKey, Base64.NO_WRAP))
+            .put("token_sha256", tokenSha256Hex)
+            .put("challenge", challenge)
+            .put("signature", signature)
+        call("POST", "/v1/approver/pairing", input)
+    }
+
+    fun pending(
+        serverId: String,
+        deviceId: String,
+        signer: AndroidKeystoreDeviceSigner,
+    ): List<PhonePendingRequest> {
+        val response = signedCall(serverId, deviceId, signer, "GET", "/v1/approver/requests")
         val array = response.getJSONArray("requests")
         return List(array.length()) { index ->
             val value = array.getJSONObject(index)
@@ -45,34 +60,70 @@ class PhoneClient(private val endpoint: String, private val timeoutMillis: Int =
         }
     }
 
-    fun decide(input: PhoneDecisionInput) {
+    fun decide(
+        serverId: String,
+        deviceId: String,
+        signer: AndroidKeystoreDeviceSigner,
+        input: PhoneDecisionInput,
+    ) {
+        val challenge = challenge()
+        val message = CompatProtocol.decisionMessage(
+            serverId = serverId,
+            deviceId = deviceId,
+            requestId = input.requestId,
+            operationSha256 = input.operationSha256,
+            decision = input.decision,
+            challenge = challenge,
+        )
         val body = JSONObject()
-            .put("device_id", input.deviceId)
+            .put("device_id", deviceId)
             .put("request_id", input.requestId)
             .put("decision", input.decision)
-            .put("op_sha256", input.opSha256)
-            .put("challenge", input.challenge)
-            .put("public_key", Base64.encodeToString(input.publicKey, Base64.NO_WRAP))
-            .put("signature", Base64.encodeToString(input.signature, Base64.NO_WRAP))
-        call("POST", "/v1/decision", body)
+            .put("operation_sha256", input.operationSha256)
+            .put("challenge", challenge)
+            .put("signature", Base64.encodeToString(signer.sign(message), Base64.NO_WRAP))
+        call("POST", "/v1/approver/decision", body)
+    }
+
+    private fun signedCall(
+        serverId: String,
+        deviceId: String,
+        signer: AndroidKeystoreDeviceSigner,
+        method: String,
+        path: String,
+    ): JSONObject {
+        val challenge = challenge()
+        val message = CompatProtocol.pollMessage(serverId, deviceId, path, challenge)
+        val connection = open(method, path)
+        connection.setRequestProperty("X-Racg-Approver-Device", deviceId)
+        connection.setRequestProperty("X-Racg-Approver-Challenge", challenge)
+        connection.setRequestProperty(
+            "X-Racg-Approver-Signature",
+            Base64.encodeToString(signer.sign(message), Base64.NO_WRAP),
+        )
+        return read(connection)
     }
 
     private fun call(method: String, path: String, body: JSONObject? = null): JSONObject {
-        val connection = (URL(baseUrl + path).openConnection() as HttpURLConnection).apply {
-            requestMethod = method
-            connectTimeout = timeoutMillis
-            readTimeout = timeoutMillis
-            if (body != null) {
-                doOutput = true
-                setRequestProperty("Content-Type", "application/json")
-            }
-        }
+        val connection = open(method, path)
         if (body != null) {
+            connection.doOutput = true
+            connection.setRequestProperty("Content-Type", "application/json")
             val output = connection.outputStream
             output.write(body.toString().toByteArray(Charsets.UTF_8))
             output.flush()
         }
+        return read(connection)
+    }
 
+    private fun open(method: String, path: String): HttpURLConnection =
+        (URL(baseUrl + path).openConnection() as HttpURLConnection).apply {
+            requestMethod = method
+            connectTimeout = timeoutMillis
+            readTimeout = timeoutMillis
+        }
+
+    private fun read(connection: HttpURLConnection): JSONObject {
         val stream = if (connection.responseCode in 200..299) {
             connection.inputStream
         } else {
@@ -82,20 +133,16 @@ class PhoneClient(private val endpoint: String, private val timeoutMillis: Int =
         connection.disconnect()
 
         if (connection.responseCode !in 200..299) {
-            throw IllegalArgumentException("Phone service returned ${connection.responseCode}")
+            throw IllegalArgumentException("Approver API returned ${connection.responseCode}: $raw")
         }
         return JSONObject(raw)
     }
 }
 
 data class PhoneDecisionInput(
-    val deviceId: String,
     val requestId: String,
     val decision: String,
-    val opSha256: String,
-    val challenge: String,
-    val publicKey: ByteArray,
-    val signature: ByteArray,
+    val operationSha256: String,
 )
 
 fun usesCompatibilityApi(endpoint: String): Boolean {
@@ -103,8 +150,11 @@ fun usesCompatibilityApi(endpoint: String): Boolean {
     return scheme == "http" || scheme == "https"
 }
 
-fun pendingCompatibilityRequests(setup: StoredSetup): List<PhonePendingRequest> =
-    PhoneClient(setup.payload.endpoint).pending()
+fun pendingCompatibilityRequests(setup: StoredSetup): List<PhonePendingRequest> {
+    val signer = DeviceKeyManager.approvalSigner(setup.approvalKeyMaterial.publicKey)
+    return PhoneClient(setup.payload.endpoint)
+        .pending(setup.payload.serverId, setup.payload.approverId, signer)
+}
 
 fun decideCompatibilityRequest(
     setup: StoredSetup,
@@ -112,25 +162,16 @@ fun decideCompatibilityRequest(
     decision: String,
     operationSha256: String,
 ) {
-    val challenge = PhoneClient(setup.payload.endpoint).challenge()
     val signer = DeviceKeyManager.approvalSigner(setup.approvalKeyMaterial.publicKey)
-    val message = CompatProtocol.decisionMessage(
-        deviceId = setup.payload.approverId,
-        requestId = requestId,
-        decision = decision,
-        operationSha256 = operationSha256,
-        challenge = challenge,
-    )
-    val signature = signer.sign(message)
-    PhoneClient(setup.payload.endpoint).decide(
-        PhoneDecisionInput(
-            deviceId = setup.payload.approverId,
-            requestId = requestId,
-            decision = decision,
-            opSha256 = operationSha256,
-            challenge = challenge,
-            publicKey = setup.approvalKeyMaterial.publicKey,
-            signature = signature,
-        ),
-    )
+    PhoneClient(setup.payload.endpoint)
+        .decide(
+            setup.payload.serverId,
+            setup.payload.approverId,
+            signer,
+            PhoneDecisionInput(
+                requestId = requestId,
+                decision = decision,
+                operationSha256 = operationSha256,
+            ),
+        )
 }

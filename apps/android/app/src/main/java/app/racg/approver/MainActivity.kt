@@ -183,10 +183,28 @@ private fun AppContent() {
                                         if (endpoint.scheme == "http" || endpoint.scheme == "https") {
                                             val token = payload.enrollmentToken
                                                 ?: throw IllegalArgumentException("Enrollment token is missing")
-                                            PhoneClient(payload.endpoint).pair(
-                                                code = Base64.getEncoder().encodeToString(token),
+                                            val client = PhoneClient(payload.endpoint)
+                                            val challenge = client.challenge()
+                                            val tokenSha256Hex = CompatProtocol.sha256Hex(token)
+                                            val publicKeySha256Hex =
+                                                CompatProtocol.sha256Hex(newSetup.approvalKeyMaterial.publicKey)
+                                            val message = CompatProtocol.pairingMessage(
+                                                serverId = payload.serverId,
+                                                deviceId = payload.approverId,
+                                                publicKeySha256Hex = publicKeySha256Hex,
+                                                challenge = challenge,
+                                                tokenSha256Hex = tokenSha256Hex,
+                                            )
+                                            val signature = Base64.getEncoder().encodeToString(
+                                                DeviceKeyManager.approvalSigner(newSetup.approvalKeyMaterial.publicKey)
+                                                    .sign(message),
+                                            )
+                                            client.pair(
                                                 deviceId = payload.approverId,
                                                 publicKey = newSetup.approvalKeyMaterial.publicKey,
+                                                tokenSha256Hex = tokenSha256Hex,
+                                                challenge = challenge,
+                                                signature = signature,
                                             )
                                         } else {
                                             payload.transferToken?.let { transferToken ->

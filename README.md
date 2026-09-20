@@ -24,8 +24,9 @@ the standalone server has no GUI build dependency. See
 
 An experimental native Android approver shell lives in `apps/android/`. Its
 Docker build needs no Android Studio. The phone scans a one-time setup QR,
-generates its own Ed25519 approver key, and uses the signed broker protocol for
-pending requests and one-shot decisions.
+generates its own ECDSA P-256 approver key in Android Keystore, enrolls through
+the signed `/v1/approver` API, and submits device-signed one-shot decisions
+bound to the exact operation digest.
 
 Manual approval and denial are local to the server TUI. Agent bearer tokens cannot approve or deny requests: the legacy `POST /v1/requests/{id}/decision` endpoint returns `403 REMOTE_DECISION_DISABLED`. Existing authorized rules may still auto-approve matching requests. Standalone `racg serve` needs no installed service or desktop approver.
 

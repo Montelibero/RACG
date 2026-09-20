@@ -75,7 +75,7 @@ class ApproverPollService : Service() {
                     async {
                         try {
                             if (usesCompatibilityApi(setup.payload.endpoint)) {
-                                PhoneClient(setup.payload.endpoint).pending().map {
+                                pendingCompatibilityRequests(setup).map {
                                     PendingRequestItem(setup, it.id, it.clientId, it.operation, it.operationSha256)
                                 }
                             } else {
