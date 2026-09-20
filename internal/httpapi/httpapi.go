@@ -311,6 +311,80 @@ func (a *API) DecideForTUI(requestID string, decision string) error {
 	return a.decideInternal(context.Background(), requestID, decision, claims)
 }
 
+type PhoneRequest struct {
+	ID        string          `json:"id"`
+	Status    string          `json:"status"`
+	Op        json.RawMessage `json:"op"`
+	OpSHA256  string          `json:"op_sha256"`
+	CreatedAt string          `json:"created_at,omitempty"`
+}
+
+func (r PhoneRequest) Summary() string {
+	var op rules.Op
+	_ = json.Unmarshal(r.Op, &op)
+	switch op.Type {
+	case "cmd.run":
+		var payload struct {
+			Argv []string `json:"argv"`
+		}
+		_ = json.Unmarshal(op.Payload, &payload)
+		if len(payload.Argv) > 0 {
+			return "cmd.run " + strings.Join(payload.Argv, " ")
+		}
+	case "fs.read", "fs.download":
+		var payload struct {
+			Path string `json:"path"`
+		}
+		_ = json.Unmarshal(op.Payload, &payload)
+		return op.Type + " " + payload.Path
+	case "fs.upload":
+		var payload struct {
+			Path string `json:"path"`
+		}
+		_ = json.Unmarshal(op.Payload, &payload)
+		return "fs.upload " + payload.Path
+	case "conf.set", "conf.set_kv":
+		return op.Type
+	}
+	return op.Type
+}
+
+func phoneRequestFromRecord(rec requestRecord) PhoneRequest {
+	copy := rec
+	copy.SessionID = ""
+	copy.ClientID = ""
+	sum := sha256.Sum256(rec.Op)
+	return PhoneRequest{ID: copy.ID, Status: copy.Status, Op: copy.Op, OpSHA256: hex.EncodeToString(sum[:]), CreatedAt: copy.CreatedAt}
+}
+
+func (a *API) PendingForPhone() []PhoneRequest {
+	a.reqsMu.Lock()
+	defer a.reqsMu.Unlock()
+	out := make([]PhoneRequest, 0)
+	for _, rec := range a.reqs {
+		if rec.Status != "PENDING_APPROVAL" {
+			continue
+		}
+		out = append(out, phoneRequestFromRecord(rec))
+	}
+	return out
+}
+
+func (a *API) RequestForPhone(requestID string) (PhoneRequest, bool) {
+	a.reqsMu.Lock()
+	defer a.reqsMu.Unlock()
+	rec, ok := a.reqs[requestID]
+	if !ok || rec.Status != "PENDING_APPROVAL" {
+		return PhoneRequest{}, false
+	}
+	return phoneRequestFromRecord(rec), true
+}
+
+func (a *API) DecideForPhone(requestID, decision, deviceID string) error {
+	claims := auth.Claims{SessionID: "phone", ClientID: deviceID}
+	return a.decideInternalWithSource(context.Background(), requestID, decision, claims, nil, "phone:"+deviceID)
+}
+
 func (a *API) DecideWithRuleForTUI(requestID string, decision string, rule rules.Rule) error {
 	a.reqsMu.Lock()
 	rec, ok := a.reqs[requestID]
@@ -1490,7 +1564,7 @@ func fileExecutionRecord(startedAt, finishedAt time.Time, res executor.Result) *
 }
 
 func (a *API) decideInternal(ctx context.Context, requestID string, decision string, c auth.Claims) error {
-	return a.decideInternalWithRules(ctx, requestID, decision, c, nil)
+	return a.decideInternalWithSource(ctx, requestID, decision, c, nil, "tui")
 }
 
 func (a *API) decideInternalWithRule(ctx context.Context, requestID string, decision string, c auth.Claims, overrideRule *rules.Rule) error {
@@ -1498,10 +1572,14 @@ func (a *API) decideInternalWithRule(ctx context.Context, requestID string, deci
 	if overrideRule != nil {
 		rs = []rules.Rule{*overrideRule}
 	}
-	return a.decideInternalWithRules(ctx, requestID, decision, c, rs)
+	return a.decideInternalWithSource(ctx, requestID, decision, c, rs, "tui")
 }
 
 func (a *API) decideInternalWithRules(ctx context.Context, requestID string, decision string, c auth.Claims, overrideRules []rules.Rule) error {
+	return a.decideInternalWithSource(ctx, requestID, decision, c, overrideRules, "tui")
+}
+
+func (a *API) decideInternalWithSource(ctx context.Context, requestID string, decision string, c auth.Claims, overrideRules []rules.Rule, decisionSource string) error {
 	decision = strings.TrimSpace(decision)
 	if decision == "" {
 		return errors.New("BAD_REQUEST")
@@ -1531,7 +1609,7 @@ func (a *API) decideInternalWithRules(ctx context.Context, requestID string, dec
 	now := decidedAt.Format(time.RFC3339Nano)
 	dec := &decisionRecord{
 		Decision:       decision,
-		DecisionSource: "tui",
+		DecisionSource: decisionSource,
 		DecidedAt:      now,
 	}
 
@@ -1546,7 +1624,7 @@ func (a *API) decideInternalWithRules(ctx context.Context, requestID string, dec
 			persistentRules = plan.Rules
 		}
 		if err := a.st.CommitPendingDecision(ctx, store.Decision{
-			RequestID: requestID, Decision: decision, DecisionSource: "tui",
+			RequestID: requestID, Decision: decision, DecisionSource: decisionSource,
 			DecidedAt: decidedAt, RuleID: ruleID,
 		}, persistentRules); err != nil {
 			a.reqsMu.Unlock()
@@ -1569,7 +1647,7 @@ func (a *API) decideInternalWithRules(ctx context.Context, requestID string, dec
 			ClientID:  c.ClientID,
 			Data: map[string]any{
 				"decision":        "DENY",
-				"decision_source": "tui",
+				"decision_source": decisionSource,
 				"status":          "DENIED",
 			},
 		})
@@ -1600,7 +1678,7 @@ func (a *API) decideInternalWithRules(ctx context.Context, requestID string, dec
 			ClientID:  c.ClientID,
 			Data: map[string]any{
 				"decision":        decision,
-				"decision_source": "tui",
+				"decision_source": decisionSource,
 				"status":          "APPROVED",
 			},
 		})

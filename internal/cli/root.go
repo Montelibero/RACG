@@ -64,6 +64,8 @@ func (r *Root) Run(args []string) int {
 		return NewServiceAdminCmd(r.stdout, r.stderr).Run(rest[1:])
 	case "service-agent":
 		return NewServiceAgentCmdWithInput(r.stdin, r.stdout, r.stderr).Run(rest[1:])
+	case "phone-service":
+		return NewPhoneServiceCmd(r.stdout, r.stderr).Run(rest[1:])
 	case "login":
 		return NewAuthCmd(r.stdout, r.stderr).RunLogin(rest[1:])
 	case "logout":
@@ -105,6 +107,8 @@ commands:
              administer trusted service devices, agents and grants
   service-agent
              submit service operations and receive signed results
+  phone-service
+             internal phone approval gateway daemon
   login      save client auth from a pairing code
   logout     remove saved client auth
   session    inspect saved/current session

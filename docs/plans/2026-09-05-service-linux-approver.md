@@ -162,6 +162,10 @@ Release is blocked unless all pass:
 1. Freeze the v0.4/v0.5 public client contract with golden tests using real
    old binaries.
 2. Add the local approval bridge inside the existing `racg serve` path.
+   Status: started. `racg serve --phone` now runs headless and exposes a local
+   Unix-socket bridge; `racg phone-service` is an internal daemon role in the
+   same binary. The bridge exposes only pending/detail/decision and verifies
+   phone decision signatures against the request digest.
 3. Add the internal `racg phone-service` role to the same binary.
 4. Add device registry, pairing QR, signed pending API and signed decision API.
 5. Reconnect Android to this phone-service API; retain biometric/PIN and request

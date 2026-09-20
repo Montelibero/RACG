@@ -16,9 +16,11 @@ import (
 )
 
 type ServeCmd struct {
-	stdout io.Writer
-	stderr io.Writer
-	runUI  func(context.Context, tui.ServeUIConfig) error
+	stdout      io.Writer
+	stderr      io.Writer
+	runUI       func(context.Context, tui.ServeUIConfig) error
+	phone       bool
+	phoneBridge string
 }
 
 func NewServeCmd(stdout, stderr io.Writer) *ServeCmd {
@@ -35,6 +37,8 @@ func (c *ServeCmd) Run(args []string) int {
 func (c *ServeCmd) run(parent context.Context, args []string) int {
 	cfg := config.Defaults()
 
+	phone := false
+	phoneBridge := "/run/racg/approval.sock"
 	fs := flag.NewFlagSet("racg serve", flag.ContinueOnError)
 	fs.SetOutput(c.stderr)
 	fs.Usage = func() {
@@ -53,6 +57,8 @@ func (c *ServeCmd) run(parent context.Context, args []string) int {
 	fs.StringVar(&cfg.ListenAddr, "listen-addr", cfg.ListenAddr, "listen address")
 	fs.IntVar(&cfg.Port, "port", cfg.Port, "listen port")
 	fs.Int64Var(&cfg.MaxTransferBytes, "max-transfer-bytes", 0, "deprecated; transfers are approval-gated and unlimited")
+	fs.BoolVar(&phone, "phone", false, "run headless compatibility server with phone approval bridge")
+	fs.StringVar(&phoneBridge, "phone-bridge", "/run/racg/approval.sock", "local phone approval bridge socket")
 
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -109,6 +115,14 @@ func (c *ServeCmd) run(parent context.Context, args []string) int {
 	}
 	fmt.Fprintf(c.stdout, "db_path=%s\n", cfg.DBPath)
 	fmt.Fprintf(c.stdout, "pairing_code=%s\n", s.PairingCode())
+	if phone {
+		fmt.Fprintf(c.stdout, "phone_mode=true\nphone_bridge=%s\n", phoneBridge)
+		if err := c.runPhoneBridge(ctx, s.API()); err != nil {
+			fmt.Fprintf(c.stderr, "phone bridge error: %v\n", err)
+			return 1
+		}
+		return 0
+	}
 	hostname, _ := os.Hostname()
 
 	// Built-in TUI (tview): pairing page + dashboard + jobs.
