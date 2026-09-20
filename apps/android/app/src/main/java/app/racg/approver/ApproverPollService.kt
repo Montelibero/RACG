@@ -91,7 +91,8 @@ class ApproverPollService : Service() {
                                     )
                                 }
                             }
-                        } catch (_: Exception) {
+                        } catch (e: Exception) {
+                            AppLog.log("poll ${setup.payload.serverId} failed: ${e.message}")
                             emptyList()
                         }
                     }

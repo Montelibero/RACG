@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -25,8 +27,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -46,6 +51,7 @@ private enum class Screen {
     Approvals,
     Servers,
     TransferQr,
+    Logs,
 }
 
 class MainActivity : FragmentActivity() {
@@ -154,12 +160,16 @@ private fun AppContent() {
                 ApproverPollService.stop(context)
                 status = "Background watching stopped"
             },
+            onOpenLogs = { screen = Screen.Logs },
         )
+
+        Screen.Logs -> DiagnosticsLogScreen(onBack = { screen = Screen.Home })
 
         Screen.ScanSetup -> BarcodeScannerView(
             onScanned = { raw ->
                 scope.launch {
                     try {
+                        AppLog.log("QR scanned (${raw.length} chars)")
                         val payload = SetupQrParser.parse(raw)
                         if (payload.transferToken != null && setups.any { it.payload.serverId == payload.serverId }) {
                             status = "That server is already configured"
@@ -168,6 +178,7 @@ private fun AppContent() {
                         }
                         val newSetup = withContext(Dispatchers.IO) {
                             val keys = DeviceKeyManager.createOrLoadPair()
+                            AppLog.log("device key pair ready")
                             StoredSetup(payload, keys.approval, keys.poll)
                         }
                         val activity = context as? FragmentActivity
@@ -248,16 +259,19 @@ private fun AppContent() {
                                         )
                                     }
                                     setups = store.save(completed)
+                                    AppLog.log("setup saved for ${payload.serverId}")
                                     status = "Setup saved for ${payload.serverId}"
                                     screen = Screen.Home
-                                } catch (_: Exception) {
-                                    status = "Setup was not completed"
+                                } catch (e: Exception) {
+                                    AppLog.error(e, "setup network step")
+                                    status = "Setup failed: ${e.message}"
                                     screen = Screen.Home
                                 }
                             }
                         }
-                    } catch (_: Exception) {
-                        status = "Setup was not completed"
+                    } catch (e: Exception) {
+                        AppLog.error(e, "setup scan step")
+                        status = "Setup failed: ${e.message}"
                         screen = Screen.Home
                     }
                 }
@@ -310,6 +324,7 @@ private fun HomeScreen(
     onScanSetup: () -> Unit,
     onStartWatching: () -> Unit,
     onStopWatching: () -> Unit,
+    onOpenLogs: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -318,6 +333,10 @@ private fun HomeScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text("RACG Approver", style = MaterialTheme.typography.headlineMedium)
+        Text(
+            "v${BuildConfig.VERSION_NAME} build ${BuildConfig.SOURCE_REVISION.take(12)}",
+            style = MaterialTheme.typography.bodySmall,
+        )
         Text(
             when {
                 setups.isNotEmpty() -> "${setups.size} server(s) configured"
@@ -350,10 +369,48 @@ private fun HomeScreen(
             OutlinedButton(onClick = onStartWatching) { Text("Start watching") }
             OutlinedButton(onClick = onStopWatching) { Text("Stop watching") }
         }
+        OutlinedButton(onClick = onOpenLogs) { Text("Diagnostics log") }
         Text(
             "Approvals use the signed broker protocol. Release packaging is not ready yet.",
             style = MaterialTheme.typography.bodyMedium,
             textAlign = TextAlign.Start,
         )
+    }
+}
+
+@Composable
+private fun DiagnosticsLogScreen(onBack: () -> Unit) {
+    var showAll by remember { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
+    val text = remember(showAll) { AppLog.text(if (showAll) null else 1.0) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedButton(onClick = onBack) { Text("Back") }
+            OutlinedButton(onClick = { showAll = !showAll }) {
+                Text(if (showAll) "Last hour" else "Show all")
+            }
+            OutlinedButton(onClick = { clipboard.setText(AnnotatedString(text)) }) {
+                Text("Copy")
+            }
+        }
+        Text(
+            if (showAll) "Full in-memory buffer (newest last)" else "Last hour (newest last)",
+            style = MaterialTheme.typography.titleSmall,
+        )
+        LazyColumn(modifier = Modifier.fillMaxSize()) {
+            items(text.lines()) { line ->
+                Text(
+                    line,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
+        }
     }
 }

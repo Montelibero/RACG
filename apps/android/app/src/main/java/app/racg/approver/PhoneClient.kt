@@ -124,7 +124,14 @@ class PhoneClient(private val endpoint: String, private val timeoutMillis: Int =
         }
 
     private fun read(connection: HttpURLConnection): JSONObject {
-        val stream = if (connection.responseCode in 200..299) {
+        val status = try {
+            connection.responseCode
+        } catch (e: Exception) {
+            AppLog.error(e, "${connection.requestMethod} ${connection.url.path}")
+            throw e
+        }
+        AppLog.log("${connection.requestMethod} ${connection.url.path} -> $status")
+        val stream = if (status in 200..299) {
             connection.inputStream
         } else {
             connection.errorStream
@@ -132,8 +139,9 @@ class PhoneClient(private val endpoint: String, private val timeoutMillis: Int =
         val raw = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
         connection.disconnect()
 
-        if (connection.responseCode !in 200..299) {
-            throw IllegalArgumentException("Approver API returned ${connection.responseCode}: $raw")
+        if (status !in 200..299) {
+            AppLog.log("${connection.url.path} body: $raw")
+            throw IllegalArgumentException("Approver API returned $status: $raw")
         }
         return JSONObject(raw)
     }
