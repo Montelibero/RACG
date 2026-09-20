@@ -68,6 +68,10 @@ func (r *Root) Run(args []string) int {
 		return NewRemoteApproverCmd(r.stdout, r.stderr).Run(rest[1:])
 	case "approver-devices":
 		return NewApproverDevicesCmd(r.stdout, r.stderr, config.Defaults().DBPath).Run(rest[1:])
+	case "approver-setup":
+		return NewApproverSetupCmd(r.stdout, r.stderr).Run(rest[1:])
+	case "pairing-code":
+		return NewPairingCodeCmd(r.stdout, r.stderr).Run(rest[1:])
 	case "login":
 		return NewAuthCmd(r.stdout, r.stderr).RunLogin(rest[1:])
 	case "logout":
@@ -105,6 +109,10 @@ commands:
              unprivileged public facade; the only public port, proxies to the pipeline socket
   approver-devices
              list, enable, or revoke enrolled remote approver devices
+  approver-setup
+             mint a one-time approver enrollment QR and print it to this terminal
+  pairing-code
+             mint a fresh agent pairing code without restarting the server
   service-authority
              start the privileged service authority/executor
   service-broker
@@ -141,6 +149,8 @@ quick start:
   sudo racg serve --headless --socket /run/racg/pipeline.sock
   racg remote-approver --listen 0.0.0.0:8777 --socket /run/racg/pipeline.sock
   racg serve --approver-setup-out /tmp/approver-qr.png --public-url http://server:8777
+  racg approver-setup --public-url http://server:8777
+  racg pairing-code
   racg login --host server --pairing-code ABC123
   export RACG_CLIENT_NAME=server
 

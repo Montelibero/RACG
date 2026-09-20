@@ -58,3 +58,9 @@ fi
 
 echo "Installed racg to ${PREFIX}/racg"
 "${PREFIX}/racg" --version
+cat <<'HINT'
+
+Headless server deployment (Ubuntu):
+  sudo bash scripts/headless-setup.sh
+  or: curl -fsSL https://raw.githubusercontent.com/Montelibero/RACG/main/scripts/headless-setup.sh | sudo bash
+HINT

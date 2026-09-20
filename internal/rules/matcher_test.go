@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"time"
 	"encoding/json"
 	"testing"
 )
@@ -239,4 +240,21 @@ func mustJSON(t *testing.T, v any) json.RawMessage {
 		t.Fatalf("json: %v", err)
 	}
 	return b
+}
+
+func TestExpiredSessionRuleDoesNotMatch(t *testing.T) {
+	e := NewEngine()
+	past := time.Now().Add(-time.Minute)
+	future := time.Now().Add(time.Hour)
+	e.AddSession("sess1", Rule{ID: "expired", OpType: "fs.read", ExpiresAt: &past, Path: &PathRule{Prefix: "/home/"}})
+	e.AddSession("sess1", Rule{ID: "valid", OpType: "fs.read", ExpiresAt: &future, Path: &PathRule{Prefix: "/home/"}})
+
+	op := Op{Type: "fs.read", Payload: mustJSON(t, map[string]any{"path": "/home/x"})}
+	m, ok := e.Match("sess1", op)
+	if !ok {
+		t.Fatalf("expected live rule to match")
+	}
+	if m.RuleID != "valid" {
+		t.Fatalf("matched expired rule %q", m.RuleID)
+	}
 }

@@ -8,6 +8,7 @@ object CompatProtocol {
     private const val PAIRING_DOMAIN = "racg/approver/pairing/v1"
     private const val POLL_DOMAIN = "racg/approver/poll/v1"
     private const val DECISION_DOMAIN = "racg/approver/decision/v1"
+    private const val ADMIN_DOMAIN = "racg/approver/admin/v1"
 
     fun sha256Hex(bytes: ByteArray): String =
         MessageDigest.getInstance("SHA-256")
@@ -18,9 +19,10 @@ object CompatProtocol {
         serverId: String,
         deviceId: String,
         publicKeySha256Hex: String,
+        pollKeySha256Hex: String,
         challenge: String,
         tokenSha256Hex: String,
-    ): ByteArray = message(PAIRING_DOMAIN, serverId, deviceId, publicKeySha256Hex, challenge, tokenSha256Hex)
+    ): ByteArray = message(PAIRING_DOMAIN, serverId, deviceId, publicKeySha256Hex, pollKeySha256Hex, challenge, tokenSha256Hex)
 
     fun pollMessage(
         serverId: String,
@@ -37,6 +39,14 @@ object CompatProtocol {
         decision: String,
         challenge: String,
     ): ByteArray = message(DECISION_DOMAIN, serverId, deviceId, requestId, operationSha256, decision, challenge)
+
+    fun adminMessage(
+        serverId: String,
+        deviceId: String,
+        action: String,
+        targetId: String,
+        challenge: String,
+    ): ByteArray = message(ADMIN_DOMAIN, serverId, deviceId, action, targetId, challenge)
 
     private fun message(vararg parts: String): ByteArray =
         parts.joinToString("\u0000").toByteArray(Charsets.UTF_8)

@@ -17,9 +17,13 @@ passphrase-encrypted Ed25519 key. That key may submit operations and poll
 results; it cannot approve them. Verify the exported server profile and use the
 explicit relay `--connect` URI.
 
-For mobile approver enrollment, administrators can use
-`racg service-admin create-setup --help` to create a one-time QR. The phone
-creates its own approver key; the QR never contains that private key.
+For mobile approver enrollment, administrators run
+`racg approver-setup --public-url http://server:8777` on the server over SSH:
+it mints a single-use enrollment token (10 minute TTL, burns after the first
+successful pairing) and renders the setup QR directly in the terminal. Run it
+once per phone; phones work in parallel. The phone creates its own
+ECDSA P-256 keys; the QR never contains that private key. `racg pairing-code`
+mints a fresh agent pairing code without a server restart.
 
 ## Core Workflow
 

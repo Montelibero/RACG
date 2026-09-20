@@ -39,6 +39,9 @@ func TestDefaults(t *testing.T) {
 	if cfg.PairingCodeTTLSeconds == 0 {
 		t.Fatalf("PairingCodeTTLSeconds=%d", cfg.PairingCodeTTLSeconds)
 	}
+	if cfg.SessionTTLHours != 8 {
+		t.Fatalf("SessionTTLHours=%d, want 8", cfg.SessionTTLHours)
+	}
 }
 
 func TestProfileDBPath(t *testing.T) {
@@ -60,6 +63,7 @@ db_path = "racg-test.db"
 max_concurrency = 7
 max_transfer_bytes = 123456
 lock_first_client_addr = true
+session_ttl_hours = 0
 `)
 
 	cfg := Defaults()
@@ -84,5 +88,8 @@ lock_first_client_addr = true
 	}
 	if !cfg.LockFirstClientAddr {
 		t.Fatalf("LockFirstClientAddr=false")
+	}
+	if cfg.SessionTTLHours != 0 {
+		t.Fatalf("SessionTTLHours=%d, want 0 (explicit no-expiry)", cfg.SessionTTLHours)
 	}
 }

@@ -53,19 +53,40 @@ public listener. Existing v0.4.x/v0.5.x clients keep working through the
 facade unchanged.
 
 ```bash
+# one-command deployment on Ubuntu (installs and enables both systemd units):
+sudo bash scripts/headless-setup.sh
+
+# manual equivalent:
 sudo racg serve --headless --socket /run/racg/pipeline.sock
 racg remote-approver --listen 0.0.0.0:8777 --socket /run/racg/pipeline.sock
 ```
 
-Remote approver devices (phone, desktop) enroll once through a one-time setup
-QR and submit signed decisions; the server verifies every device signature and
-binds it to the exact approved operation. Enrollment and revocation:
+Remote approver devices (phone, desktop) enroll once through a single-use
+enrollment QR (10 minute TTL, burns after the first successful pairing) and
+submit signed decisions; the server verifies every device signature and binds
+it to the exact approved operation. Enrollment and revocation:
 
 ```bash
-racg serve --approver-setup-out /tmp/approver-qr.png --public-url http://server:8777
+racg approver-setup          # interactive: picks the public address with you (tailscale first)
+racg approver-setup --public-url http://server:8777   # explicit address for scripts
+racg serve --approver-setup-out /tmp/approver-qr.png --public-url http://server:8777  # manual test mode
 racg approver-devices list
 racg approver-devices revoke <device_id>
 ```
+
+Each `racg approver-setup` run pairs exactly one phone; run it again for every
+additional phone — devices work in parallel. Pending-list reads are signed with
+a dedicated non-biometric poll key (the watcher and the approvals screen never
+ask for biometrics); decisions use the biometry-bound approval key with a
+KeePass-style window: one unlock per five minutes. Decisions support
+`ALLOW_ONCE`, `ALLOW_SESSION`, `ALLOW_ALWAYS` and `DENY`; timed grants take an
+editable scope (one line per script segment, like the TUI) and 1h/24h/session
+durations — the rule dies with the agent session. The phone also gets a
+decision history view (phone, TUI and auto-rule decisions alike), an instant
+wake-up channel (`/v1/approver/events` WebSocket) with a 60 second polling
+fallback, and can manage the server: extend/revoke agent sessions, revoke
+devices, and issue fresh pairing codes (`racg pairing-code` mints one
+on the server over SSH).
 
 The facade validates traffic shape only and holds no secrets; the privileged
 pipeline verifies every session token and approver signature itself. See

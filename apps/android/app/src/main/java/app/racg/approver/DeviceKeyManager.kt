@@ -40,7 +40,11 @@ object DeviceKeyManager {
     private const val APPROVAL_KEY_ALIAS = "racg_approver_p256_v1"
     private const val POLL_KEY_ALIAS = "racg_approver_poll_p256_v1"
     private const val ANDROID_KEY_STORE = "AndroidKeyStore"
-    private const val AUTH_WINDOW_SECONDS = 30
+
+    // KeePass-style window (item 11): one biometric confirmation unlocks
+    // decision signing for five minutes; reads never need it (poll key).
+    // NOTE: changing this only affects newly generated approval keys.
+    private const val AUTH_WINDOW_SECONDS = 300
 
     /** Creates, or reuses, a non-exportable ECDSA P-256 user-auth key. */
     data class KeyPair(
@@ -58,6 +62,16 @@ object DeviceKeyManager {
 
     fun pollSigner(publicKey: ByteArray): AndroidKeystoreDeviceSigner =
         signer(POLL_KEY_ALIAS, publicKey)
+
+    /** Deletes both device keys. Only safe before a brand-new enrollment
+     * (no server has registered these public keys yet); regenerating after
+     * deleting the last configured server lets settings changes like the
+     * auth window take effect. */
+    fun deleteAll() {
+        val keyStore = KeyStore.getInstance(ANDROID_KEY_STORE).apply { load(null) }
+        keyStore.deleteEntry(APPROVAL_KEY_ALIAS)
+        keyStore.deleteEntry(POLL_KEY_ALIAS)
+    }
 
     private fun createOrLoad(alias: String, authRequired: Boolean): DeviceKeyMaterial {
         val keyStore = KeyStore.getInstance(ANDROID_KEY_STORE).apply { load(null) }

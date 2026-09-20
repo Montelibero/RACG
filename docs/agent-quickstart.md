@@ -39,12 +39,18 @@ responses against the pinned server key, wait for terminal results, and save
 verified `fs.download` artifacts. The desktop approver signs decisions; the
 agent key cannot approve anything.
 
-For the experimental Android approver, the server administrator creates a
-one-time setup QR with `racg service-admin create-setup --help`. The QR pins the
-authority key and broker endpoint, but does not carry a private key. The phone
-generates its own approver key, enrolls its public key with the one-time token,
-and verifies the authority receipt before saving the setup. Treat the QR file as
-secret until scanned.
+For the Android approver, the server administrator runs
+`racg approver-setup --public-url http://server:8777` over SSH: the single-use
+enrollment QR (10 minute TTL) renders directly in the terminal. The phone
+generates its own ECDSA P-256 keys (a biometry-bound approval key plus a
+non-biometric poll key), enrolls both through the signed `/v1/approver`
+pairing API, and treats the QR as secret until scanned. Pending-list reads are
+poll-key signed and never prompt; decisions require one biometric unlock per
+five minutes and support ALLOW_ONCE / ALLOW_SESSION / ALLOW_ALWAYS / DENY.
+The approvals screen and a background watcher (auto-started, with an instant
+WebSocket wake-up channel) surface new requests immediately; the admin screen
+extends or revokes agent sessions, revokes devices, and issues pairing codes
+without touching the server shell.
 
 Use the skill when an agent should operate through RACG instead of direct shell execution. It covers login, command submission, live output, final logs, cancel/kill, safe diagnostics, and auto-approve rule boundaries.
 

@@ -21,15 +21,20 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.onTimeout
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withContext
 
 class ApproverPollService : Service() {
     private val store by lazy { DataStoreApproverStore(this) }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val running = AtomicBoolean(false)
-    private val visibleRequests = mutableSetOf<String>()
+    private val visibleRequests = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val wakeups = kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
+    private val eventWatchers = mutableMapOf<String, kotlinx.coroutines.Job>()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -52,6 +57,8 @@ class ApproverPollService : Service() {
 
     override fun onDestroy() {
         running.set(false)
+        eventWatchers.values.forEach { it.cancel() }
+        eventWatchers.clear()
         scope.cancel()
         super.onDestroy()
     }
@@ -63,12 +70,58 @@ class ApproverPollService : Service() {
             } catch (_: Exception) {
                 updateForeground("Approval watching paused. Retrying.")
             }
-            delay(60_000)
+            // Instant wakeups arrive from the WebSocket event watchers (9.3);
+            // the 60-second sweep stays as the fallback.
+            select<Unit> {
+                wakeups.onReceive { }
+                onTimeout(60_000) { }
+            }
+        }
+    }
+
+    /** Keeps one signed WebSocket per cleartext/facade server alive; each
+     * event just pulls the trigger for an immediate poll. Failures fall back
+     * to the 60s sweep silently. */
+    private fun syncEventWatchers(setups: List<StoredSetup>) {
+        val wanted = setups.filter { usesCompatibilityApi(it.payload.endpoint) }
+            .associateBy { it.payload.serverId }
+        eventWatchers.keys.filterNot { wanted.containsKey(it) }.forEach { id ->
+            eventWatchers.remove(id)?.cancel()
+        }
+        wanted.forEach { (serverId, setup) ->
+            if (eventWatchers.containsKey(serverId)) return@forEach
+            eventWatchers[serverId] = scope.launch {
+                var backoffSeconds = 5L
+                while (running.get() && scope.isActive) {
+                    try {
+                        ApproverSocket(
+                            endpoint = setup.payload.endpoint,
+                            serverId = serverId,
+                            deviceId = setup.payload.approverId,
+                            pollKeyPublic = setup.pollKeyMaterial.publicKey,
+                        ).run(object : ApproverSocket.Listener {
+                            override fun onWakeup() {
+                                wakeups.trySend(Unit)
+                            }
+
+                            override fun onClosed() {
+                                wakeups.trySend(Unit)
+                            }
+                        })
+                        backoffSeconds = 5L
+                    } catch (e: Exception) {
+                        AppLog.log("events $serverId: ${e.message ?: e.javaClass.simpleName}")
+                    }
+                    delay(backoffSeconds * 1000)
+                    if (backoffSeconds < 60L) backoffSeconds = (backoffSeconds * 2).coerceAtMost(60L)
+                }
+            }
         }
     }
 
     private suspend fun pollOnce() {
         val setups = store.loadAll()
+        syncEventWatchers(setups)
         val requests = withContext(Dispatchers.IO) {
             coroutineScope {
                 setups.map { setup ->
@@ -101,6 +154,7 @@ class ApproverPollService : Service() {
         }
 
         notify(requests)
+        pendingCount.value = requests.size
         val status = if (requests.isEmpty()) "Connected. No pending approvals." else "${requests.size} approval(s) waiting."
         updateForeground(status)
     }
@@ -194,11 +248,15 @@ class ApproverPollService : Service() {
         private const val FOREGROUND_ID = 1
         private const val SUMMARY_ID = 2
 
+        /** Live pending-request count for the home screen indicator (item 9.2). */
+        val pendingCount = MutableStateFlow(0)
+
         fun start(context: Context) {
             context.startForegroundService(Intent(context, ApproverPollService::class.java))
         }
 
         fun stop(context: Context) {
+            pendingCount.value = 0
             context.startService(Intent(context, ApproverPollService::class.java).setAction(ACTION_STOP))
         }
     }

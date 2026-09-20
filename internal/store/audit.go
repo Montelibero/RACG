@@ -221,6 +221,58 @@ func insertDecision(ctx context.Context, q sqlExecer, d Decision) error {
 	return err
 }
 
+// DecisionHistoryRow is one recent decision joined with its request.
+type DecisionHistoryRow struct {
+	RequestID      string
+	Decision       string
+	DecisionSource string
+	DecidedAt      time.Time
+	RuleID         string
+	ClientID       string
+	Status         string
+	OpJSON         string
+}
+
+// ListRecentDecisions returns the latest decisions (any source) joined with
+// their requests: the phone history screen (item 16) mirrors the TUI history.
+func (s *Store) ListRecentDecisions(ctx context.Context, limit int) ([]DecisionHistoryRow, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT d.request_id, d.decision, d.decision_source, d.decided_at,
+		       COALESCE(d.rule_id, ''), COALESCE(r.client_id, ''),
+		       COALESCE(r.status, ''), COALESCE(r.op_json, '')
+		  FROM decisions d
+		  LEFT JOIN requests r ON r.request_id = d.request_id
+		 ORDER BY d.decided_at DESC
+		 LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []DecisionHistoryRow
+	for rows.Next() {
+		var row DecisionHistoryRow
+		var decided string
+		var ruleID, clientID, status, opJSON sql.NullString
+		if err := rows.Scan(&row.RequestID, &row.Decision, &row.DecisionSource, &decided, &ruleID, &clientID, &status, &opJSON); err != nil {
+			return nil, err
+		}
+		row.DecidedAt, err = time.Parse(time.RFC3339Nano, decided)
+		if err != nil {
+			return nil, fmt.Errorf("parse decision decided_at: %w", err)
+		}
+		row.RuleID = ruleID.String
+		row.ClientID = clientID.String
+		row.Status = status.String
+		row.OpJSON = opJSON.String
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) GetDecision(ctx context.Context, requestID string) (Decision, error) {
 	var d Decision
 	var decided string

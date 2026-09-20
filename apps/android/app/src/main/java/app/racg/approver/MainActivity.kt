@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.content.Context
 import android.content.pm.PackageManager
 import androidx.activity.compose.setContent
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -21,6 +22,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,14 +51,20 @@ private enum class Screen {
     Home,
     ScanSetup,
     Approvals,
+    RequestDetail,
+    Raw,
+    History,
     Servers,
     TransferQr,
     Logs,
+    Admin,
 }
 
 class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppLog.init(filesDir)
+        AppLog.installCrashHandler()
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
@@ -77,6 +85,8 @@ private fun AppContent() {
     var status by remember { mutableStateOf<String?>(null) }
     var transferQr by remember { mutableStateOf<String?>(null) }
     var transferServerId by remember { mutableStateOf<String?>(null) }
+    var selectedRequest by remember { mutableStateOf<PendingRequestItem?>(null) }
+    val pendingCount by ApproverPollService.pendingCount.collectAsState()
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
@@ -98,6 +108,22 @@ private fun AppContent() {
 
     LaunchedEffect(store) {
         setups = store.loadAll()
+    }
+
+    // Auto-start the watcher (item 9.1): with at least one configured server
+    // the foreground service comes up on every app launch without a button.
+    LaunchedEffect(setups) {
+        if (setups.isNotEmpty()) startWatching()
+    }
+
+    // System back navigates in-app (item 10): every screen pops to its
+    // parent instead of finishing the activity.
+    BackHandler(enabled = screen != Screen.Home) {
+        screen = when (screen) {
+            Screen.Raw -> Screen.RequestDetail
+            Screen.RequestDetail -> Screen.Approvals
+            else -> Screen.Home
+        }
     }
 
     fun transferServer(target: StoredSetup) {
@@ -152,6 +178,7 @@ private fun AppContent() {
         Screen.Home -> HomeScreen(
             setups = setups,
             status = status,
+            pendingCount = pendingCount,
             onShowApprovals = { screen = Screen.Approvals },
             onManageServers = { screen = Screen.Servers },
             onScanSetup = { screen = Screen.ScanSetup },
@@ -161,9 +188,17 @@ private fun AppContent() {
                 status = "Background watching stopped"
             },
             onOpenLogs = { screen = Screen.Logs },
+            onOpenAdmin = { screen = Screen.Admin },
         )
 
         Screen.Logs -> DiagnosticsLogScreen(onBack = { screen = Screen.Home })
+
+        Screen.Admin -> if (setups.isNotEmpty()) {
+            AdminScreen(
+                setups = setups,
+                onBack = { screen = Screen.Home },
+            )
+        }
 
         Screen.ScanSetup -> BarcodeScannerView(
             onScanned = { raw ->
@@ -177,6 +212,13 @@ private fun AppContent() {
                             return@launch
                         }
                         val newSetup = withContext(Dispatchers.IO) {
+                            // Fresh install: regenerate keys so current key
+                            // settings (auth window) apply. Existing servers
+                            // share these keys, so only safe when none left.
+                            if (setups.isEmpty()) {
+                                DeviceKeyManager.deleteAll()
+                                AppLog.log("device keys regenerated for fresh enrollment")
+                            }
                             val keys = DeviceKeyManager.createOrLoadPair()
                             AppLog.log("device key pair ready")
                             StoredSetup(payload, keys.approval, keys.poll)
@@ -199,10 +241,13 @@ private fun AppContent() {
                                             val tokenSha256Hex = CompatProtocol.sha256Hex(token)
                                             val publicKeySha256Hex =
                                                 CompatProtocol.sha256Hex(newSetup.approvalKeyMaterial.publicKey)
+                                            val pollKeySha256Hex =
+                                                CompatProtocol.sha256Hex(newSetup.pollKeyMaterial.publicKey)
                                             val message = CompatProtocol.pairingMessage(
                                                 serverId = payload.serverId,
                                                 deviceId = payload.approverId,
                                                 publicKeySha256Hex = publicKeySha256Hex,
+                                                pollKeySha256Hex = pollKeySha256Hex,
                                                 challenge = challenge,
                                                 tokenSha256Hex = tokenSha256Hex,
                                             )
@@ -213,6 +258,7 @@ private fun AppContent() {
                                             client.pair(
                                                 deviceId = payload.approverId,
                                                 publicKey = newSetup.approvalKeyMaterial.publicKey,
+                                                pollPublicKey = newSetup.pollKeyMaterial.publicKey,
                                                 tokenSha256Hex = tokenSha256Hex,
                                                 challenge = challenge,
                                                 signature = signature,
@@ -283,6 +329,33 @@ private fun AppContent() {
             ApprovalsScreen(
                 setups = setups,
                 onBack = { screen = Screen.Home },
+                onOpen = { request ->
+                    selectedRequest = request
+                    screen = Screen.RequestDetail
+                },
+                onOpenHistory = { screen = Screen.History },
+            )
+        }
+
+        Screen.RequestDetail -> selectedRequest?.let { request ->
+            RequestDetailsScreen(
+                request = request,
+                onBack = { screen = Screen.Approvals },
+                onShowRaw = { screen = Screen.Raw },
+            )
+        } ?: run { screen = Screen.Approvals }
+
+        Screen.Raw -> selectedRequest?.let { request ->
+            RawRequestScreen(
+                request = request,
+                onBack = { screen = Screen.RequestDetail },
+            )
+        } ?: run { screen = Screen.Approvals }
+
+        Screen.History -> if (setups.isNotEmpty()) {
+            HistoryScreen(
+                setups = setups,
+                onBack = { screen = Screen.Approvals },
             )
         }
 
@@ -319,20 +392,16 @@ private fun AppContent() {
 private fun HomeScreen(
     setups: List<StoredSetup>,
     status: String?,
+    pendingCount: Int,
     onShowApprovals: () -> Unit,
     onManageServers: () -> Unit,
     onScanSetup: () -> Unit,
     onStartWatching: () -> Unit,
     onStopWatching: () -> Unit,
     onOpenLogs: () -> Unit,
+    onOpenAdmin: () -> Unit,
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Text("RACG Approver", style = MaterialTheme.typography.headlineMedium)
+    AppFrame(title = "RACG Approver", onBack = null) {
         Text(
             "v${BuildConfig.VERSION_NAME} build ${BuildConfig.SOURCE_REVISION.take(12)}",
             style = MaterialTheme.typography.bodySmall,
@@ -347,33 +416,29 @@ private fun HomeScreen(
         status?.let {
             Text(it, style = MaterialTheme.typography.bodyMedium)
         }
-        Button(
-            onClick = onShowApprovals,
-            enabled = setups.isNotEmpty(),
-        ) {
-            Text("Show approvals")
+        if (setups.isNotEmpty()) {
+            if (pendingCount > 0) {
+                AppButton(
+                    text = "$pendingCount approval(s) waiting — review now",
+                    onClick = onShowApprovals,
+                )
+            } else {
+                AppButton(text = "Show approvals", onClick = onShowApprovals)
+            }
+        } else {
+            AppButton(text = "Show approvals", onClick = onShowApprovals, enabled = false)
         }
-        OutlinedButton(
-            onClick = onManageServers,
-            enabled = setups.isNotEmpty(),
-        ) {
-            Text("Manage servers")
+        AppButton(text = "Manage servers", onClick = onManageServers, outlined = true, enabled = setups.isNotEmpty())
+        AppButton(text = "Scan setup QR", onClick = onScanSetup, outlined = true)
+        AppButton(text = "Start watching", onClick = onStartWatching, outlined = true)
+        AppButton(text = "Stop watching", onClick = onStopWatching, outlined = true)
+        AppButton(text = "Diagnostics log", onClick = onOpenLogs, outlined = true)
+        if (setups.isNotEmpty()) {
+            AppButton(text = "Manage sessions & devices", onClick = onOpenAdmin, outlined = true)
         }
-        OutlinedButton(
-            onClick = onScanSetup,
-            enabled = true,
-        ) {
-            Text("Scan setup QR")
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(onClick = onStartWatching) { Text("Start watching") }
-            OutlinedButton(onClick = onStopWatching) { Text("Stop watching") }
-        }
-        OutlinedButton(onClick = onOpenLogs) { Text("Diagnostics log") }
         Text(
-            "Approvals use the signed broker protocol. Release packaging is not ready yet.",
-            style = MaterialTheme.typography.bodyMedium,
-            textAlign = TextAlign.Start,
+            "Reads (pending list) are signed with the device poll key and never ask for biometrics. Decisions require one biometric unlock per five minutes.",
+            style = MaterialTheme.typography.bodySmall,
         )
     }
 }
@@ -384,14 +449,8 @@ private fun DiagnosticsLogScreen(onBack: () -> Unit) {
     val clipboard = LocalClipboardManager.current
     val text = remember(showAll) { AppLog.text(if (showAll) null else 1.0) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
+    AppFrame(title = "Diagnostics log", onBack = onBack) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(onClick = onBack) { Text("Back") }
             OutlinedButton(onClick = { showAll = !showAll }) {
                 Text(if (showAll) "Last hour" else "Show all")
             }
@@ -400,7 +459,7 @@ private fun DiagnosticsLogScreen(onBack: () -> Unit) {
             }
         }
         Text(
-            if (showAll) "Full in-memory buffer (newest last)" else "Last hour (newest last)",
+            if (showAll) "Full buffer incl. persisted history (newest last)" else "Last hour (newest last)",
             style = MaterialTheme.typography.titleSmall,
         )
         LazyColumn(modifier = Modifier.fillMaxSize()) {

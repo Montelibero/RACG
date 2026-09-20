@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Op struct {
@@ -15,8 +16,29 @@ type Rule struct {
 	ID     string
 	OpType string
 
+	// ExpiresAt, when set, limits a session-scoped rule's lifetime: phone
+	// grants like "allow for one hour" (item 13) die with the TTL even if
+	// the agent session itself is extended for a year.
+	ExpiresAt *time.Time
+
 	Cmd  *CmdRule
 	Path *PathRule
+}
+
+// expired reports whether the rule's TTL has passed.
+func (r Rule) expired(now time.Time) bool {
+	return r.ExpiresAt != nil && now.After(*r.ExpiresAt)
+}
+
+// live filters out rules whose TTL has passed.
+func live(rs []Rule, now time.Time) []Rule {
+	out := rs[:0:0]
+	for _, r := range rs {
+		if !r.expired(now) {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 type CmdRule struct {
@@ -109,8 +131,9 @@ func (e *Engine) SessionRulesSnapshot() map[string][]Rule {
 
 func (e *Engine) Match(sessionID string, op Op) (Match, bool) {
 	e.mu.Lock()
-	sess := append([]Rule(nil), e.sessionRules[sessionID]...)
-	always := append([]Rule(nil), e.always...)
+	now := time.Now()
+	sess := live(append([]Rule(nil), e.sessionRules[sessionID]...), now)
+	always := live(append([]Rule(nil), e.always...), now)
 	e.mu.Unlock()
 
 	if op.Type == "cmd.run" {
@@ -140,8 +163,9 @@ func (e *Engine) Match(sessionID string, op Op) (Match, bool) {
 
 func (e *Engine) Explain(sessionID string, op Op) Explanation {
 	e.mu.Lock()
-	sess := append([]Rule(nil), e.sessionRules[sessionID]...)
-	always := append([]Rule(nil), e.always...)
+	now := time.Now()
+	sess := live(append([]Rule(nil), e.sessionRules[sessionID]...), now)
+	always := live(append([]Rule(nil), e.always...), now)
 	e.mu.Unlock()
 
 	if op.Type == "cmd.run" {

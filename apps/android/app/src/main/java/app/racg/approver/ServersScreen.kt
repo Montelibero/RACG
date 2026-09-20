@@ -33,24 +33,12 @@ fun ServersScreen(
 ) {
     var pendingForget by remember { mutableStateOf<StoredSetup?>(null) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            OutlinedButton(onClick = onBack) { Text("Back") }
-            OutlinedButton(onClick = onAddServer) { Text("Add server") }
-        }
-        Text("My servers", style = MaterialTheme.typography.headlineMedium)
+    AppFrame(title = "My servers", onBack = onBack) {
         Text(
             "These profiles stay on this phone. Removing one does not revoke access on the server.",
             style = MaterialTheme.typography.bodyMedium,
         )
+        AppButton(text = "Add server", onClick = onAddServer, outlined = true)
 
         LazyColumn(
             modifier = Modifier.weight(1f),
@@ -58,7 +46,7 @@ fun ServersScreen(
         ) {
             items(setups, key = { it.payload.serverId }) { setup ->
                 Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
                             setup.payload.serverId,
                             style = MaterialTheme.typography.titleMedium,
@@ -68,12 +56,8 @@ fun ServersScreen(
                             "Profile stored on this phone",
                             style = MaterialTheme.typography.bodySmall,
                         )
-                        OutlinedButton(onClick = { pendingForget = setup }) {
-                            Text("Remove from phone")
-                        }
-                        OutlinedButton(onClick = { onTransfer(setup) }) {
-                            Text("Transfer to new phone")
-                        }
+                        AppButton(text = "Remove from phone", onClick = { pendingForget = setup }, outlined = true)
+                        AppButton(text = "Transfer to new phone", onClick = { onTransfer(setup) }, outlined = true)
                     }
                 }
             }

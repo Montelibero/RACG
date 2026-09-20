@@ -22,6 +22,10 @@ type Config struct {
 	MaxConcurrency        int
 	PairingCodeTTLSeconds int
 
+	// SessionTTLHours is the lifetime of session auth tokens in hours.
+	// 0 disables expiry: tokens stay valid until revoked.
+	SessionTTLHours int
+
 	// ServerID is the stable server identity bound into approver signing
 	// messages and setup QR payloads. Changing it invalidates enrolled
 	// approver devices; they must re-pair.
@@ -42,6 +46,7 @@ func Defaults() Config {
 		MaxTransferBytes:        0,
 		MaxConcurrency:          3,
 		PairingCodeTTLSeconds:   180,
+		SessionTTLHours:         8,
 		ServerID:                defaultServerID(),
 		LockFirstClientAddr:     false,
 		AllowAlwaysForDangerous: false,
@@ -182,6 +187,12 @@ func ApplyTOMLSimple(cfg *Config, r io.Reader) error {
 				return fmt.Errorf("line %d: kill_grace_sec: %w", lineNo, err)
 			}
 			cfg.KillGraceSec = n
+		case "session_ttl_hours":
+			n, err := strconv.Atoi(val)
+			if err != nil {
+				return fmt.Errorf("line %d: session_ttl_hours: %w", lineNo, err)
+			}
+			cfg.SessionTTLHours = n
 		default:
 			// Ignore unknown keys in MVP.
 		}

@@ -47,7 +47,17 @@ func TestOpenAPIDocumentCoversCoreEndpoints(t *testing.T) {
 		"/v1/approver/pairing",
 		"/v1/approver/requests",
 		"/v1/approver/requests/{request_id}",
+		"/v1/approver/requests/{request_id}/scope",
 		"/v1/approver/decision",
+		"/v1/approver/sessions",
+		"/v1/approver/sessions/extend",
+		"/v1/approver/sessions/revoke",
+		"/v1/approver/devices",
+		"/v1/approver/devices/revoke",
+		"/v1/approver/pairing-code",
+		"/v1/approver/events",
+		"/v1/admin/approver/enrollment",
+		"/v1/admin/pairing-code",
 	}
 	for _, p := range wantPaths {
 		if _, ok := paths[p]; !ok {

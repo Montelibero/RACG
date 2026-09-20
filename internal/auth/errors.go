@@ -9,4 +9,6 @@ var (
 
 	ErrUnauthorized  = errors.New("UNAUTHORIZED")
 	ErrSessionExpired = errors.New("SESSION_EXPIRED")
+
+	ErrSessionNotFound = errors.New("SESSION_NOT_FOUND")
 )

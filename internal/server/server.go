@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/itolstov/racg/internal/auth"
 	"github.com/itolstov/racg/internal/config"
 	"github.com/itolstov/racg/internal/httpapi"
 	"github.com/itolstov/racg/internal/rules"
@@ -23,6 +24,7 @@ type Server struct {
 	ln         net.Listener
 	api        *httpapi.API
 	st         *store.Store
+	tm         *auth.TokenManager
 }
 
 func New(cfg config.Config) (*Server, error) {
@@ -55,7 +57,29 @@ func New(cfg config.Config) (*Server, error) {
 		return nil, fmt.Errorf("store load always rules: %w", err)
 	}
 
-	api := httpapi.New(cfg, httpapi.WithRulesEngine(re), httpapi.WithStore(st))
+	// Auth tokens survive restarts: replay persisted records into the
+	// manager and mirror every change back through its OnChange sink.
+	tm := auth.NewTokenManager(auth.RealClock{})
+	tokens, err := st.ListAuthTokens(context.Background())
+	if err != nil {
+		_ = st.Close()
+		return nil, fmt.Errorf("store load auth tokens: %w", err)
+	}
+	for _, t := range tokens {
+		tm.Restore(t.TokenHash, auth.Claims{SessionID: t.SessionID, ClientID: t.ClientID, ExpiresAt: t.ExpiresAt})
+	}
+	tm.OnChange(func(hash string, claims auth.Claims, deleted bool) {
+		// Persistence failures are non-fatal (MVP): the in-memory
+		// token keeps working; only restart durability is lost.
+		ctx := context.Background()
+		if deleted {
+			_ = st.DeleteAuthToken(ctx, hash)
+			return
+		}
+		_ = st.UpsertAuthToken(ctx, hash, claims.SessionID, claims.ClientID, claims.ExpiresAt)
+	})
+
+	api := httpapi.New(cfg, httpapi.WithRulesEngine(re), httpapi.WithStore(st), httpapi.WithTokenManager(tm))
 	if err := api.RehydrateFromStore(context.Background()); err != nil {
 		_ = st.Close()
 		return nil, fmt.Errorf("store rehydrate: %w", err)
@@ -71,6 +95,7 @@ func New(cfg config.Config) (*Server, error) {
 		handler: handler,
 		api:     api,
 		st:      st,
+		tm:      tm,
 	}, nil
 }
 
@@ -90,6 +115,9 @@ func (s *Server) PairingCode() string {
 }
 
 func (s *Server) API() *httpapi.API { return s.api }
+
+// Tokens exposes the session token manager (e.g. for logout/revoke).
+func (s *Server) Tokens() *auth.TokenManager { return s.tm }
 
 func (s *Server) Store() *store.Store { return s.st }
 

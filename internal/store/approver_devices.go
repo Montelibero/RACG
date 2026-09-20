@@ -10,33 +10,43 @@ import (
 )
 
 // ApproverDevice is one enrolled remote approver client (phone, desktop, ...).
-// Private keys never leave the device; only the public key is stored here.
+// Private keys never leave the device; only the public keys are stored here.
+// PublicKey signs decisions (biometry-bound on phones); PollPublicKey, when
+// present, signs pending-list reads and carries no user-auth requirement.
 type ApproverDevice struct {
-	DeviceID   string
-	PublicKey  []byte
-	CreatedAt  time.Time
-	Enabled    bool
-	DisabledAt *time.Time
+	DeviceID      string
+	PublicKey     []byte
+	PollPublicKey []byte
+	CreatedAt     time.Time
+	Enabled       bool
+	DisabledAt    *time.Time
 }
 
 // UpsertApproverDevice enrolls or re-enrolls a device. Re-pairing an existing
 // device ID replaces its key and re-enables it; pairing requires a one-time
-// enrollment token, so this stays a trusted administrative act.
-func (s *Store) UpsertApproverDevice(ctx context.Context, deviceID string, publicKey []byte, createdAt time.Time) error {
+// enrollment token, so this stays a trusted administrative act. A nil
+// pollPublicKey keeps any previously stored poll key (legacy single-key
+// devices poll with their approval key).
+func (s *Store) UpsertApproverDevice(ctx context.Context, deviceID string, publicKey, pollPublicKey []byte, createdAt time.Time) error {
 	if strings.TrimSpace(deviceID) == "" {
 		return fmt.Errorf("device ID required")
 	}
 	if len(publicKey) == 0 {
 		return fmt.Errorf("public key required")
 	}
+	var pollArg any
+	if len(pollPublicKey) > 0 {
+		pollArg = pollPublicKey
+	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO approver_devices (device_id, public_key, created_at, enabled)
-		VALUES (?, ?, ?, 1)
+		INSERT INTO approver_devices (device_id, public_key, poll_public_key, created_at, enabled)
+		VALUES (?, ?, ?, ?, 1)
 		ON CONFLICT(device_id) DO UPDATE SET
 		  public_key = excluded.public_key,
+		  poll_public_key = COALESCE(excluded.poll_public_key, approver_devices.poll_public_key),
 		  enabled = 1,
 		  disabled_at = NULL`,
-		deviceID, publicKey, createdAt.UTC().Format(time.RFC3339Nano))
+		deviceID, publicKey, pollArg, createdAt.UTC().Format(time.RFC3339Nano))
 	return err
 }
 
@@ -51,10 +61,10 @@ func (s *Store) GetApproverDevice(ctx context.Context, deviceID string) (Approve
 		enabledInt int
 	)
 	err := s.db.QueryRowContext(ctx, `
-		SELECT device_id, public_key, created_at, enabled, disabled_at
+		SELECT device_id, public_key, poll_public_key, created_at, enabled, disabled_at
 		  FROM approver_devices
 		 WHERE device_id = ?`, deviceID).
-		Scan(&dev.DeviceID, &dev.PublicKey, &created, &enabledInt, &disabled)
+		Scan(&dev.DeviceID, &dev.PublicKey, &dev.PollPublicKey, &created, &enabledInt, &disabled)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ApproverDevice{}, false, nil
 	}
@@ -103,7 +113,7 @@ func (s *Store) ListApproverDevices(ctx context.Context, limit int) ([]ApproverD
 		limit = 100
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT device_id, public_key, created_at, enabled, disabled_at
+		SELECT device_id, public_key, poll_public_key, created_at, enabled, disabled_at
 		  FROM approver_devices
 		 ORDER BY created_at DESC
 		 LIMIT ?`, limit)
@@ -120,7 +130,7 @@ func (s *Store) ListApproverDevices(ctx context.Context, limit int) ([]ApproverD
 			disabled   sql.NullString
 			enabledInt int
 		)
-		if err := rows.Scan(&dev.DeviceID, &dev.PublicKey, &created, &enabledInt, &disabled); err != nil {
+		if err := rows.Scan(&dev.DeviceID, &dev.PublicKey, &dev.PollPublicKey, &created, &enabledInt, &disabled); err != nil {
 			return nil, err
 		}
 		dev.CreatedAt, err = time.Parse(time.RFC3339Nano, created)

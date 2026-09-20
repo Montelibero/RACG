@@ -4,7 +4,7 @@ import android.graphics.Bitmap
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
@@ -45,14 +45,15 @@ fun TransferQrScreen(
     onDone: () -> Unit,
 ) {
     val bitmap = remember(qr) { setupQrBitmap(qr) }
-    Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text("Transfer ${serverId}", style = MaterialTheme.typography.headlineMedium)
+    AppFrame(title = "Transfer $serverId", onBack = onDone) {
         Text("Scan this once from the new phone. It expires in ten minutes and can be used only once.")
-        Image(bitmap.asImageBitmap(), contentDescription = "Transfer QR", modifier = Modifier.size(340.dp))
-        OutlinedButton(onClick = onDone) { Text("Done") }
+        Image(
+            bitmap.asImageBitmap(),
+            contentDescription = "Transfer QR",
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 12.dp),
+        )
+        AppButton(text = "Done", onClick = onDone, outlined = true)
     }
 }

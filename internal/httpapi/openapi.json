@@ -15,306 +15,757 @@
     "schemas": {
       "ErrorEnvelope": {
         "type": "object",
-        "required": ["error"],
-        "properties": { "error": { "$ref": "#/components/schemas/ErrorObject" } }
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorObject"
+          }
+        }
       },
       "ErrorObject": {
         "type": "object",
-        "required": ["code", "message"],
+        "required": [
+          "code",
+          "message"
+        ],
         "properties": {
-          "code": { "type": "string" },
-          "message": { "type": "string" },
-          "request_id": { "type": "string" }
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          }
         }
       },
       "InfoResponse": {
         "type": "object",
-        "required": ["server_version", "api_versions", "ws_url", "openapi_url", "privilege_mode", "limits", "features", "supported_ops"],
+        "required": [
+          "server_version",
+          "api_versions",
+          "ws_url",
+          "openapi_url",
+          "privilege_mode",
+          "limits",
+          "features",
+          "supported_ops"
+        ],
         "properties": {
-          "server_version": { "type": "string" },
-          "api_versions": { "type": "array", "items": { "type": "string" } },
-          "ws_url": { "type": "string" },
-          "openapi_url": { "type": "string" },
-          "privilege_mode": { "type": "string", "enum": ["root"] },
+          "server_version": {
+            "type": "string"
+          },
+          "api_versions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "ws_url": {
+            "type": "string"
+          },
+          "openapi_url": {
+            "type": "string"
+          },
+          "privilege_mode": {
+            "type": "string",
+            "enum": [
+              "root"
+            ]
+          },
           "limits": {
             "type": "object",
-            "required": ["default_timeout_sec", "max_output_bytes", "max_concurrency", "max_transfer_bytes"],
+            "required": [
+              "default_timeout_sec",
+              "max_output_bytes",
+              "max_concurrency",
+              "max_transfer_bytes"
+            ],
             "properties": {
-              "default_timeout_sec": { "type": "integer" },
-              "max_output_bytes": { "type": "integer" },
-              "max_concurrency": { "type": "integer" },
-              "max_transfer_bytes": { "type": "integer", "format": "int64" }
+              "default_timeout_sec": {
+                "type": "integer"
+              },
+              "max_output_bytes": {
+                "type": "integer"
+              },
+              "max_concurrency": {
+                "type": "integer"
+              },
+              "max_transfer_bytes": {
+                "type": "integer",
+                "format": "int64"
+              }
             }
           },
           "features": {
             "type": "object",
             "properties": {
-              "lock_first_client_addr": { "type": "boolean" }
+              "lock_first_client_addr": {
+                "type": "boolean"
+              }
             }
           },
-          "supported_ops": { "type": "array", "items": { "type": "string" } }
+          "supported_ops": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
         }
       },
       "SessionOpenRequest": {
         "type": "object",
-        "required": ["client_id", "pairing_code"],
+        "required": [
+          "client_id",
+          "pairing_code"
+        ],
         "properties": {
-          "client_id": { "type": "string" },
-          "pairing_code": { "type": "string" }
+          "client_id": {
+            "type": "string"
+          },
+          "pairing_code": {
+            "type": "string"
+          }
         }
       },
       "SessionOpenResponse": {
         "type": "object",
-        "required": ["session_id", "session_token", "expires_at", "server_version"],
+        "required": [
+          "session_id",
+          "session_token",
+          "expires_at",
+          "server_version"
+        ],
         "properties": {
-          "session_id": { "type": "string" },
-          "session_token": { "type": "string" },
-          "expires_at": { "type": "string", "format": "date-time" },
-          "server_version": { "type": "string" }
+          "session_id": {
+            "type": "string"
+          },
+          "session_token": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "server_version": {
+            "type": "string"
+          }
         }
       },
       "SessionMeResponse": {
         "type": "object",
-        "required": ["session_id", "client_id", "expires_at", "privilege_mode"],
+        "required": [
+          "session_id",
+          "client_id",
+          "expires_at",
+          "privilege_mode"
+        ],
         "properties": {
-          "session_id": { "type": "string" },
-          "client_id": { "type": "string" },
-          "expires_at": { "type": "string", "format": "date-time" },
-          "privilege_mode": { "type": "string", "enum": ["root"] }
+          "session_id": {
+            "type": "string"
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "privilege_mode": {
+            "type": "string",
+            "enum": [
+              "root"
+            ]
+          }
         }
       },
       "CreateRequestRequest": {
         "type": "object",
-        "required": ["op"],
+        "required": [
+          "op"
+        ],
         "properties": {
-          "op": { "$ref": "#/components/schemas/Op" },
-          "client_req_id": { "type": "string" }
+          "op": {
+            "$ref": "#/components/schemas/Op"
+          },
+          "client_req_id": {
+            "type": "string"
+          }
         }
       },
       "CreateRequestResponse": {
         "type": "object",
-        "required": ["request_id", "status"],
+        "required": [
+          "request_id",
+          "status"
+        ],
         "properties": {
-          "request_id": { "type": "string" },
-          "status": { "$ref": "#/components/schemas/RequestStatus" }
+          "request_id": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RequestStatus"
+          }
         }
       },
       "ListRequestsResponse": {
         "type": "object",
-        "required": ["requests"],
+        "required": [
+          "requests"
+        ],
         "properties": {
-          "requests": { "type": "array", "items": { "$ref": "#/components/schemas/RequestRecord" } }
+          "requests": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RequestRecord"
+            }
+          }
         }
       },
       "DecisionRequest": {
         "type": "object",
-        "required": ["decision"],
+        "required": [
+          "decision"
+        ],
         "properties": {
-          "decision": { "type": "string", "enum": ["ALLOW_ONCE", "ALLOW_SESSION", "ALLOW_ALWAYS", "DENY"] }
+          "decision": {
+            "type": "string",
+            "enum": [
+              "ALLOW_ONCE",
+              "ALLOW_SESSION",
+              "ALLOW_ALWAYS",
+              "DENY"
+            ]
+          }
         }
       },
       "OKResponse": {
         "type": "object",
-        "required": ["ok"],
-        "properties": { "ok": { "type": "boolean" } }
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
       },
       "RequestStatus": {
         "type": "string",
-        "enum": ["PENDING_APPROVAL", "APPROVED", "QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "TIMED_OUT", "KILLED", "DENIED", "CANCELED"]
+        "enum": [
+          "PENDING_APPROVAL",
+          "APPROVED",
+          "QUEUED",
+          "RUNNING",
+          "SUCCEEDED",
+          "FAILED",
+          "TIMED_OUT",
+          "KILLED",
+          "DENIED",
+          "CANCELED"
+        ]
       },
       "OpType": {
         "type": "string",
-        "enum": ["cmd.run", "fs.read", "fs.patch_unified", "fs.upload", "fs.download", "conf.set", "svc.status", "svc.restart", "svc.logs"]
+        "enum": [
+          "cmd.run",
+          "fs.read",
+          "fs.patch_unified",
+          "fs.upload",
+          "fs.download",
+          "conf.set",
+          "svc.status",
+          "svc.restart",
+          "svc.logs"
+        ]
       },
       "Op": {
         "oneOf": [
-          { "$ref": "#/components/schemas/CmdRunOp" },
-          { "$ref": "#/components/schemas/FsReadOp" },
-          { "$ref": "#/components/schemas/FsPatchUnifiedOp" },
-          { "$ref": "#/components/schemas/FsUploadOp" },
-          { "$ref": "#/components/schemas/FsDownloadOp" },
-          { "$ref": "#/components/schemas/ConfSetOp" },
-          { "$ref": "#/components/schemas/GenericOp" }
+          {
+            "$ref": "#/components/schemas/CmdRunOp"
+          },
+          {
+            "$ref": "#/components/schemas/FsReadOp"
+          },
+          {
+            "$ref": "#/components/schemas/FsPatchUnifiedOp"
+          },
+          {
+            "$ref": "#/components/schemas/FsUploadOp"
+          },
+          {
+            "$ref": "#/components/schemas/FsDownloadOp"
+          },
+          {
+            "$ref": "#/components/schemas/ConfSetOp"
+          },
+          {
+            "$ref": "#/components/schemas/GenericOp"
+          }
         ],
-        "discriminator": { "propertyName": "type" }
+        "discriminator": {
+          "propertyName": "type"
+        }
       },
       "GenericOp": {
         "type": "object",
-        "required": ["type", "payload"],
+        "required": [
+          "type",
+          "payload"
+        ],
         "properties": {
-          "type": { "$ref": "#/components/schemas/OpType" },
-          "payload": { "type": "object", "additionalProperties": true }
+          "type": {
+            "$ref": "#/components/schemas/OpType"
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": true
+          }
         }
       },
       "CmdRunOp": {
         "type": "object",
-        "required": ["type", "payload"],
+        "required": [
+          "type",
+          "payload"
+        ],
         "properties": {
-          "type": { "type": "string", "enum": ["cmd.run"] },
-          "payload": { "$ref": "#/components/schemas/CmdRunPayload" }
+          "type": {
+            "type": "string",
+            "enum": [
+              "cmd.run"
+            ]
+          },
+          "payload": {
+            "$ref": "#/components/schemas/CmdRunPayload"
+          }
         }
       },
       "CmdRunPayload": {
         "type": "object",
-        "required": ["argv"],
+        "required": [
+          "argv"
+        ],
         "properties": {
-          "argv": { "type": "array", "items": { "type": "string" } },
-          "cwd": { "type": "string" },
-          "timeout_sec": { "type": "integer" },
-          "stdin_upload_id": { "type": "string", "format": "uuid", "description": "Session-owned staged content supplied to the process as stdin." },
-          "stdin_size": { "type": "integer", "format": "int64", "description": "Canonical staged stdin size supplied by the server." },
-          "stdin_sha256": { "type": "string", "description": "Canonical staged stdin SHA-256 supplied by the server for integrity verification and audit." },
-          "run_as": { "type": "string", "description": "Accepted but currently ignored by the executor; server runs in root mode." }
+          "argv": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "timeout_sec": {
+            "type": "integer"
+          },
+          "stdin_upload_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Session-owned staged content supplied to the process as stdin."
+          },
+          "stdin_size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Canonical staged stdin size supplied by the server."
+          },
+          "stdin_sha256": {
+            "type": "string",
+            "description": "Canonical staged stdin SHA-256 supplied by the server for integrity verification and audit."
+          },
+          "run_as": {
+            "type": "string",
+            "description": "Accepted but currently ignored by the executor; server runs in root mode."
+          }
         }
       },
       "FsReadOp": {
         "type": "object",
-        "required": ["type", "payload"],
+        "required": [
+          "type",
+          "payload"
+        ],
         "properties": {
-          "type": { "type": "string", "enum": ["fs.read"] },
-          "payload": { "$ref": "#/components/schemas/FsReadPayload" }
+          "type": {
+            "type": "string",
+            "enum": [
+              "fs.read"
+            ]
+          },
+          "payload": {
+            "$ref": "#/components/schemas/FsReadPayload"
+          }
         }
       },
       "FsReadPayload": {
         "type": "object",
-        "required": ["path"],
+        "required": [
+          "path"
+        ],
         "properties": {
-          "path": { "type": "string" },
-          "max_bytes": { "type": "integer" }
+          "path": {
+            "type": "string"
+          },
+          "max_bytes": {
+            "type": "integer"
+          }
         }
       },
       "FsPatchUnifiedOp": {
         "type": "object",
-        "required": ["type", "payload"],
+        "required": [
+          "type",
+          "payload"
+        ],
         "properties": {
-          "type": { "type": "string", "enum": ["fs.patch_unified"] },
-          "payload": { "$ref": "#/components/schemas/FsPatchUnifiedPayload" }
+          "type": {
+            "type": "string",
+            "enum": [
+              "fs.patch_unified"
+            ]
+          },
+          "payload": {
+            "$ref": "#/components/schemas/FsPatchUnifiedPayload"
+          }
         }
       },
       "FsPatchUnifiedPayload": {
         "type": "object",
-        "required": ["path", "diff"],
+        "required": [
+          "path",
+          "diff"
+        ],
         "properties": {
-          "path": { "type": "string" },
-          "diff": { "type": "string", "description": "Unified diff." }
+          "path": {
+            "type": "string"
+          },
+          "diff": {
+            "type": "string",
+            "description": "Unified diff."
+          }
         }
       },
       "FsUploadOp": {
         "type": "object",
-        "required": ["type", "payload"],
+        "required": [
+          "type",
+          "payload"
+        ],
         "properties": {
-          "type": { "type": "string", "enum": ["fs.upload"] },
-          "payload": { "$ref": "#/components/schemas/FsUploadPayload" }
+          "type": {
+            "type": "string",
+            "enum": [
+              "fs.upload"
+            ]
+          },
+          "payload": {
+            "$ref": "#/components/schemas/FsUploadPayload"
+          }
         }
       },
       "FsUploadPayload": {
         "type": "object",
-        "required": ["path", "upload_id"],
+        "required": [
+          "path",
+          "upload_id"
+        ],
         "properties": {
-          "path": { "type": "string" },
-          "upload_id": { "type": "string", "format": "uuid" },
-          "size": { "type": "integer", "format": "int64", "description": "Canonical value supplied by the server." },
-          "sha256": { "type": "string", "description": "Canonical value supplied by the server." },
-          "mode": { "type": "string", "pattern": "^0[0-7]{3}$" }
+          "path": {
+            "type": "string"
+          },
+          "upload_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Canonical value supplied by the server."
+          },
+          "sha256": {
+            "type": "string",
+            "description": "Canonical value supplied by the server."
+          },
+          "mode": {
+            "type": "string",
+            "pattern": "^0[0-7]{3}$"
+          }
         }
       },
       "FsDownloadOp": {
         "type": "object",
-        "required": ["type", "payload"],
+        "required": [
+          "type",
+          "payload"
+        ],
         "properties": {
-          "type": { "type": "string", "enum": ["fs.download"] },
-          "payload": { "$ref": "#/components/schemas/FsDownloadPayload" }
+          "type": {
+            "type": "string",
+            "enum": [
+              "fs.download"
+            ]
+          },
+          "payload": {
+            "$ref": "#/components/schemas/FsDownloadPayload"
+          }
         }
       },
       "FsDownloadPayload": {
         "type": "object",
-        "required": ["path"],
-        "properties": { "path": { "type": "string" } }
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        }
       },
       "StagedUploadResponse": {
         "type": "object",
-        "required": ["upload_id", "size", "sha256", "created_at"],
+        "required": [
+          "upload_id",
+          "size",
+          "sha256",
+          "created_at"
+        ],
         "properties": {
-          "upload_id": { "type": "string", "format": "uuid" },
-          "size": { "type": "integer", "format": "int64" },
-          "sha256": { "type": "string" },
-          "created_at": { "type": "string", "format": "date-time" }
+          "upload_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
         }
       },
       "ConfSetOp": {
         "type": "object",
-        "required": ["type", "payload"],
+        "required": [
+          "type",
+          "payload"
+        ],
         "properties": {
-          "type": { "type": "string", "enum": ["conf.set"] },
-          "payload": { "$ref": "#/components/schemas/ConfSetPayload" }
+          "type": {
+            "type": "string",
+            "enum": [
+              "conf.set"
+            ]
+          },
+          "payload": {
+            "$ref": "#/components/schemas/ConfSetPayload"
+          }
         }
       },
       "ConfSetPayload": {
         "type": "object",
-        "required": ["path", "format", "key", "value"],
+        "required": [
+          "path",
+          "format",
+          "key",
+          "value"
+        ],
         "properties": {
-          "path": { "type": "string" },
-          "format": { "type": "string", "enum": ["env", "json", "yaml"] },
-          "key": { "type": "string", "description": "Key name for env or dotted path for json/yaml." },
-          "value": { "type": "string" },
-          "value_type": { "type": "string", "enum": ["string", "bool", "int", "float", "null", "json"], "default": "string" },
-          "backup": { "type": "boolean", "default": true },
-          "backup_dir": { "type": "string" },
-          "create": { "type": "boolean", "default": false, "description": "Create a missing config file with mode 0600. The parent directory must already exist." }
+          "path": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "env",
+              "json",
+              "yaml"
+            ]
+          },
+          "key": {
+            "type": "string",
+            "description": "Key name for env or dotted path for json/yaml."
+          },
+          "value": {
+            "type": "string"
+          },
+          "value_type": {
+            "type": "string",
+            "enum": [
+              "string",
+              "bool",
+              "int",
+              "float",
+              "null",
+              "json"
+            ],
+            "default": "string"
+          },
+          "backup": {
+            "type": "boolean",
+            "default": true
+          },
+          "backup_dir": {
+            "type": "string"
+          },
+          "create": {
+            "type": "boolean",
+            "default": false,
+            "description": "Create a missing config file with mode 0600. The parent directory must already exist."
+          }
         }
       },
       "RequestRecord": {
         "type": "object",
-        "required": ["request_id", "status", "op"],
+        "required": [
+          "request_id",
+          "status",
+          "op"
+        ],
         "properties": {
-          "request_id": { "type": "string" },
-          "status": { "$ref": "#/components/schemas/RequestStatus" },
-          "op": { "$ref": "#/components/schemas/Op" },
-          "decision": { "$ref": "#/components/schemas/DecisionRecord" },
-          "result": { "$ref": "#/components/schemas/ResultRecord" },
-          "risk_flags": { "type": "array", "items": { "type": "string" } },
-          "session_id": { "type": "string" },
-          "client_id": { "type": "string" },
-          "created_at": { "type": "string", "format": "date-time" }
+          "request_id": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RequestStatus"
+          },
+          "op": {
+            "$ref": "#/components/schemas/Op"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/DecisionRecord"
+          },
+          "result": {
+            "$ref": "#/components/schemas/ResultRecord"
+          },
+          "risk_flags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
         }
       },
       "DecisionRecord": {
         "type": "object",
-        "required": ["decision", "decision_source", "decided_at"],
+        "required": [
+          "decision",
+          "decision_source",
+          "decided_at"
+        ],
         "properties": {
-          "decision": { "type": "string" },
-          "decision_source": { "type": "string", "enum": ["tui", "rule"] },
-          "decided_at": { "type": "string", "format": "date-time" },
-          "rule_id": { "type": "string" }
+          "decision": {
+            "type": "string"
+          },
+          "decision_source": {
+            "type": "string",
+            "enum": [
+              "tui",
+              "rule"
+            ]
+          },
+          "decided_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "rule_id": {
+            "type": "string"
+          }
         }
       },
       "ResultRecord": {
         "type": "object",
-        "required": ["started_at", "finished_at", "duration_ms", "exit_code", "status", "stdout", "stderr", "stdout_truncated", "stderr_truncated", "stdout_sha256", "stderr_sha256"],
+        "required": [
+          "started_at",
+          "finished_at",
+          "duration_ms",
+          "exit_code",
+          "status",
+          "stdout",
+          "stderr",
+          "stdout_truncated",
+          "stderr_truncated",
+          "stdout_sha256",
+          "stderr_sha256"
+        ],
         "properties": {
-          "started_at": { "type": "string", "format": "date-time" },
-          "finished_at": { "type": "string", "format": "date-time" },
-          "duration_ms": { "type": "integer" },
-          "exit_code": { "type": "integer" },
-          "status": { "type": "string" },
-          "stdout": { "type": "string" },
-          "stderr": { "type": "string" },
-          "stdout_truncated": { "type": "boolean" },
-          "stderr_truncated": { "type": "boolean" },
-          "stdout_sha256": { "type": "string" },
-          "stderr_sha256": { "type": "string" }
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finished_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "duration_ms": {
+            "type": "integer"
+          },
+          "exit_code": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          },
+          "stdout": {
+            "type": "string"
+          },
+          "stderr": {
+            "type": "string"
+          },
+          "stdout_truncated": {
+            "type": "boolean"
+          },
+          "stderr_truncated": {
+            "type": "boolean"
+          },
+          "stdout_sha256": {
+            "type": "string"
+          },
+          "stderr_sha256": {
+            "type": "string"
+          }
         }
       },
       "ApproverRequest": {
         "type": "object",
         "description": "Pending request as visible to an enrolled approver device.",
         "properties": {
-          "id": { "type": "string" },
-          "status": { "type": "string" },
-          "client_id": { "type": "string" },
-          "op": { "type": "object", "description": "exact operation bytes; the decision must be signed over this SHA-256" },
-          "op_sha256": { "type": "string" },
-          "created_at": { "type": "string", "format": "date-time" }
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "op": {
+            "type": "object",
+            "description": "exact operation bytes; the decision must be signed over this SHA-256"
+          },
+          "op_sha256": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
         }
       }
     }
@@ -326,7 +777,13 @@
         "responses": {
           "200": {
             "description": "ok",
-            "content": { "text/plain": { "schema": { "type": "string" } } }
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           }
         }
       }
@@ -337,7 +794,13 @@
         "responses": {
           "200": {
             "description": "OpenAPI JSON",
-            "content": { "application/json": { "schema": { "type": "object" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
           }
         }
       }
@@ -348,7 +811,13 @@
         "responses": {
           "200": {
             "description": "info",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/InfoResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InfoResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -358,42 +827,120 @@
         "summary": "Open session",
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SessionOpenRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionOpenRequest"
+              }
+            }
+          }
         },
         "responses": {
           "200": {
             "description": "session",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SessionOpenResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionOpenResponse"
+                }
+              }
+            }
           },
-          "403": { "description": "forbidden", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+          "403": {
+            "description": "forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
         }
       }
     },
     "/v1/session/me": {
       "get": {
         "summary": "Session info",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "me",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SessionMeResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionMeResponse"
+                }
+              }
+            }
           },
-          "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
         }
       }
     },
     "/v1/uploads": {
       "post": {
         "summary": "Stage binary content for an fs.upload approval request",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "requestBody": {
           "required": true,
-          "content": { "application/octet-stream": { "schema": { "type": "string", "format": "binary" } } }
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
         },
         "responses": {
-          "200": { "description": "staged upload metadata", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StagedUploadResponse" } } } },
-          "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
-          "413": { "description": "transfer too large", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+          "200": {
+            "description": "staged upload metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StagedUploadResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "transfer too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -401,64 +948,175 @@
       "post": {
         "summary": "Create approval request",
         "description": "If automatic approval cannot be persisted, returns HTTP 500 DECISION_PERSISTENCE_FAILED with error.request_id. The existing request remains pending. Resolve server storage and review that ID in TUI; do not resubmit.",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateRequestRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRequestRequest"
+              }
+            }
+          }
         },
         "responses": {
-          "500": { "description": "DECISION_PERSISTENCE_FAILED: existing request remains pending; error.request_id identifies it. Other internal persistence failures may occur before request creation.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "500": {
+            "description": "DECISION_PERSISTENCE_FAILED: existing request remains pending; error.request_id identifies it. Other internal persistence failures may occur before request creation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
           "200": {
             "description": "request",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateRequestResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateRequestResponse"
+                }
+              }
+            }
           },
-          "400": { "description": "bad request", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
-          "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+          "400": {
+            "description": "bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
         }
       },
       "get": {
         "summary": "List requests (in-memory)",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "parameters": [
           {
             "name": "status",
             "in": "query",
             "required": false,
-            "schema": { "$ref": "#/components/schemas/RequestStatus" },
+            "schema": {
+              "$ref": "#/components/schemas/RequestStatus"
+            },
             "description": "Defaults to PENDING_APPROVAL."
           },
           {
             "name": "unredacted",
             "in": "query",
             "required": false,
-            "schema": { "type": "boolean", "default": false },
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
             "description": "Return stored stdout and stderr without display redaction."
           }
         ],
         "responses": {
           "200": {
             "description": "requests",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ListRequestsResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListRequestsResponse"
+                }
+              }
+            }
           },
-          "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
         }
       }
     },
     "/v1/requests/{request_id}": {
       "get": {
         "summary": "Get request",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "parameters": [
-          { "name": "request_id", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "unredacted", "in": "query", "required": false, "schema": { "type": "boolean", "default": false }, "description": "Return stored stdout and stderr without display redaction." }
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "unredacted",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Return stored stdout and stderr without display redaction."
+          }
         ],
         "responses": {
           "200": {
             "description": "request",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RequestRecord" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestRecord"
+                }
+              }
+            }
           },
-          "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
-          "404": { "description": "not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -467,59 +1125,239 @@
         "summary": "Disabled legacy decision endpoint",
         "description": "Manual approval and denial are local to the server TUI. Agent tokens never grant decision authority. Authenticated POST requests return 403 REMOTE_DECISION_DISABLED without changing request state or rules. Signed remote approval is not yet available.",
         "deprecated": true,
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "parameters": [
-          { "name": "request_id", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
-          "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
-          "403": { "description": "REMOTE_DECISION_DISABLED: approve or deny in the server TUI", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "REMOTE_DECISION_DISABLED: approve or deny in the server TUI",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
         }
       }
     },
     "/v1/requests/{request_id}/file": {
       "get": {
         "summary": "Stream an approved fs.download snapshot",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "parameters": [
-          { "name": "request_id", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
-          "200": { "description": "binary file with X-RACG-SHA256 and X-RACG-Mode headers", "content": { "application/octet-stream": { "schema": { "type": "string", "format": "binary" } } } },
-          "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
-          "404": { "description": "not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
-          "409": { "description": "download not ready", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+          "200": {
+            "description": "binary file with X-RACG-SHA256 and X-RACG-Mode headers",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "download not ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
         }
       }
     },
     "/v1/requests/{request_id}/kill": {
       "post": {
         "summary": "Kill running request",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "parameters": [
-          { "name": "request_id", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
-          "200": { "description": "ok", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OKResponse" } } } },
-          "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
-          "404": { "description": "not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OKResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
         }
       }
     },
     "/v1/requests/{request_id}/logs/stdout": {
       "get": {
         "summary": "Get request stdout",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "parameters": [
-          { "name": "request_id", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "unredacted", "in": "query", "required": false, "schema": { "type": "boolean", "default": false }, "description": "Return raw stdout instead of display-redacted output." }
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "unredacted",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Return raw stdout instead of display-redacted output."
+          }
         ],
         "responses": {
-          "200": { "description": "display-redacted stdout by default", "content": { "text/plain": { "schema": { "type": "string" } } } },
-          "400": { "description": "bad request", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
-          "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
-          "404": { "description": "not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
-          "409": { "description": "request has no result yet", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+          "200": {
+            "description": "display-redacted stdout by default",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "request has no result yet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -527,32 +1365,144 @@
       "get": {
         "summary": "Get current live combined request output",
         "description": "Returns the in-memory combined live output buffer for a request. This is available while a request is running and may be empty before the first output chunk.",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "parameters": [
-          { "name": "request_id", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "unredacted", "in": "query", "required": false, "schema": { "type": "boolean", "default": false }, "description": "Return raw live output instead of display-redacted output." }
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "unredacted",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Return raw live output instead of display-redacted output."
+          }
         ],
         "responses": {
-          "200": { "description": "live combined output", "content": { "text/plain": { "schema": { "type": "string" } } } },
-          "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
-          "404": { "description": "not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+          "200": {
+            "description": "live combined output",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
         }
       }
     },
     "/v1/requests/{request_id}/logs/stderr": {
       "get": {
         "summary": "Get request stderr",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "parameters": [
-          { "name": "request_id", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "unredacted", "in": "query", "required": false, "schema": { "type": "boolean", "default": false }, "description": "Return raw stderr instead of display-redacted output." }
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "unredacted",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Return raw stderr instead of display-redacted output."
+          }
         ],
         "responses": {
-          "200": { "description": "display-redacted stderr by default", "content": { "text/plain": { "schema": { "type": "string" } } } },
-          "400": { "description": "bad request", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
-          "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
-          "404": { "description": "not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
-          "409": { "description": "request has no result yet", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+          "200": {
+            "description": "display-redacted stderr by default",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "request has no result yet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -560,13 +1510,37 @@
       "get": {
         "summary": "WebSocket events (upgrade)",
         "description": "Upgrade this endpoint to WebSocket. Authentication is via Authorization: Bearer <token> header.",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "parameters": [
-          { "name": "unredacted", "in": "query", "required": false, "schema": { "type": "boolean", "default": false }, "description": "Return raw request.output chunks instead of display-redacted chunks." }
+          {
+            "name": "unredacted",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Return raw request.output chunks instead of display-redacted chunks."
+          }
         ],
         "responses": {
-          "101": { "description": "Switching Protocols (WebSocket)" },
-          "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+          "101": {
+            "description": "Switching Protocols (WebSocket)"
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -575,8 +1549,31 @@
         "summary": "Get a one-time approver challenge",
         "description": "Returns a random single-use challenge consumed by the next signed approver request (pairing, poll, or decision).",
         "responses": {
-          "200": { "description": "challenge issued", "content": { "application/json": { "schema": { "type": "object", "properties": { "challenge": { "type": "string" } } } } } },
-          "405": { "description": "method not allowed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+          "200": {
+            "description": "challenge issued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "challenge": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "method not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -584,11 +1581,82 @@
       "post": {
         "summary": "Enroll a remote approver device",
         "description": "One-time enrollment: requires the server enrollment token (SHA-256 of the raw 32 token bytes) and an ECDSA P-256 signature from the device key over the racg/approver/pairing/v1 message.",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["device_id", "public_key", "token_sha256", "challenge", "signature"], "properties": { "device_id": { "type": "string" }, "public_key": { "type": "string", "format": "base64", "description": "PKIX-encoded ECDSA P-256 public key" }, "token_sha256": { "type": "string" }, "challenge": { "type": "string" }, "signature": { "type": "string", "format": "base64" } } } } } },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "device_id",
+                  "public_key",
+                  "token_sha256",
+                  "challenge",
+                  "signature"
+                ],
+                "properties": {
+                  "device_id": {
+                    "type": "string"
+                  },
+                  "public_key": {
+                    "type": "string",
+                    "format": "base64",
+                    "description": "PKIX-encoded ECDSA P-256 public key"
+                  },
+                  "token_sha256": {
+                    "type": "string"
+                  },
+                  "challenge": {
+                    "type": "string"
+                  },
+                  "signature": {
+                    "type": "string",
+                    "format": "base64"
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
-          "200": { "description": "device enrolled", "content": { "application/json": { "schema": { "type": "object", "properties": { "ok": { "type": "boolean" }, "device_id": { "type": "string" } } } } } },
-          "400": { "description": "bad request", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
-          "401": { "description": "PAIRING_FAILED: wrong token, stale challenge or invalid signature", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+          "200": {
+            "description": "device enrolled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "device_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "PAIRING_FAILED: wrong token, stale challenge or invalid signature",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -597,14 +1665,71 @@
         "summary": "List pending requests for an enrolled approver device",
         "description": "Requires signed poll headers: X-Racg-Approver-Device, X-Racg-Approver-Challenge and X-Racg-Approver-Signature (base64 ECDSA P-256 over the racg/approver/poll/v1 message). The challenge is consumed by this call.",
         "parameters": [
-          { "name": "X-Racg-Approver-Device", "in": "header", "required": true, "schema": { "type": "string" } },
-          { "name": "X-Racg-Approver-Challenge", "in": "header", "required": true, "schema": { "type": "string" } },
-          { "name": "X-Racg-Approver-Signature", "in": "header", "required": true, "schema": { "type": "string", "format": "base64" } }
+          {
+            "name": "X-Racg-Approver-Device",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Racg-Approver-Challenge",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Racg-Approver-Signature",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "base64"
+            }
+          }
         ],
         "responses": {
-          "200": { "description": "pending requests", "content": { "application/json": { "schema": { "type": "object", "properties": { "requests": { "type": "array", "items": { "$ref": "#/components/schemas/ApproverRequest" } } } } } } },
-          "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
-          "405": { "description": "method not allowed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+          "200": {
+            "description": "pending requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "requests": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ApproverRequest"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "method not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -613,28 +1738,625 @@
         "summary": "Get one pending request for an enrolled approver device",
         "description": "Same signed poll headers as the pending list; the signature binds the exact request path.",
         "parameters": [
-          { "name": "request_id", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "X-Racg-Approver-Device", "in": "header", "required": true, "schema": { "type": "string" } },
-          { "name": "X-Racg-Approver-Challenge", "in": "header", "required": true, "schema": { "type": "string" } },
-          { "name": "X-Racg-Approver-Signature", "in": "header", "required": true, "schema": { "type": "string", "format": "base64" } }
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Racg-Approver-Device",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Racg-Approver-Challenge",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Racg-Approver-Signature",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "base64"
+            }
+          }
         ],
         "responses": {
-          "200": { "description": "pending request", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApproverRequest" } } } },
-          "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
-          "404": { "description": "not found or not pending", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+          "200": {
+            "description": "pending request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApproverRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not found or not pending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
         }
       }
     },
     "/v1/approver/decision": {
       "post": {
         "summary": "Submit a signed approver decision",
-        "description": "ALLOW_ONCE or DENY, signed by an enrolled device key and bound to the exact stored operation SHA-256, a fresh single-use challenge and the server identity. The first valid decision wins; conflicting later decisions are rejected.",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["device_id", "request_id", "decision", "operation_sha256", "challenge", "signature"], "properties": { "device_id": { "type": "string" }, "request_id": { "type": "string" }, "decision": { "type": "string", "enum": ["ALLOW_ONCE", "DENY"] }, "operation_sha256": { "type": "string" }, "challenge": { "type": "string" }, "signature": { "type": "string", "format": "base64" } } } } } },
+        "description": "ALLOW_ONCE, ALLOW_SESSION, ALLOW_ALWAYS or DENY, signed by an enrolled device approval key and bound to the exact stored operation SHA-256, a fresh single-use challenge and the server identity. ALLOW_SESSION binds to the target agent session server-side; the phone never sees session IDs. The first valid decision wins; conflicting later decisions are rejected.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "device_id",
+                  "request_id",
+                  "decision",
+                  "operation_sha256",
+                  "challenge",
+                  "signature"
+                ],
+                "properties": {
+                  "device_id": {
+                    "type": "string"
+                  },
+                  "request_id": {
+                    "type": "string"
+                  },
+                  "decision": {
+                    "type": "string",
+                    "enum": [
+                      "ALLOW_ONCE",
+                      "ALLOW_SESSION",
+                      "ALLOW_ALWAYS",
+                      "DENY"
+                    ]
+                  },
+                  "operation_sha256": {
+                    "type": "string"
+                  },
+                  "challenge": {
+                    "type": "string"
+                  },
+                  "signature": {
+                    "type": "string",
+                    "format": "base64"
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
-          "200": { "description": "decision applied", "content": { "application/json": { "schema": { "type": "object", "properties": { "ok": { "type": "boolean" }, "device_id": { "type": "string" } } } } } },
-          "400": { "description": "operation mismatch or request no longer pending", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
-          "401": { "description": "unknown device, invalid signature or stale challenge", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
-          "404": { "description": "request not found or not pending", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+          "200": {
+            "description": "decision applied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "device_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "operation mismatch or request no longer pending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unknown device, invalid signature or stale challenge",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "request not found or not pending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/approver/sessions": {
+      "get": {
+        "summary": "List agent sessions (signed poll)",
+        "description": "Same signed poll headers as the pending list. Returns session_id, client_id and expires_at for every live auth-token session.",
+        "responses": {
+          "200": {
+            "description": "session list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sessions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "session_id": {
+                            "type": "string"
+                          },
+                          "client_id": {
+                            "type": "string"
+                          },
+                          "expires_at": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid poll credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/approver/sessions/extend": {
+      "post": {
+        "summary": "Extend a session (signed admin action)",
+        "description": "Device-signed racg/approver/admin/v1 message (approval key) with action sessions.extend. Slides the session expiry by the configured TTL without changing the agent token string.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproverAdminRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "session extended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "session_id": {
+                      "type": "string"
+                    },
+                    "expires_at": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid admin signature or stale challenge",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "unknown session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/approver/sessions/revoke": {
+      "post": {
+        "summary": "Revoke a session (signed admin action)",
+        "description": "Device-signed racg/approver/admin/v1 message (approval key) with action sessions.revoke. Deletes every auth token of the session and closes the audit session.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproverAdminRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "session revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "session_id": {
+                      "type": "string"
+                    },
+                    "revoked": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid admin signature or stale challenge",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/approver/devices": {
+      "get": {
+        "summary": "List enrolled approver devices (signed poll)",
+        "description": "Same signed poll headers as the pending list. Returns device_id, created_at, enabled and has_poll_key for every enrolled approver device.",
+        "responses": {
+          "200": {
+            "description": "device list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "devices": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "device_id": {
+                            "type": "string"
+                          },
+                          "created_at": {
+                            "type": "string"
+                          },
+                          "enabled": {
+                            "type": "boolean"
+                          },
+                          "has_poll_key": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid poll credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/approver/devices/revoke": {
+      "post": {
+        "summary": "Revoke an approver device (signed admin action)",
+        "description": "Device-signed racg/approver/admin/v1 message (approval key) with action devices.revoke. Revoked devices fail poll and decision verification immediately.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproverAdminRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "device revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "device_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid admin signature or stale challenge",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "unknown device",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/approver/pairing-code": {
+      "post": {
+        "summary": "Mint a fresh agent pairing code (signed admin action)",
+        "description": "Device-signed racg/approver/admin/v1 message (approval key) with action pairing_code. Returns a fresh pairing code for racg login without a server restart.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproverAdminRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "pairing code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "pairing_code": {
+                      "type": "string"
+                    },
+                    "expires_in_seconds": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid admin signature or stale challenge",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/approver/events": {
+      "get": {
+        "summary": "Instant event stream for an enrolled approver device (WebSocket)",
+        "description": "WebSocket upgrade whose handshake is authenticated exactly like a signed poll (poll key or legacy approval key, path-bound). Text frames carry hub events; the phone still reads pending lists through the signed REST endpoint.",
+        "responses": {
+          "101": {
+            "description": "switching protocols"
+          },
+          "401": {
+            "description": "invalid poll credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/approver/enrollment": {
+      "post": {
+        "summary": "Mint a single-use approver enrollment token (unix socket only)",
+        "description": "Privileged admin endpoint reachable only over the pipeline unix socket. Invalidates the previous token and issues a fresh single-use one with a 10 minute TTL; used by racg approver-setup.",
+        "responses": {
+          "200": {
+            "description": "enrollment token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "approver_token_b64": {
+                      "type": "string"
+                    },
+                    "expires_at": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "unix socket required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/pairing-code": {
+      "post": {
+        "summary": "Mint a fresh agent pairing code (unix socket only)",
+        "description": "Privileged admin endpoint reachable only over the pipeline unix socket; used by racg pairing-code.",
+        "responses": {
+          "200": {
+            "description": "pairing code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "pairing_code": {
+                      "type": "string"
+                    },
+                    "expires_in_seconds": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "unix socket required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/approver/requests/{request_id}/scope": {
+      "get": {
+        "summary": "List reusable-scope candidates for a pending request",
+        "description": "Same signed poll headers as the pending list. Returns one candidate per shell script segment (cmd.run) or per path (fs.*/conf.* ops); the timed-grant dialog shows one editable scope line per candidate. Append /scope to the request path.",
+        "responses": {
+          "200": {
+            "description": "scope candidates",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "candidates": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "op_type": {
+                            "type": "string"
+                          },
+                          "segment": {
+                            "type": "string"
+                          },
+                          "pattern": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "problem": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid poll credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
         }
       }
     }

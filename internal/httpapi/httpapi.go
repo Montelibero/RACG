@@ -102,10 +102,11 @@ type API struct {
 
 	transferMu sync.Mutex
 
-	approverMu           sync.Mutex
-	approverChallenges   map[string]time.Time
-	approverPairingToken []byte
-	serverName           string
+	approverMu                  sync.Mutex
+	approverChallenges          map[string]time.Time
+	approverPairingToken        []byte
+	approverPairingTokenExpires time.Time
+	serverName                  string
 }
 
 type requestRecord struct {
@@ -310,11 +311,33 @@ func (a *API) PairingCode() string {
 	return a.pairing.Code()
 }
 
-// ApproverPairingToken returns the one-time enrollment token encoded for the
+// ApproverPairingToken returns the current enrollment token encoded for the
 // setup QR payload (standard base64 of 32 raw bytes; the Android parser
-// requires exactly that shape).
+// requires exactly that shape). Tokens are single-use (8.2) and expire after
+// approverPairingTokenTTL; this lazily mints a fresh one for the manual
+// serve-time test flow (--approver-setup-out).
 func (a *API) ApproverPairingToken() string {
-	return base64.StdEncoding.EncodeToString(a.approverTokenBytes())
+	token := a.approverTokenBytes()
+	if len(token) == 0 {
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString(token)
+}
+
+// MintApproverPairingToken invalidates any current enrollment token and
+// issues a fresh single-use one. Used by the admin enrollment endpoint
+// (racg approver-setup): every run produces a unique, one-shot QR.
+func (a *API) MintApproverPairingToken() (string, time.Time, error) {
+	token, err := randomTokenBytes()
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	expires := time.Now().UTC().Add(approverPairingTokenTTL)
+	a.approverMu.Lock()
+	a.approverPairingToken = token
+	a.approverPairingTokenExpires = expires
+	a.approverMu.Unlock()
+	return base64.StdEncoding.EncodeToString(token), expires, nil
 }
 
 // approverTokenBytes lazily generates the enrollment token. An empty token
@@ -322,10 +345,32 @@ func (a *API) ApproverPairingToken() string {
 func (a *API) approverTokenBytes() []byte {
 	a.approverMu.Lock()
 	defer a.approverMu.Unlock()
-	if a.approverPairingToken == nil {
-		a.approverPairingToken, _ = randomTokenBytes()
+	if a.approverPairingTokenExpires.IsZero() || time.Now().After(a.approverPairingTokenExpires) {
+		token, _ := randomTokenBytes()
+		a.approverPairingToken = token
+		a.approverPairingTokenExpires = time.Now().Add(approverPairingTokenTTL)
 	}
 	return a.approverPairingToken
+}
+
+// validApproverToken checks a client-supplied token hash (constant time)
+// against the live, unexpired enrollment token. Returns the expected hex
+// hash for message binding.
+func (a *API) validApproverToken(tokenSHA256 string) (string, bool) {
+	a.approverMu.Lock()
+	defer a.approverMu.Unlock()
+	if a.approverPairingToken == nil {
+		return "", false
+	}
+	if !a.approverPairingTokenExpires.IsZero() && time.Now().After(a.approverPairingTokenExpires) {
+		return "", false
+	}
+	tokenHash := sha256.Sum256(a.approverPairingToken)
+	expectedTokenHex := hex.EncodeToString(tokenHash[:])
+	if subtle.ConstantTimeCompare([]byte(expectedTokenHex), []byte(tokenSHA256)) != 1 {
+		return "", false
+	}
+	return expectedTokenHex, true
 }
 
 func randomTokenBytes() ([]byte, error) {
@@ -1091,6 +1136,7 @@ func (a *API) handleOpenAPI(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleInfo(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]any{
 		"server_version": version.Version,
+		"server_id":      a.serverName,
 		"api_versions":   []string{"v1"},
 		"ws_url":         "/v1/events",
 		"openapi_url":    "/openapi.json",
@@ -1169,7 +1215,7 @@ func (a *API) handleSessionOpen(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	tok, exp := a.tokens.Issue(sessionID, req.ClientID, 8*time.Hour)
+	tok, exp := a.tokens.Issue(sessionID, req.ClientID, time.Duration(a.cfg.SessionTTLHours)*time.Hour)
 
 	resp := map[string]any{
 		"session_id":     sessionID,
