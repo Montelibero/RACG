@@ -1,8 +1,179 @@
 # RACG service mode and Linux approver
 
-Status: file execution extracted; shared UI contracts, signed protocol primitives, internal authenticated delivery/recovery, peer-verified Unix transport, trusted key/admin boundaries, operation admission/staging, stored execution/result delivery, reusable service grants, desktop transport UI, two-process service commands, trusted admin/enrollment CLI, authenticated agent results/downloads, service stdin/upload staging delivery and pre-dispatch cancellation added. Production packaging/installer is not implemented. User authorized closing the legacy HTTP decision endpoint; it now rejects agent decisions while local TUI decisions remain available. Baseline inspected: `a1fda41`.
+Status: this document is now historical progress context. The active target is
+the **single-binary compatibility + phone approver architecture** defined in
+“Superseding architecture decision” below. Earlier service-mode topology,
+separate deployed components and public `service-*` workflows are superseded.
+Production packaging/installer is not implemented. Baseline inspected:
+`a1fda41`.
 
-## Agreed scope
+## Superseding architecture decision: one binary, old clients unchanged
+
+### Hard requirements
+
+1. The shipped server artifact is **one binary**: `racg`.
+2. Existing agent machines may remain on client versions **v0.4.x and v0.5.x**.
+   They must continue using the normal public workflow:
+
+   ```sh
+   racg login
+   racg run -- ...
+   racg request ...
+   racg file ...
+   racg config ...
+   ```
+
+3. Old clients must not know whether approval happened in TUI, on a phone, or in
+   another approver backend. Their commands, wire API, output, statuses and exit
+   codes remain unchanged.
+4. Phone approval is a separate server-side daemon mode, not a new required
+   agent CLI. There is no user-facing `service-agent run` workflow.
+5. The phone-facing component must run as a separate unprivileged service user.
+6. File transfers remain approval-gated and digest-checked, with no
+   server-imposed size cap.
+
+### One binary, multiple roles
+
+The same `racg` executable contains all roles. Different processes may be
+started with different arguments and service users.
+
+#### Legacy compatibility/executor role
+
+```sh
+racg serve --phone ...
+```
+
+This process:
+
+- preserves the public HTTP/WebSocket contract used by v0.4/v0.5 clients;
+- owns request persistence, execution, output/result delivery;
+- may run headless in phone mode;
+- exposes only a local, permission-restricted approval bridge over a Unix
+  socket;
+- remains the sole component that executes approved operations.
+
+The legacy interactive `racg serve` mode remains available and unchanged for
+users who want TUI-only approval.
+
+#### Phone gateway role
+
+```sh
+racg phone-service ...
+```
+
+This process:
+
+- runs as an unprivileged system user;
+- listens only on a private/Tailscale-reachable endpoint;
+- manages Android approver device enrollment and pairing;
+- serves authenticated pending/request-detail data to the phone;
+- accepts signed `ALLOW_ONCE` / `DENY` decisions;
+- forwards only validated decisions to the local approval bridge.
+
+It is **not** an executor and must not have access to command execution,
+authority state files, server signing keys or arbitrary local files.
+
+### Security boundary
+
+The local approval bridge is deliberately narrow. It accepts only a signed
+decision envelope bound to an existing pending request. It must reject command
+payloads, file paths, operation JSON, unknown message types and direct execution
+requests.
+
+For every phone decision, `racg serve` verifies:
+
+- the phone device exists, is enabled and not revoked;
+- the decision signature was made by that device's non-exportable Android
+  Keystore key;
+- the request SHA-256 matches the stored immutable request bytes;
+- the request is still pending;
+- the challenge is fresh and single-use;
+- the decision is `ALLOW_ONCE` or `DENY`;
+- acceptance is committed atomically exactly once.
+
+The audit record records the decision source as TUI or phone device. Whichever
+valid decision commits first wins; later conflicting decisions are rejected.
+
+### Android approver
+
+The Android app remains native Kotlin + Jetpack Compose and keeps its current
+UX goals: scan QR, manage servers, see pending requests, inspect exact request
+details, approve/deny with biometric/PIN, and receive notifications.
+
+The phone uses non-exportable ECDSA P-256 keys from Android Keystore. It may use
+separate approval and poll keys, but neither key is transported between phones.
+Adding a second phone means enrolling a new independently generated key pair;
+the old phone remains active unless explicitly revoked.
+
+### Deployment
+
+The installer/systemd packaging starts one phone-mode target using the same
+binary twice under different users:
+
+```text
+racg-phone.target
+├── racg-serve.service        User=root/executor service
+└── racg-phone-service.service User=racg-phone/unprivileged
+```
+
+Standalone TUI-only deployment continues to be:
+
+```sh
+racg serve
+```
+
+No separate executable is introduced.
+
+### Deprecated/experimental public surface
+
+The previously explored public service topology is out of the release path:
+
+- `service-authority`;
+- `service-broker`;
+- `service-admin`;
+- `service-agent run` as a required agent workflow;
+- separate authority/broker deployment as the only supported mode.
+
+These may remain as internal or experimental code, but they must not be required
+for the compatibility goal and must not be exposed as the primary workflow.
+
+### Compatibility acceptance
+
+Release is blocked unless all pass:
+
+1. Golden tests run the real client binaries v0.4.x and v0.5.x against the new
+   server in phone mode.
+2. The old clients work without upgrade, new flags, new config files or manual
+   service-agent steps.
+3. `racg run -- ...` produces unchanged request creation, polling, live output,
+   exit code and result behavior.
+4. A request approved from the phone behaves identically to one approved from
+   TUI.
+5. A request approved from TUI behaves identically and prevents a conflicting
+   phone decision.
+6. File transfers with no server size cap still work when approved.
+7. Removing the phone or stopping `phone-service` leaves legacy clients working
+   with TUI approval.
+8. A forged, replayed, modified, revoked-device or wrong-server phone decision
+   is rejected without executing the request.
+
+### Implementation order
+
+1. Freeze the v0.4/v0.5 public client contract with golden tests using real
+   old binaries.
+2. Add the local approval bridge inside the existing `racg serve` path.
+3. Add the internal `racg phone-service` role to the same binary.
+4. Add device registry, pairing QR, signed pending API and signed decision API.
+5. Reconnect Android to this phone-service API; retain biometric/PIN and request
+   detail UI.
+6. Add systemd target/unit packaging using the one binary under two users.
+7. Run compatibility, adversarial security and release artifact tests.
+
+Publication still requires an explicit user request.
+
+## Historical scope and decisions
+
+The following older decisions are retained as context, but they are superseded by the architecture above where they conflict.
 
 - Develop in this repository, with separately built and deployed components.
 - Primary new workflow: persistent server services and a Linux desktop approver.
