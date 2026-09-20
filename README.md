@@ -1,6 +1,6 @@
 # RACG
 
-RACG is a local Approval Gateway for privileged operations. A client sends requests such as `cmd.run`, `fs.read`, `fs.patch_unified`, `fs.upload`, or `fs.download`; a human approves or denies them in the terminal UI, and execution is audited in SQLite.
+RACG is a local Approval Gateway for privileged operations. A client sends requests such as `cmd.run`, `fs.read`, `fs.patch_unified`, `fs.upload`, or `fs.download`; a human approves or denies them in the terminal UI or from an enrolled remote approver (phone, desktop), and execution is audited in SQLite.
 
 ## Features
 
@@ -40,6 +40,32 @@ Security upgrade: older server builds accepted decisions from agent tokens. Upda
 - Read-only diagnostics rule presets
 - SQLite audit trail: sessions, requests, decisions, executions, rules
 - Command execution with timeout/kill/output limits
+
+## Remote approver mode (single public port)
+
+For headless servers the same binary splits into two processes: the privileged
+pipeline never touches the network, and the unprivileged facade is the only
+public listener. Existing v0.4.x/v0.5.x clients keep working through the
+facade unchanged.
+
+```bash
+sudo racg serve --headless --socket /run/racg/pipeline.sock
+racg remote-approver --listen 0.0.0.0:8777 --socket /run/racg/pipeline.sock
+```
+
+Remote approver devices (phone, desktop) enroll once through a one-time setup
+QR and submit signed decisions; the server verifies every device signature and
+binds it to the exact approved operation. Enrollment and revocation:
+
+```bash
+racg serve --approver-setup-out /tmp/approver-qr.png --public-url http://server:8777
+racg approver-devices list
+racg approver-devices revoke <device_id>
+```
+
+The facade validates traffic shape only and holds no secrets; the privileged
+pipeline verifies every session token and approver signature itself. See
+`docs/plans/2026-09-05-service-linux-approver.md` for the architecture.
 
 ## Local run
 

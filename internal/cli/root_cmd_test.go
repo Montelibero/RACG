@@ -61,3 +61,29 @@ func TestRootHelpIncludesFileAndConfigExamples(t *testing.T) {
 		}
 	}
 }
+
+func TestRootHelpCoversRemoteApproverSurface(t *testing.T) {
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	root := NewRoot(&out, &errOut)
+
+	if code := root.Run([]string{"--help"}); code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+
+	got := out.String()
+	for _, want := range []string{
+		"remote-approver",
+		"approver-devices",
+		"--headless",
+		"--socket /run/racg/pipeline.sock",
+		"--approver-setup-out",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("help output missing %q", want)
+		}
+	}
+	if strings.Contains(got, "phone-service") || strings.Contains(got, "phone bridge") {
+		t.Fatalf("help output must not mention removed phone surface")
+	}
+}

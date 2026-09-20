@@ -34,7 +34,7 @@ On HTTP 500 `DECISION_PERSISTENCE_FAILED`, retain `error.request_id`: automatic 
 
 If a manual decision cannot be persisted, the server leaves the request pending without applying new rules or dispatching execution. Ask the operator to resolve the storage error shown in TUI; do not resubmit the operation as a workaround.
 
-Manual approval and denial are local to the server TUI. Agent tokens cannot approve or deny requests over HTTP: the legacy `POST /v1/requests/{id}/decision` endpoint returns `403 REMOTE_DECISION_DISABLED`. Do not retry it or attempt self-approval; submit and wait for the operator. Existing authorized rules may still auto-approve matching requests. This protection requires an updated, restarted server, not just an updated client.
+Manual approval and denial are local to the server TUI, or performed by an enrolled remote approver device (phone, desktop) through the signed `/v1/approver` API. Agent tokens cannot approve or deny requests over HTTP: the legacy `POST /v1/requests/{id}/decision` endpoint returns `403 REMOTE_DECISION_DISABLED`. Do not retry it or attempt self-approval; submit and wait for the operator. Existing authorized rules may still auto-approve matching requests. This protection requires an updated, restarted server, not just an updated client.
 
 1. Resolve server auth:
    - If the user provides a pairing code, run `racg login --host <url> --pairing-code <code>`.

@@ -304,6 +304,18 @@
           "stdout_sha256": { "type": "string" },
           "stderr_sha256": { "type": "string" }
         }
+      },
+      "ApproverRequest": {
+        "type": "object",
+        "description": "Pending request as visible to an enrolled approver device.",
+        "properties": {
+          "id": { "type": "string" },
+          "status": { "type": "string" },
+          "client_id": { "type": "string" },
+          "op": { "type": "object", "description": "exact operation bytes; the decision must be signed over this SHA-256" },
+          "op_sha256": { "type": "string" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
       }
     }
   },
@@ -555,6 +567,74 @@
         "responses": {
           "101": { "description": "Switching Protocols (WebSocket)" },
           "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+        }
+      }
+    },
+    "/v1/approver/challenge": {
+      "get": {
+        "summary": "Get a one-time approver challenge",
+        "description": "Returns a random single-use challenge consumed by the next signed approver request (pairing, poll, or decision).",
+        "responses": {
+          "200": { "description": "challenge issued", "content": { "application/json": { "schema": { "type": "object", "properties": { "challenge": { "type": "string" } } } } } },
+          "405": { "description": "method not allowed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+        }
+      }
+    },
+    "/v1/approver/pairing": {
+      "post": {
+        "summary": "Enroll a remote approver device",
+        "description": "One-time enrollment: requires the server enrollment token (SHA-256 of the raw 32 token bytes) and an ECDSA P-256 signature from the device key over the racg/approver/pairing/v1 message.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["device_id", "public_key", "token_sha256", "challenge", "signature"], "properties": { "device_id": { "type": "string" }, "public_key": { "type": "string", "format": "base64", "description": "PKIX-encoded ECDSA P-256 public key" }, "token_sha256": { "type": "string" }, "challenge": { "type": "string" }, "signature": { "type": "string", "format": "base64" } } } } } },
+        "responses": {
+          "200": { "description": "device enrolled", "content": { "application/json": { "schema": { "type": "object", "properties": { "ok": { "type": "boolean" }, "device_id": { "type": "string" } } } } } },
+          "400": { "description": "bad request", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "401": { "description": "PAIRING_FAILED: wrong token, stale challenge or invalid signature", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+        }
+      }
+    },
+    "/v1/approver/requests": {
+      "get": {
+        "summary": "List pending requests for an enrolled approver device",
+        "description": "Requires signed poll headers: X-Racg-Approver-Device, X-Racg-Approver-Challenge and X-Racg-Approver-Signature (base64 ECDSA P-256 over the racg/approver/poll/v1 message). The challenge is consumed by this call.",
+        "parameters": [
+          { "name": "X-Racg-Approver-Device", "in": "header", "required": true, "schema": { "type": "string" } },
+          { "name": "X-Racg-Approver-Challenge", "in": "header", "required": true, "schema": { "type": "string" } },
+          { "name": "X-Racg-Approver-Signature", "in": "header", "required": true, "schema": { "type": "string", "format": "base64" } }
+        ],
+        "responses": {
+          "200": { "description": "pending requests", "content": { "application/json": { "schema": { "type": "object", "properties": { "requests": { "type": "array", "items": { "$ref": "#/components/schemas/ApproverRequest" } } } } } } },
+          "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "405": { "description": "method not allowed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+        }
+      }
+    },
+    "/v1/approver/requests/{request_id}": {
+      "get": {
+        "summary": "Get one pending request for an enrolled approver device",
+        "description": "Same signed poll headers as the pending list; the signature binds the exact request path.",
+        "parameters": [
+          { "name": "request_id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "X-Racg-Approver-Device", "in": "header", "required": true, "schema": { "type": "string" } },
+          { "name": "X-Racg-Approver-Challenge", "in": "header", "required": true, "schema": { "type": "string" } },
+          { "name": "X-Racg-Approver-Signature", "in": "header", "required": true, "schema": { "type": "string", "format": "base64" } }
+        ],
+        "responses": {
+          "200": { "description": "pending request", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApproverRequest" } } } },
+          "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "404": { "description": "not found or not pending", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+        }
+      }
+    },
+    "/v1/approver/decision": {
+      "post": {
+        "summary": "Submit a signed approver decision",
+        "description": "ALLOW_ONCE or DENY, signed by an enrolled device key and bound to the exact stored operation SHA-256, a fresh single-use challenge and the server identity. The first valid decision wins; conflicting later decisions are rejected.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["device_id", "request_id", "decision", "operation_sha256", "challenge", "signature"], "properties": { "device_id": { "type": "string" }, "request_id": { "type": "string" }, "decision": { "type": "string", "enum": ["ALLOW_ONCE", "DENY"] }, "operation_sha256": { "type": "string" }, "challenge": { "type": "string" }, "signature": { "type": "string", "format": "base64" } } } } } },
+        "responses": {
+          "200": { "description": "decision applied", "content": { "application/json": { "schema": { "type": "object", "properties": { "ok": { "type": "boolean" }, "device_id": { "type": "string" } } } } } },
+          "400": { "description": "operation mismatch or request no longer pending", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "401": { "description": "unknown device, invalid signature or stale challenge", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "404": { "description": "request not found or not pending", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
         }
       }
     }
