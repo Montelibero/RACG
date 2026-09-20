@@ -73,6 +73,20 @@ This process:
 It is **not** an executor and must not have access to command execution,
 authority state files, server signing keys or arbitrary local files.
 
+Its public phone/approver API uses the shared `/v1/approver` namespace:
+
+```text
+GET  /v1/approver/pairing/challenge
+POST /v1/approver/pairing
+GET  /v1/approver/requests
+GET  /v1/approver/requests/{id}
+POST /v1/approver/requests/{id}/decision
+```
+
+The `/v1/approver` routes are separate from the unchanged v0.4/v0.5 client API
+routes. A phone credential cannot call agent routes, and an agent credential
+cannot call approver routes.
+
 ### Security boundary
 
 The local approval bridge is deliberately narrow. It accepts only a signed
