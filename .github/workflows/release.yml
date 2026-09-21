@@ -112,10 +112,24 @@ jobs:
             echo "::warning::RACG_RELEASE_KEYSTORE_B64 / RACG_RELEASE_PROPERTIES secrets are missing; the release APK will be unsigned"
           fi
 
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.tag }}" ]]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+          echo "count=$(git rev-list --count HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Build APK (tests + debug + release)
         working-directory: apps/android
         env:
           SOURCE_REVISION: ${{ steps.rev.outputs.revision }}
+          RACG_VERSION_TAG: ${{ steps.ver.outputs.tag }}
+          RACG_ANDROID_VERSION_CODE: ${{ steps.ver.outputs.count }}
         run: bash build-docker.sh dist
 
       - name: Verify release signature

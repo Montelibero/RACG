@@ -8,6 +8,12 @@ rm -f \
   "$OUT/racg-approver-release.apk" \
   "$OUT/racg-approver-release-unsigned.apk"
 SOURCE_REVISION=$(git rev-parse HEAD 2>/dev/null || date +%s)
+# Version name: release tag in CI, git describe for local builds. Version
+# code: commit count — grows monotonically so APK updates install in place.
+VERSION_TAG="${RACG_VERSION_TAG:-$(git describe --tags 2>/dev/null || true)}"
+VERSION_NAME="${VERSION_TAG#v}"
+[[ -n "${VERSION_NAME}" ]] || VERSION_NAME="0.0.0-local"
+COMMIT_COUNT="$(git rev-list --count HEAD 2>/dev/null || echo 2)"
 secret_args=()
 if [[ -f docker/release.keystore || -f docker/release.properties ]]; then
   [[ -f docker/release.keystore && -f docker/release.properties ]] || {
@@ -22,6 +28,8 @@ if [[ -f docker/release.keystore || -f docker/release.properties ]]; then
 fi
 docker build \
   --build-arg SOURCE_REVISION="$SOURCE_REVISION" \
+  --build-arg ANDROID_VERSION_NAME="$VERSION_NAME" \
+  --build-arg ANDROID_VERSION_CODE="$COMMIT_COUNT" \
   "${secret_args[@]+"${secret_args[@]}"}" \
   --target apk-export \
   --output type=local,dest="$OUT" \
