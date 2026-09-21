@@ -88,7 +88,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-
+        with:
+          # Full history: build-docker.sh derives the APK versionCode from the
+          # commit count; a shallow clone would produce versionCode=1.
+          fetch-depth: 0
       - uses: docker/setup-buildx-action@v3
 
       - name: Resolve source revision
