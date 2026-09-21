@@ -60,12 +60,15 @@ fun BarcodeScannerView(
                 PackageManager.PERMISSION_GRANTED,
         )
     }
-    val launcher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted -> hasPermission = granted }
+
+    fun requestCamera() {
+        (context as? MainActivity)?.requestPermission(Manifest.permission.CAMERA) { granted ->
+            hasPermission = granted
+        } ?: run { hasPermission = false }
+    }
 
     LaunchedEffect(Unit) {
-        if (!hasPermission) launcher.launch(Manifest.permission.CAMERA)
+        if (!hasPermission) requestCamera()
     }
 
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
@@ -75,7 +78,7 @@ fun BarcodeScannerView(
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("Camera access is required")
                 Spacer(Modifier.height(16.dp))
-                Button(onClick = { launcher.launch(Manifest.permission.CAMERA) }) {
+                Button(onClick = { requestCamera() }) {
                     Text("Allow camera")
                 }
             }
