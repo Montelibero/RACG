@@ -39,7 +39,22 @@ type downloadArtifact struct {
 
 func (a *API) transferDir() string {
 	if strings.HasPrefix(a.cfg.DBPath, "file:") || strings.TrimSpace(a.cfg.DBPath) == "" {
-		return filepath.Join(os.TempDir(), "racg-transfers")
+		// In-memory or unset database (tests, misconfigured TOML):
+		// use a private random directory instead of a predictable
+		// shared one. A pre-created world-writable /tmp/racg-transfers
+		// would let a local user read and swap staged transfers.
+		a.transferMu.Lock()
+		defer a.transferMu.Unlock()
+		if a.fallbackTransferDir == "" {
+			dir, err := os.MkdirTemp("", "racg-transfers-*")
+			if err != nil {
+				// No private temp dir available; at least stay
+				// per-process and unpredictable-ish.
+				return filepath.Join(os.TempDir(), fmt.Sprintf("racg-transfers-%d", os.Getpid()))
+			}
+			a.fallbackTransferDir = dir
+		}
+		return a.fallbackTransferDir
 	}
 	return a.cfg.DBPath + ".transfers"
 }
@@ -343,12 +358,9 @@ func (a *API) handleRequestFile(w http.ResponseWriter, r *http.Request, c auth.C
 	a.reqsMu.Lock()
 	rec, ok := a.reqs[requestID]
 	a.reqsMu.Unlock()
-	if !ok {
+	if !ok || !canAccessRequest(c, rec) {
+		// Do not reveal the existence of other clients' downloads.
 		writeError(w, http.StatusNotFound, "REQUEST_NOT_FOUND", "request not found", requestID)
-		return
-	}
-	if rec.SessionID != c.SessionID {
-		writeError(w, http.StatusForbidden, "FORBIDDEN", "download belongs to another session", requestID)
 		return
 	}
 	var op rules.Op

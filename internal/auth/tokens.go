@@ -8,12 +8,27 @@ import (
 	"sync"
 	"time"
 )
+// Token roles. Operator tokens audit every request (the current
+// single-client model); agent tokens — minted through the pairing flow —
+// only ever see their own session's requests.
+const (
+	RoleAgent    = "agent"
+	RoleOperator = "operator"
+)
 
 type Claims struct {
 	SessionID string
 	ClientID  string
 	ExpiresAt time.Time
+	Role      string
 }
+
+// IsOperator reports whether the claims carry operator visibility. An
+// empty role reads as operator: pre-role records only exist for tokens
+// that predate roles, and the store migration marks exactly those as
+// operator.
+func (c Claims) IsOperator() bool { return c.Role != RoleAgent }
+
 
 // tokenRecord keeps the per-token TTL so Verify can slide the expiry.
 // ttl <= 0 means the token never expires.
@@ -72,9 +87,15 @@ func (m *TokenManager) Restore(hash string, claims Claims) {
 	m.mu.Unlock()
 }
 
-// Issue mints a token for the session. ttl <= 0 means the token never
-// expires (zero ExpiresAt).
+// Issue mints an agent-role token for the session. ttl <= 0 means the
+// token never expires.
 func (m *TokenManager) Issue(sessionID, clientID string, ttl time.Duration) (string, time.Time) {
+	return m.IssueWithRole(sessionID, clientID, ttl, RoleAgent)
+}
+
+// IssueWithRole mints a token with an explicit role (RoleAgent or
+// RoleOperator). ttl <= 0 means the token never expires.
+func (m *TokenManager) IssueWithRole(sessionID, clientID string, ttl time.Duration, role string) (string, time.Time) {
 	if ttl < 0 {
 		ttl = 0
 	}
@@ -88,7 +109,7 @@ func (m *TokenManager) Issue(sessionID, clientID string, ttl time.Duration) (str
 	_, _ = rand.Read(buf)
 	tok := base64.RawURLEncoding.EncodeToString(buf)
 
-	claims := Claims{SessionID: sessionID, ClientID: clientID, ExpiresAt: exp}
+	claims := Claims{SessionID: sessionID, ClientID: clientID, ExpiresAt: exp, Role: role}
 	hash := HashToken(tok)
 
 	m.mu.Lock()

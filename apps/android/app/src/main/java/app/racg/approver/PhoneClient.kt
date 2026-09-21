@@ -351,5 +351,7 @@ private fun adminPath(action: String): String = when (action) {
     "sessions.revoke" -> "/v1/approver/sessions/revoke"
     "devices.revoke" -> "/v1/approver/devices/revoke"
     "pairing_code" -> "/v1/approver/pairing-code"
+    "enrollment" -> "/v1/approver/enrollment"
+    "request.kill" -> "/v1/approver/request/kill"
     else -> throw IllegalArgumentException("Unknown admin action: $action")
 }

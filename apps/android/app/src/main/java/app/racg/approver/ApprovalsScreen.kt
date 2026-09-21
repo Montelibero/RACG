@@ -487,9 +487,11 @@ fun HistoryScreen(
     onBack: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var loading by remember { mutableStateOf(true) }
     var status by remember { mutableStateOf("Loading history") }
     var entries by remember { mutableStateOf<List<PhoneHistoryEntry>>(emptyList()) }
+    var busy by remember { mutableStateOf(false) }
     var serverId by remember { mutableStateOf(setups.firstOrNull()?.payload?.serverId ?: "") }
     val setup = setups.firstOrNull { it.payload.serverId == serverId } ?: setups.firstOrNull()
 
@@ -508,6 +510,33 @@ fun HistoryScreen(
             loading = false
         }
     }
+    fun killRequest(entry: PhoneHistoryEntry) {
+        val target = setup ?: return
+        val activity = context as? FragmentActivity
+        if (activity == null) {
+            status = "Biometric authentication is unavailable"
+            return
+        }
+        requestDeviceAuthentication(activity) {
+            scope.launch {
+                busy = true
+                runCatching {
+                    withContext(Dispatchers.IO) { adminAction(target, "request.kill", entry.requestId) }
+                }.onSuccess { response ->
+                    status = if (response.optBoolean("already_finished")) {
+                        "Request already finished (${entry.status ?: "finished"})"
+                    } else {
+                        "Request stopped"
+                    }
+                }.onFailure { error ->
+                    status = "Stop failed: ${error.message ?: "unknown error"}"
+                }
+                busy = false
+                load()
+            }
+        }
+    }
+
 
     LaunchedEffect(serverId) { load() }
 
@@ -538,6 +567,12 @@ fun HistoryScreen(
                         Text(historyVerdict(entry), style = MaterialTheme.typography.bodyMedium)
                         entry.clientId?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                         Text(formatHistoryTime(entry.decidedAt), style = MaterialTheme.typography.bodySmall)
+                        if (isActiveRequestStatus(entry.status)) {
+                            OutlinedButton(
+                                onClick = { killRequest(entry) },
+                                enabled = !busy,
+                            ) { Text("Stop this request") }
+                        }
                     }
                 }
             }
@@ -560,8 +595,13 @@ internal fun historyVerdict(entry: PhoneHistoryEntry): String {
         entry.decisionSource == "tui" -> "by TUI"
         else -> "by ${entry.decisionSource}"
     }
+
     val status = entry.status?.let { " — $it" } ?: ""
     return "$action $by$status".replace("  ", " ")
+}
+internal fun isActiveRequestStatus(status: String?): Boolean = when (status) {
+    "PENDING_APPROVAL", "APPROVED", "QUEUED", "RUNNING" -> true
+    else -> false
 }
 
 internal fun formatHistoryTime(decidedAt: String): String =

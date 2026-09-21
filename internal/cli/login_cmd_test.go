@@ -338,7 +338,7 @@ func TestCLISessionStatusUsesStoredClientConfig(t *testing.T) {
 			t.Fatalf("Authorization=%q", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"session_id":"sess1","client_id":"agent-1","expires_at":"2030-01-01T00:00:00Z","privilege_mode":"root"}`))
+		_, _ = w.Write([]byte(`{"session_id":"sess1","client_id":"agent-1","role":"agent","expires_at":"2030-01-01T00:00:00Z","privilege_mode":"root"}`))
 	}))
 	defer ts.Close()
 
@@ -353,7 +353,7 @@ func TestCLISessionStatusUsesStoredClientConfig(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("session status code=%d stderr=%s", code, errOut.String())
 	}
-	for _, want := range []string{"host: " + ts.URL, "session_id: sess1", "client_id: agent-1"} {
+	for _, want := range []string{"host: " + ts.URL, "session_id: sess1", "client_id: agent-1", "role: agent"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("stdout=%q want %q", out.String(), want)
 		}

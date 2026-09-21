@@ -75,7 +75,7 @@ func TestServerRehydratesRequestsAndMarksRunningFailed(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	openBody := []byte(`{"client_id":"codex-home","pairing_code":"` + s.PairingCode() + `"}`)
+	openBody := []byte(`{"client_id":"c1","pairing_code":"` + s.PairingCode() + `"}`)
 	openReq := httptest.NewRequest(http.MethodPost, "http://example/v1/session/open", bytes.NewReader(openBody))
 	openReq.Header.Set("Content-Type", "application/json")
 	openRW := httptest.NewRecorder()

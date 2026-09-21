@@ -42,6 +42,18 @@ url="https://github.com/${REPO}/releases/download/${tag}/${asset}"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "${tmp_dir}"' EXIT
 
+sum_url="https://github.com/${REPO}/releases/download/${tag}/checksums.txt"
+curl -fL "${sum_url}" -o "${tmp_dir}/checksums.txt"
+want="$(awk -v asset="${asset}" '$NF == asset {print $1}' "${tmp_dir}/checksums.txt")"
+if [[ -z "${want}" ]]; then
+  echo "checksums.txt has no entry for ${asset}" >&2
+  exit 1
+fi
+got="$(sha256sum "${tmp_dir}/${asset}" | awk '{print $1}')"
+if [[ "${got}" != "${want}" ]]; then
+  echo "SHA-256 mismatch for ${asset}: got ${got}, want ${want}" >&2
+  exit 1
+fi
 curl -fL "${url}" -o "${tmp_dir}/${asset}"
 tar -xzf "${tmp_dir}/${asset}" -C "${tmp_dir}"
 

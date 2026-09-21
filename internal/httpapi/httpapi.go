@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -101,6 +102,9 @@ type API struct {
 	live   map[string]*liveOutput
 
 	transferMu sync.Mutex
+	// fallbackTransferDir caches the private temp dir used when DBPath is
+	// in-memory or empty (see transferDir).
+	fallbackTransferDir string
 
 	approverMu                  sync.Mutex
 	approverChallenges          map[string]time.Time
@@ -1227,9 +1231,14 @@ func (a *API) handleSessionOpen(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleSessionMe(w http.ResponseWriter, r *http.Request, c auth.Claims) {
+	role := c.Role
+	if role == "" {
+		role = auth.RoleOperator
+	}
 	resp := map[string]any{
 		"session_id":     c.SessionID,
 		"client_id":      c.ClientID,
+		"role":           role,
 		"expires_at":     c.ExpiresAt.Format(time.RFC3339Nano),
 		"privilege_mode": "root",
 	}
@@ -1328,7 +1337,50 @@ func (a *API) handleRequests(w http.ResponseWriter, r *http.Request, c auth.Clai
 }
 
 func (a *API) handleRequestsList(w http.ResponseWriter, r *http.Request, c auth.Claims) {
-	status := strings.TrimSpace(r.URL.Query().Get("status"))
+	query := r.URL.Query()
+	status := strings.TrimSpace(query.Get("status"))
+	scope := query.Get("scope")
+	if !c.IsOperator() {
+		// Agent tokens never list beyond their own session, whatever
+		// the query string says.
+		scope = "session"
+	}
+	if scope == "session" {
+		// Recent history of the calling token's own session. The filter
+		// comes from the server-side session claim, never from the wire,
+		// so one agent cannot enumerate another session's requests.
+		limit := 10
+		if v := strings.TrimSpace(query.Get("limit")); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
+				limit = n
+			}
+		}
+		a.reqsMu.Lock()
+		out := make([]requestRecord, 0, limit)
+		for _, rec := range a.reqs {
+			if rec.SessionID != c.SessionID {
+				continue
+			}
+			if status != "" && rec.Status != status {
+				continue
+			}
+			out = append(out, rec)
+		}
+		a.reqsMu.Unlock()
+		sort.Slice(out, func(i, j int) bool {
+			return requestCreatedAt(out[i]).After(requestCreatedAt(out[j]))
+		})
+		if len(out) > limit {
+			out = out[:limit]
+		}
+		for i := range out {
+			if !requestUnredacted(r) {
+				out[i] = redactRequestRecord(out[i])
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"requests": out})
+		return
+	}
 	if status == "" {
 		status = "PENDING_APPROVAL"
 	}
@@ -1349,6 +1401,14 @@ func (a *API) handleRequestsList(w http.ResponseWriter, r *http.Request, c auth.
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"requests": out})
+}
+
+func requestCreatedAt(rec requestRecord) time.Time {
+	parsed, err := time.Parse(time.RFC3339Nano, rec.CreatedAt)
+	if err != nil {
+		return time.Time{}
+	}
+	return parsed
 }
 
 func mustJSON(v any) json.RawMessage {
@@ -1783,6 +1843,15 @@ func (a *API) decideInternalWithSource(ctx context.Context, requestID string, de
 }
 
 func (a *API) handleKill(w http.ResponseWriter, r *http.Request, c auth.Claims, requestID string) {
+	a.reqsMu.Lock()
+	rec, ok := a.reqs[requestID]
+	a.reqsMu.Unlock()
+	if !ok || !canAccessRequest(c, rec) {
+		// Do not reveal other clients' requests and never let one
+		// agent kill another client's running request.
+		writeError(w, http.StatusNotFound, "REQUEST_NOT_FOUND", "request not found", requestID)
+		return
+	}
 	if err := a.killInternal(r.Context(), requestID, c); err != nil {
 		if err.Error() == "REQUEST_NOT_FOUND" {
 			writeError(w, http.StatusNotFound, "REQUEST_NOT_FOUND", "request not found", requestID)
@@ -1861,6 +1930,15 @@ func summarizeOp(rec requestRecord) string {
 	default:
 		return op.Type
 	}
+}
+
+// canAccessRequest enforces token-role isolation: operator tokens audit
+// everything, agent tokens only ever reach their own client's requests.
+func canAccessRequest(c auth.Claims, rec requestRecord) bool {
+	if c.IsOperator() {
+		return true
+	}
+	return rec.ClientID == c.ClientID
 }
 
 func tuiDetails(rec requestRecord) string {
@@ -2123,7 +2201,7 @@ func readPreview(path string, maxBytes int) string {
 }
 
 func (a *API) handleEventsWS(w http.ResponseWriter, r *http.Request) {
-	_, ok := a.mustAuth(w, r)
+	claims, ok := a.mustAuth(w, r)
 	if !ok {
 		return
 	}
@@ -2149,6 +2227,11 @@ func (a *API) handleEventsWS(w http.ResponseWriter, r *http.Request) {
 		case e, ok := <-ch:
 			if !ok {
 				return
+			}
+			if !claims.IsOperator() && e.ClientID != "" && e.ClientID != claims.ClientID {
+				// Agent tokens receive only their own client's events;
+				// unattributed system events stay visible to everyone.
+				continue
 			}
 			if !requestUnredacted(r) && e.Type == "request.output" {
 				data := make(map[string]any, len(e.Data))
@@ -2184,12 +2267,12 @@ func (a *API) handleRequestByID(w http.ResponseWriter, r *http.Request, c auth.C
 		a.reqsMu.Lock()
 		rec, ok := a.reqs[id]
 		a.reqsMu.Unlock()
-		if !ok {
+		if !ok || !canAccessRequest(c, rec) {
+			// Do not reveal the existence of other clients' requests.
 			writeError(w, http.StatusNotFound, "REQUEST_NOT_FOUND", "request not found", id)
 			return
 		}
 
-		// In MVP we don't filter by session/client; token possession is sufficient.
 		if !requestUnredacted(r) {
 			rec = redactRequestRecord(rec)
 		}
@@ -2239,11 +2322,10 @@ func (a *API) handleRequestByID(w http.ResponseWriter, r *http.Request, c auth.C
 }
 
 func (a *API) handleRequestLog(w http.ResponseWriter, r *http.Request, c auth.Claims, requestID string, stream string) {
-	_ = c
 	a.reqsMu.Lock()
 	rec, ok := a.reqs[requestID]
 	a.reqsMu.Unlock()
-	if !ok {
+	if !ok || !canAccessRequest(c, rec) {
 		writeError(w, http.StatusNotFound, "REQUEST_NOT_FOUND", "request not found", requestID)
 		return
 	}
@@ -2336,6 +2418,8 @@ func mapPairingErr(err error) (code string, status int) {
 		return "PAIRING_CODE_EXPIRED", http.StatusForbidden
 	case errors.Is(err, auth.ErrPairingCodeUsed):
 		return "PAIRING_CODE_USED", http.StatusForbidden
+	case errors.Is(err, auth.ErrPairingCodeLocked):
+		return "PAIRING_CODE_LOCKED", http.StatusForbidden
 	default:
 		return "FORBIDDEN", http.StatusForbidden
 	}

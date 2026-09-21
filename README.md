@@ -88,6 +88,10 @@ export RACG_CLIENT_NAME=server
 racg session status
 ```
 
+Pairing codes are single-use, expire after 3 minutes, and burn permanently
+after 5 wrong attempts (`PAIRING_CODE_LOCKED`) — mint a fresh one with
+`racg pairing-code` instead of guessing.
+
 `racg login` saves a named client profile under `~/.config/racg/clients/`. It does not change global client state. Without `--name`, the profile name is derived from the hostname only: `--host server:8777` saves profile `server`. Select a profile per shell with `RACG_CLIENT_NAME`, or per command with `--name`:
 
 ```bash
@@ -130,6 +134,7 @@ Use `racg run --script <local-file>` or `--script-stdin` for multiline shell cod
 `racg request logs` reads raw stream endpoints (`/v1/requests/<id>/logs/stdout` and `/v1/requests/<id>/logs/stderr`) so large output can be consumed without parsing the full request JSON.
 Use `racg request logs <id> --live` for the current in-memory live output snapshot while a request is still running, or `racg request tail <id>` to follow live output until the request reaches a terminal status.
 Use `racg request cancel <id>` to cancel a pending approval or stop a running command.
+`racg request list` shows the recent history of the calling token's session: the 10 newest requests (any status), newest first, with `--status` and `--limit` filters. It reads `GET /v1/requests?scope=session`; the session filter is the server-side token claim, so one agent never sees another session's requests.
 Use `racg config set` to request a format-aware config edit without shell scripts. It supports `env`, `json`, and `yaml`; writes a backup next to an existing file by default; validates the result before replacing the file; and uses dotted keys for `json`/`yaml`. Pass `--create` to atomically create a missing file with mode `0600`; its parent directory must already exist.
 Use `racg file read` and `racg file patch` for plain text files such as HAProxy, nginx, systemd unit files, or other non-JSON/YAML configs. `file patch` submits an `fs.patch_unified` request and expects a unified diff.
 Use `racg file upload <local> <remote>` and `racg file download <remote> <local>` for binary or large files. Both create approval requests. File bytes are streamed outside JSON, checked with SHA-256, and written atomically. Upload preserves an existing target's permissions or uses `0644` for a new file; pass `--mode 0600` when needed. Download refuses to replace a local file unless `--force` is passed. The server default transfer limit is 100 MiB and can be changed with `racg serve --max-transfer-bytes N`.
@@ -187,7 +192,9 @@ For shell requests such as:
 bash -lc 'docker stop nginx && echo ok && rm /'
 ```
 
-RACG analyzes each shell segment independently. Auto-approve only happens when every segment matches a rule. The TUI request details show `[ALLOW]` and `[BLOCK]` lines with the matching rule or block reason.
+RACG analyzes each shell segment independently. Auto-approve only happens when every segment matches a rule. Segments with dynamic words, redirects, or environment assignment prefixes (`VAR=val cmd`) are never auto-approved; they always fall through to manual confirmation, so `LD_PRELOAD`-style overrides cannot ride an allowed command.
+
+File operations (`fs.read`, `fs.patch_unified`, `fs.upload`, `fs.download`, `conf.set`) require absolute canonical paths: no `.`/`..` segments, no trailing slash, no double separators, no symlinks escaping the rule scope. Non-canonical paths are rejected at admission, and rule matching resolves symlinks before comparing against path rules, so `/var/log/../../etc/shadow` cannot ride a `/var/log/` prefix rule.
 
 ## Safe vs Dangerous (`ALLOW_ALWAYS`)
 
@@ -238,6 +245,12 @@ operation details, raw operation on demand, decision history from every
 source (phone, TUI, auto-rules), and a server management screen: extend or
 revoke agent sessions, revoke devices, mint pairing codes.
 
+Transferring to a new phone is a remote enrollment: an enrolled device
+mints a fresh single-use enrollment token through the signed admin action
+`enrollment` (`POST /v1/approver/enrollment`) and renders a standard setup
+QR from it; the new phone pairs through the regular flow and the old one
+stays enrolled.
+
 Background watcher starts on its own, receives instant WebSocket wake-ups
 (`/v1/approver/events`) with a 60-second polling fallback, and survives
 reboots. Server-side decisions from the phone carry the device identity and
@@ -258,6 +271,27 @@ Sessions persist across server restarts (hashed tokens in SQLite), extend on
 activity (sliding expiry) and can be extended or revoked from the phone. Set
 `session_ttl_hours` in the config to change the default 8-hour lifetime
 (`0` = no expiry).
+
+### Token roles
+
+Tokens carry a role. Tokens minted through the pairing flow are `agent`
+role: their request list is always scoped to their own session, and
+detail/logs/files/events/kill only reach their own requests — another
+client's requests answer `404`, so one agent can neither read nor stop
+another agent's work. `operator` role keeps the full audit view across all
+sessions (`racg request list` without the session scope, every request
+detail). `racg session status` shows the current role.
+
+The role column was added by a migration that marks every token issued
+before roles existed as `operator`, so existing deployments keep working.
+Those legacy tokens retain cross-session visibility until they are
+re-issued: revoke the session from the phone or TUI and log the agent in
+again with a fresh pairing code to mint an `agent` token.
+
+The approver phone shows which agent owns every request (client id in the
+pending list, request details, and history) and can stop a wrong running
+request from the history screen (`request.kill` admin action), regardless
+of the owning session.
 
 ## Headless mode (SSH-only servers)
 

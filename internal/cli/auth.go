@@ -180,7 +180,7 @@ func (c *AuthCmd) runSessionStatus(args []string) int {
 		fmt.Fprintf(c.stderr, "session status failed: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(c.stdout, "host: %s\nsession_id: %s\nclient_id: %s\nexpires_at: %s\nprivilege_mode: %s\n", h, me.SessionID, me.ClientID, me.ExpiresAt, me.PrivilegeMode)
+	fmt.Fprintf(c.stdout, "host: %s\nsession_id: %s\nclient_id: %s\nrole: %s\nexpires_at: %s\nprivilege_mode: %s\n", h, me.SessionID, me.ClientID, me.Role, me.ExpiresAt, me.PrivilegeMode)
 	return 0
 }
 

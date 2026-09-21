@@ -19,14 +19,14 @@ func TestAuthTokensCRUD(t *testing.T) {
 	}
 
 	exp := time.Unix(2000, 123456789).UTC()
-	if err := s.UpsertAuthToken(ctx, "hash1", "sess1", "client1", exp); err != nil {
+	if err := s.UpsertAuthToken(ctx, "hash1", "sess1", "client1", "operator", exp); err != nil {
 		t.Fatalf("UpsertAuthToken: %v", err)
 	}
-	if err := s.UpsertAuthToken(ctx, "hash2", "sess1", "client2", time.Time{}); err != nil {
+	if err := s.UpsertAuthToken(ctx, "hash2", "sess1", "client2", "agent", time.Time{}); err != nil {
 		t.Fatalf("UpsertAuthToken no-expiry: %v", err)
 	}
 	// Upsert on the same hash updates in place instead of duplicating.
-	if err := s.UpsertAuthToken(ctx, "hash1", "sess1", "client1", exp.Add(time.Minute)); err != nil {
+	if err := s.UpsertAuthToken(ctx, "hash1", "sess1", "client1", "operator", exp.Add(time.Minute)); err != nil {
 		t.Fatalf("UpsertAuthToken update: %v", err)
 	}
 
@@ -45,7 +45,7 @@ func TestAuthTokensCRUD(t *testing.T) {
 	if !ok {
 		t.Fatalf("hash1 missing: %+v", got)
 	}
-	if h1.SessionID != "sess1" || h1.ClientID != "client1" {
+	if h1.SessionID != "sess1" || h1.ClientID != "client1" || h1.Role != "operator" {
 		t.Fatalf("hash1 = %+v", h1)
 	}
 	if !h1.ExpiresAt.Equal(exp.Add(time.Minute)) {
@@ -59,6 +59,9 @@ func TestAuthTokensCRUD(t *testing.T) {
 		t.Fatalf("hash2 expires=%v, want zero", h2.ExpiresAt)
 	}
 
+	if h2.Role != "agent" {
+		t.Fatalf("hash2 role=%q, want agent", h2.Role)
+	}
 	if err := s.DeleteAuthToken(ctx, "hash1"); err != nil {
 		t.Fatalf("DeleteAuthToken: %v", err)
 	}

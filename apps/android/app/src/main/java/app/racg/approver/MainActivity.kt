@@ -158,33 +158,55 @@ private fun AppContent() {
             scope.launch {
                 try {
                     val qr = withContext(Dispatchers.IO) {
-                        val token = ByteArray(32).also { SecureRandom().nextBytes(it) }
-                        val suffix = ByteArray(6).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
-                        val newDeviceId = target.payload.approverId + "-transfer-" + suffix
-                        val grant = ApprovalProtocol.newDeviceTransferGrant(
-                            serverId = target.payload.serverId,
-                            currentDeviceId = target.payload.approverId,
-                            keyType = target.approvalKeyMaterial.keyType,
-                            newDeviceId = newDeviceId,
-                            token = token,
-                            now = Instant.now(),
-                        )
-                        val signedGrant = ApprovalProtocol.signDeviceTransferGrant(
-                            grant,
-                            DeviceKeyManager.approvalSigner(target.approvalKeyMaterial.publicKey),
-                        )
-                        val uri = URI(target.payload.endpoint)
-                        BrokerClient(uri.host, uri.port).createTransfer(signedGrant)
-                        org.json.JSONObject().apply {
-                            put("v", 3)
-                            put("kind", SetupQrParser.KIND)
-                            put("server_id", target.payload.serverId)
-                            put("server_public_key", java.util.Base64.getEncoder().encodeToString(target.payload.serverPublicKey))
-                            put("endpoint", target.payload.endpoint)
-                            put("new_device_id", newDeviceId)
-                            put("grant_challenge", java.util.Base64.getEncoder().encodeToString(grant.challenge))
-                            put("transfer_token", java.util.Base64.getEncoder().encodeToString(token))
-                        }.toString()
+                        val endpointUri = URI(target.payload.endpoint)
+                        if (endpointUri.scheme == "http" || endpointUri.scheme == "https") {
+                            // HTTP servers: transfer is a remote enrollment.
+                            // The old phone mints a fresh one-time enrollment
+                            // token through the signed admin action and renders
+                            // a standard v4 setup QR; the new phone pairs
+                            // through the regular flow, the old one stays
+                            // enrolled.
+                            val tokenB64 = adminAction(target, "enrollment", "").getString("token_b64")
+                            val suffix = ByteArray(6).also { SecureRandom().nextBytes(it) }
+                                .joinToString("") { "%02x".format(it) }
+                            val newDeviceId = target.payload.approverId + "-transfer-" + suffix
+                            org.json.JSONObject().apply {
+                                put("v", 4)
+                                put("kind", SetupQrParser.KIND)
+                                put("server_id", target.payload.serverId)
+                                put("approver_id", newDeviceId)
+                                put("endpoint", target.payload.endpoint)
+                                put("enrollment_token", tokenB64)
+                            }.toString()
+                        } else {
+                            val token = ByteArray(32).also { SecureRandom().nextBytes(it) }
+                            val suffix = ByteArray(6).also { SecureRandom().nextBytes(it) }
+                                .joinToString("") { "%02x".format(it) }
+                            val newDeviceId = target.payload.approverId + "-transfer-" + suffix
+                            val grant = ApprovalProtocol.newDeviceTransferGrant(
+                                serverId = target.payload.serverId,
+                                currentDeviceId = target.payload.approverId,
+                                keyType = target.approvalKeyMaterial.keyType,
+                                newDeviceId = newDeviceId,
+                                token = token,
+                                now = Instant.now(),
+                            )
+                            val signedGrant = ApprovalProtocol.signDeviceTransferGrant(
+                                grant,
+                                DeviceKeyManager.approvalSigner(target.approvalKeyMaterial.publicKey),
+                            )
+                            BrokerClient(endpointUri.host, endpointUri.port).createTransfer(signedGrant)
+                            org.json.JSONObject().apply {
+                                put("v", 3)
+                                put("kind", SetupQrParser.KIND)
+                                put("server_id", target.payload.serverId)
+                                put("server_public_key", java.util.Base64.getEncoder().encodeToString(target.payload.serverPublicKey))
+                                put("endpoint", target.payload.endpoint)
+                                put("new_device_id", newDeviceId)
+                                put("grant_challenge", java.util.Base64.getEncoder().encodeToString(grant.challenge))
+                                put("transfer_token", java.util.Base64.getEncoder().encodeToString(token))
+                            }.toString()
+                        }
                     }
                     transferQr = qr
                     transferServerId = target.payload.serverId

@@ -125,7 +125,7 @@ commands:
   logout     remove saved client auth
   session    inspect saved/current session
   run        submit cmd.run and wait by default
-  request    wait, cancel, tail, or read request logs
+  request    list recent session requests, wait, cancel, tail, or read logs
   file       read, patch, upload, or download files through approval
   config     set env/json/yaml config keys through approval
   rules      list, enable/disable/delete, and install presets
@@ -168,6 +168,8 @@ common commands:
   racg request tail <id>
   racg request logs <id> --stdout --unredacted
   racg request cancel <id>
+  racg request list
+  racg request list --status FAILED --limit 5
 
 updates and version compatibility:
   racg update --check

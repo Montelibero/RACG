@@ -184,8 +184,9 @@ func (d *approverTestDevice) pollWithApprovalKey(t *testing.T, api *API, path st
 	return req
 }
 
-// adminRequest builds a device-signed administrative mutation (approval key).
-func (d *approverTestDevice) adminRequest(t *testing.T, api *API, action, targetID string) *http.Request {
+// adminRequest builds a device-signed administrative mutation (approval key)
+// targeting the given endpoint path.
+func (d *approverTestDevice) adminRequest(t *testing.T, api *API, action, targetID, path string) *http.Request {
 	t.Helper()
 	challenge := fetchApproverChallenge(t, api)
 	message := approverMessage(approverAdminDomain, api.serverName, d.id, action, targetID, challenge)
@@ -199,7 +200,7 @@ func (d *approverTestDevice) adminRequest(t *testing.T, api *API, action, target
 	if err != nil {
 		t.Fatal(err)
 	}
-	return httptest.NewRequest(http.MethodPost, "/v1/approver/devices/revoke", strings.NewReader(string(body)))
+	return httptest.NewRequest(http.MethodPost, path, strings.NewReader(string(body)))
 }
 
 func (d *approverTestDevice) signWith(t *testing.T, key *ecdsa.PrivateKey, message []byte) []byte {
@@ -330,6 +331,55 @@ func TestApproverEnrollmentTokenSingleUse(t *testing.T) {
 	}
 }
 
+func TestApproverTransferEnrollmentFlow(t *testing.T) {
+	api, _, _ := newApproverTestAPI(t)
+	oldPhone := newApproverTestDevice(t, "dev-old")
+	// The old phone must be enrolled before it can mint enrollment tokens.
+	if rw := serveApprover(t, api, oldPhone.pairRequest(t, api, api.serverName, approverTokenHex(api))); rw.Code != http.StatusOK {
+		t.Fatalf("old phone pairing: %d %s", rw.Code, rw.Body.String())
+	}
+
+	// Unsigned enrollment minting must be rejected.
+	if rw := serveApprover(t, api, httptest.NewRequest(http.MethodPost, "/v1/approver/enrollment", strings.NewReader(`{"device_id":"dev-old","action":"enrollment"}`))); rw.Code != http.StatusUnauthorized {
+		t.Fatalf("unsigned enrollment: %d %s", rw.Code, rw.Body.String())
+	}
+	// Wrong action must be rejected with a distinct error.
+	if rw := serveApprover(t, api, oldPhone.adminRequest(t, api, "pairing_code", "", "/v1/approver/enrollment")); rw.Code != http.StatusBadRequest {
+		t.Fatalf("wrong action: %d %s", rw.Code, rw.Body.String())
+	}
+
+	rw := serveApprover(t, api, oldPhone.adminRequest(t, api, "enrollment", "", "/v1/approver/enrollment"))
+	if rw.Code != http.StatusOK {
+		t.Fatalf("signed enrollment: %d %s", rw.Code, rw.Body.String())
+	}
+	var out struct {
+		TokenB64  string `json:"token_b64"`
+		ExpiresAt string `json:"expires_at"`
+	}
+	if err := json.Unmarshal(rw.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := base64.StdEncoding.DecodeString(out.TokenB64)
+	if err != nil || len(raw) == 0 {
+		t.Fatalf("token_b64 invalid: %q err=%v", out.TokenB64, err)
+	}
+	if expires, err := time.Parse(time.RFC3339Nano, out.ExpiresAt); err != nil || expires.Before(time.Now()) {
+		t.Fatalf("expires_at invalid: %q err=%v", out.ExpiresAt, err)
+	}
+
+	// The minted token pairs a new phone through the regular flow.
+	sum := sha256.Sum256(raw)
+	tokenHex := hex.EncodeToString(sum[:])
+	newPhone := newApproverTestDevice(t, "dev-new")
+	if rw := serveApprover(t, api, newPhone.pairRequest(t, api, api.serverName, tokenHex)); rw.Code != http.StatusOK {
+		t.Fatalf("new phone pairing with minted token: %d %s", rw.Code, rw.Body.String())
+	}
+	// The old phone stays enrolled and operational after the transfer.
+	if rw := serveApprover(t, api, oldPhone.pollRequest(t, api, "/v1/approver/devices")); rw.Code != http.StatusOK {
+		t.Fatalf("old phone poll after transfer: %d %s", rw.Code, rw.Body.String())
+	}
+}
+
 func TestApproverDeviceListAndRevocation(t *testing.T) {
 	api, _, _ := newApproverTestAPI(t)
 	device := newApproverTestDevice(t, "dev1")
@@ -343,9 +393,9 @@ func TestApproverDeviceListAndRevocation(t *testing.T) {
 	}
 	var devices struct {
 		Devices []struct {
-			DeviceID    string `json:"device_id"`
-			Enabled     bool   `json:"enabled"`
-			HasPollKey  bool   `json:"has_poll_key"`
+			DeviceID   string `json:"device_id"`
+			Enabled    bool   `json:"enabled"`
+			HasPollKey bool   `json:"has_poll_key"`
 		} `json:"devices"`
 	}
 	if err := json.Unmarshal(list.Body.Bytes(), &devices); err != nil {
@@ -368,7 +418,7 @@ func TestApproverDeviceListAndRevocation(t *testing.T) {
 	if rw := serveApprover(t, api, httptest.NewRequest(http.MethodPost, "/v1/approver/devices/revoke", strings.NewReader(string(revokeBody)))); rw.Code != http.StatusUnauthorized {
 		t.Fatalf("unsigned revoke: %d %s", rw.Code, rw.Body.String())
 	}
-	signed := device.adminRequest(t, api, "devices.revoke", "dev1")
+	signed := device.adminRequest(t, api, "devices.revoke", "dev1", "/v1/approver/devices/revoke")
 	if rw := serveApprover(t, api, signed); rw.Code != http.StatusOK {
 		t.Fatalf("signed revoke: %d %s", rw.Code, rw.Body.String())
 	}

@@ -20,9 +20,61 @@ func TestPairingConsumeOnce(t *testing.T) {
 	if err := p.Consume(code); err != ErrPairingCodeUsed {
 		t.Fatalf("expected used, got %v", err)
 	}
-	if err := p.Consume("WRONG1"); err != ErrPairingCodeInvalid {
-		t.Fatalf("expected invalid, got %v", err)
+	// A burned code answers USED for any guess — never confirm whether
+	// the guess itself was right.
+	if err := p.Consume("WRONG1"); err != ErrPairingCodeUsed {
+		t.Fatalf("expected used, got %v", err)
 	}
+}
+
+func TestPairingLocksAfterFailedAttempts(t *testing.T) {
+	clk := NewFakeClock(time.Unix(1000, 0).UTC())
+	p := NewPairing(6, 3*time.Minute, clk)
+	code := p.Code()
+
+	// Wrong codes are tolerated until the fifth; case and surrounding
+	// whitespace stay irrelevant.
+	for i := 0; i < maxPairingAttempts-1; i++ {
+		if err := p.Consume("WRONG1"); err != ErrPairingCodeInvalid {
+			t.Fatalf("attempt %d: expected invalid, got %v", i, err)
+		}
+	}
+	if err := p.Consume("  " + lower(code) + " "); err != nil {
+		t.Fatalf("valid code after %d wrong attempts: %v", maxPairingAttempts-1, err)
+	}
+
+	// A fresh code burns permanently on the fifth wrong attempt.
+	p2 := NewPairing(6, 3*time.Minute, clk)
+	real := p2.Code()
+	for i := 0; i < maxPairingAttempts; i++ {
+		err := p2.Consume("WRONG1")
+		if i < maxPairingAttempts-1 && err != ErrPairingCodeInvalid {
+			t.Fatalf("attempt %d: expected invalid, got %v", i, err)
+		}
+		if i == maxPairingAttempts-1 && err != ErrPairingCodeLocked {
+			t.Fatalf("final attempt: expected locked, got %v", err)
+		}
+	}
+	// Even the right code is dead afterwards.
+	if err := p2.Consume(real); err != ErrPairingCodeUsed {
+		t.Fatalf("correct code after lock: got %v", err)
+	}
+
+	// Regenerate fully resets the lock.
+	p2.Regenerate()
+	if err := p2.Consume(p2.Code()); err != nil {
+		t.Fatalf("consume after regenerate: %v", err)
+	}
+}
+
+func lower(s string) string {
+	out := []byte(s)
+	for i := range out {
+		if out[i] >= 'A' && out[i] <= 'Z' {
+			out[i] += 'a' - 'A'
+		}
+	}
+	return string(out)
 }
 
 func TestPairingExpiry(t *testing.T) {
@@ -51,7 +103,7 @@ func TestPairingRegenerate(t *testing.T) {
 		t.Fatalf("consume new: %v", err)
 	}
 	// Old code should no longer be valid.
-	if err := p.Consume(code1); err != ErrPairingCodeInvalid {
+	if err := p.Consume(code1); err != ErrPairingCodeUsed {
 		t.Fatalf("expected old invalid, got %v", err)
 	}
 }

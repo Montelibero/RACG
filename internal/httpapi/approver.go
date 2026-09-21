@@ -87,6 +87,8 @@ func (a *API) registerApproverRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/v1/approver/devices", a.handleApproverDevices)
 	mux.HandleFunc("/v1/approver/devices/revoke", a.handleApproverDeviceRevoke)
 	mux.HandleFunc("/v1/approver/pairing-code", a.handleApproverPairingCode)
+	mux.HandleFunc("/v1/approver/enrollment", a.handleApproverEnrollment)
+	mux.HandleFunc("/v1/approver/request/kill", a.handleApproverRequestKill)
 	mux.HandleFunc("/v1/approver/events", a.handleApproverEvents)
 	mux.HandleFunc("/v1/admin/approver/enrollment", a.handleAdminApproverEnrollment)
 	mux.HandleFunc("/v1/admin/pairing-code", a.handleAdminPairingCode)
@@ -354,10 +356,10 @@ func (a *API) handleApproverHistory(w http.ResponseWriter, r *http.Request) {
 	out := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
 		entry := map[string]any{
-			"request_id":     row.RequestID,
-			"decision":       row.Decision,
+			"request_id":      row.RequestID,
+			"decision":        row.Decision,
 			"decision_source": row.DecisionSource,
-			"decided_at":     row.DecidedAt.UTC().Format(time.RFC3339Nano),
+			"decided_at":      row.DecidedAt.UTC().Format(time.RFC3339Nano),
 		}
 		if row.RuleID != "" {
 			entry["rule_id"] = row.RuleID
@@ -611,9 +613,9 @@ func (a *API) handleApproverDevices(w http.ResponseWriter, r *http.Request) {
 	out := []map[string]any{}
 	for _, d := range devices {
 		out = append(out, map[string]any{
-			"device_id":  d.DeviceID,
-			"created_at": d.CreatedAt.UTC().Format(time.RFC3339Nano),
-			"enabled":    d.Enabled,
+			"device_id":    d.DeviceID,
+			"created_at":   d.CreatedAt.UTC().Format(time.RFC3339Nano),
+			"enabled":      d.Enabled,
 			"has_poll_key": len(d.PollPublicKey) > 0,
 		})
 	}
@@ -666,6 +668,97 @@ func (a *API) handleApproverPairingCode(w http.ResponseWriter, r *http.Request) 
 		"pairing_code":       a.pairing.Code(),
 		"expires_in_seconds": int(a.pairing.ExpiresIn().Seconds()),
 	})
+}
+
+// handleApproverEnrollment mints a fresh one-time approver enrollment token
+// for an already-enrolled device ("transfer to a new phone"): the old phone
+// signs the admin action and renders a standard setup QR, the new phone
+// pairs through the regular /v1/approver/pairing flow. The minted token is
+// single-use, expires after approverPairingTokenTTL, and invalidates any
+// previously issued enrollment token.
+func (a *API) handleApproverEnrollment(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "", "")
+		return
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, approverMaxBodyBytes))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request", "")
+		return
+	}
+	input, err := a.authenticateApproverAdmin(body)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", err.Error(), input.TargetID)
+		return
+	}
+	if input.Action != "enrollment" {
+		writeError(w, http.StatusBadRequest, "BAD_ACTION", "expected action enrollment", input.TargetID)
+		return
+	}
+	token, expires, err := a.MintApproverPairingToken()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL", err.Error(), "")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "token_b64": token, "expires_at": expires.Format(time.RFC3339Nano)})
+}
+
+// handleApproverRequestKill stops a running (or still queued) request from
+// the phone: a device-signed admin action with target_id = request_id.
+// The phone sees request owners in its history, so it can kill a wrong
+// command regardless of which agent session submitted it. Terminal-status
+// requests are reported as already finished instead of being mutated.
+func (a *API) handleApproverRequestKill(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "", "")
+		return
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, approverMaxBodyBytes))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request", "")
+		return
+	}
+	input, err := a.authenticateApproverAdmin(body)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", err.Error(), input.TargetID)
+		return
+	}
+	if input.Action != "request.kill" {
+		writeError(w, http.StatusBadRequest, "BAD_ACTION", "expected action request.kill", input.TargetID)
+		return
+	}
+	requestID := strings.TrimSpace(input.TargetID)
+	if requestID == "" {
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "target_id (request_id) required", "")
+		return
+	}
+	a.reqsMu.Lock()
+	rec, ok := a.reqs[requestID]
+	a.reqsMu.Unlock()
+	if !ok {
+		writeError(w, http.StatusNotFound, "REQUEST_NOT_FOUND", "request not found", requestID)
+		return
+	}
+	if terminalRequestStatus(rec.Status) {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "request_id": requestID, "status": rec.Status, "already_finished": true})
+		return
+	}
+	// Attribute the kill to the request owner so hub events and audit
+	// reflect the affected session, not the phone.
+	if err := a.killInternal(context.Background(), requestID, auth.Claims{SessionID: rec.SessionID, ClientID: rec.ClientID}); err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL", err.Error(), requestID)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "request_id": requestID, "killed": true})
+}
+
+func terminalRequestStatus(status string) bool {
+	switch status {
+	case "SUCCEEDED", "FAILED", "TIMED_OUT", "KILLED", "DENIED", "CANCELED":
+		return true
+	default:
+		return false
+	}
 }
 
 // ---- Privileged admin endpoints (pipeline unix socket only) ----

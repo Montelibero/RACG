@@ -160,6 +160,7 @@
         "required": [
           "session_id",
           "client_id",
+          "role",
           "expires_at",
           "privilege_mode"
         ],
@@ -169,6 +170,14 @@
           },
           "client_id": {
             "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "agent",
+              "operator"
+            ],
+            "description": "agent tokens only see their own session's requests; operator tokens audit everything."
           },
           "expires_at": {
             "type": "string",
@@ -1022,6 +1031,26 @@
               "$ref": "#/components/schemas/RequestStatus"
             },
             "description": "Defaults to PENDING_APPROVAL."
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["session"]
+            },
+            "description": "scope=session returns the recent history of the calling token's own session (server-side session claim, newest first, default limit 10). Without it the legacy behavior stays: pending approvals across all sessions."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 10
+            },
+            "description": "How many recent requests to return with scope=session (1-100)."
           },
           {
             "name": "unredacted",
@@ -2206,6 +2235,140 @@
           },
           "401": {
             "description": "invalid admin signature or stale challenge",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/approver/enrollment": {
+      "post": {
+        "summary": "Mint a one-time approver enrollment token (transfer to a new phone)",
+        "description": "Device-signed racg/approver/admin/v1 message (approval key) with action enrollment. Returns a fresh single-use enrollment token (base64 of 32 raw bytes) plus its expiry. The old phone renders a standard setup QR from it; the new phone pairs through the regular /v1/approver/pairing flow. Minting invalidates any previously issued enrollment token; the old device stays enrolled.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproverAdminRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "enrollment token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "token_b64": {
+                      "type": "string"
+                    },
+                    "expires_at": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "action is not enrollment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid admin signature or stale challenge",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/approver/request/kill": {
+      "post": {
+        "summary": "Stop a running request from the phone (signed admin action)",
+        "description": "Device-signed racg/approver/admin/v1 message (approval key) with action request.kill and target_id = request_id. Cancels pending requests and kills running ones regardless of the owning agent session; terminal-status requests are reported as already finished. The phone history shows each request's owner (client_id).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproverAdminRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "request stopped or already finished",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "request_id": {
+                      "type": "string"
+                    },
+                    "killed": {
+                      "type": "boolean"
+                    },
+                    "already_finished": {
+                      "type": "boolean"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "action is not request.kill or target_id missing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid admin signature or stale challenge",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "unknown request",
             "content": {
               "application/json": {
                 "schema": {

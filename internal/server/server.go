@@ -66,7 +66,7 @@ func New(cfg config.Config) (*Server, error) {
 		return nil, fmt.Errorf("store load auth tokens: %w", err)
 	}
 	for _, t := range tokens {
-		tm.Restore(t.TokenHash, auth.Claims{SessionID: t.SessionID, ClientID: t.ClientID, ExpiresAt: t.ExpiresAt})
+		tm.Restore(t.TokenHash, auth.Claims{SessionID: t.SessionID, ClientID: t.ClientID, ExpiresAt: t.ExpiresAt, Role: t.Role})
 	}
 	tm.OnChange(func(hash string, claims auth.Claims, deleted bool) {
 		// Persistence failures are non-fatal (MVP): the in-memory
@@ -76,7 +76,7 @@ func New(cfg config.Config) (*Server, error) {
 			_ = st.DeleteAuthToken(ctx, hash)
 			return
 		}
-		_ = st.UpsertAuthToken(ctx, hash, claims.SessionID, claims.ClientID, claims.ExpiresAt)
+		_ = st.UpsertAuthToken(ctx, hash, claims.SessionID, claims.ClientID, claims.Role, claims.ExpiresAt)
 	})
 
 	api := httpapi.New(cfg, httpapi.WithRulesEngine(re), httpapi.WithStore(st), httpapi.WithTokenManager(tm))

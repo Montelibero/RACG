@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -43,6 +44,8 @@ func (c *RequestCmd) Run(args []string) int {
 		return c.runLogs(args[1:])
 	case "tail":
 		return c.runTail(args[1:])
+	case "list":
+		return c.runList(args[1:])
 	default:
 		fmt.Fprintln(c.stderr, requestUsage())
 		return 2
@@ -50,7 +53,7 @@ func (c *RequestCmd) Run(args []string) int {
 }
 
 func requestUsage() string {
-	return "usage: racg request <wait|cancel|logs|tail> [args]"
+	return "usage: racg request <list|wait|cancel|logs|tail> [args]"
 }
 
 func (c *RequestCmd) RunRun(args []string) int {
@@ -306,6 +309,88 @@ func (c *RequestCmd) runCancel(args []string) int {
 	return 0
 }
 
+func (c *RequestCmd) runList(args []string) int {
+	fs := flag.NewFlagSet("racg request list", flag.ContinueOnError)
+	fs.SetOutput(c.stderr)
+	host := fs.String("host", strings.TrimSpace(os.Getenv("RACG_HOST")), "RACG server URL")
+	token := fs.String("token", strings.TrimSpace(os.Getenv("RACG_TOKEN")), "session bearer token")
+	name := fs.String("name", strings.TrimSpace(os.Getenv("RACG_CLIENT_NAME")), "client profile name")
+	status := fs.String("status", "", "filter by request status (default: all statuses)")
+	limit := fs.Int("limit", 10, "how many recent requests to show (1-100)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *limit < 1 || *limit > 100 {
+		fmt.Fprintln(c.stderr, "usage: --limit must be between 1 and 100")
+		return 2
+	}
+
+	resolvedHost, resolvedToken, err := resolveClientAuthNamed(*host, *token, *name)
+	if err != nil {
+		fmt.Fprintf(c.stderr, "%v\n", err)
+		return 2
+	}
+	client, err := newRACGClient(resolvedHost, resolvedToken)
+	if err != nil {
+		fmt.Fprintf(c.stderr, "%v\n", err)
+		return 2
+	}
+
+	path := fmt.Sprintf("/v1/requests?scope=session&limit=%d", *limit)
+	if strings.TrimSpace(*status) != "" {
+		path += "&status=" + url.QueryEscape(strings.TrimSpace(*status))
+	}
+	var out struct {
+		Requests []struct {
+			RequestID string          `json:"request_id"`
+			Status    string          `json:"status"`
+			Op        json.RawMessage `json:"op"`
+			CreatedAt string          `json:"created_at"`
+		} `json:"requests"`
+	}
+	if err := client.doJSON(http.MethodGet, client.outputPath(path), nil, &out); err != nil {
+		fmt.Fprintf(c.stderr, "request list failed: %v\n", err)
+		return 1
+	}
+	if len(out.Requests) == 0 {
+		fmt.Fprintln(c.stdout, "requests: none")
+		return 0
+	}
+	for _, rec := range out.Requests {
+		fmt.Fprintf(c.stdout, "request_id=%s status=%s op=%s created_at=%s\n", rec.RequestID, statusOrUnknown(rec.Status), opSummary(rec.Op), rec.CreatedAt)
+	}
+	return 0
+}
+
+// opSummary renders a one-line operation label for list output: "cmd.run
+// docker stop nginx" or "fs.read /var/log/x".
+func opSummary(op json.RawMessage) string {
+	var parsed struct {
+		Type    string          `json:"type"`
+		Payload json.RawMessage `json:"payload"`
+	}
+	if err := json.Unmarshal(op, &parsed); err != nil || parsed.Type == "" {
+		return "?"
+	}
+	switch parsed.Type {
+	case "cmd.run":
+		var p struct {
+			Argv []string `json:"argv"`
+		}
+		if err := json.Unmarshal(parsed.Payload, &p); err != nil || len(p.Argv) == 0 {
+			return parsed.Type
+		}
+		return parsed.Type + " " + strings.Join(p.Argv, " ")
+	}
+	var p struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(parsed.Payload, &p); err != nil || p.Path == "" {
+		return parsed.Type
+	}
+	return parsed.Type + " " + p.Path
+}
+
 func (c *RequestCmd) runLogs(args []string) int {
 	if len(args) == 0 || strings.TrimSpace(args[0]) == "" {
 		fmt.Fprintln(c.stderr, "usage: racg request logs <request_id> [--stdout] [--stderr] --host URL --token TOKEN")
@@ -513,6 +598,7 @@ func (e *httpStatusError) Error() string {
 type sessionMeResp struct {
 	SessionID     string `json:"session_id"`
 	ClientID      string `json:"client_id"`
+	Role          string `json:"role"`
 	ExpiresAt     string `json:"expires_at"`
 	PrivilegeMode string `json:"privilege_mode"`
 }

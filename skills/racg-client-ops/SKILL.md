@@ -67,8 +67,11 @@ Manual approval and denial are local to the server TUI, or performed by an enrol
 7. For finished requests, inspect final streams with:
    - `racg request logs <id> --stdout`
    - `racg request logs <id> --stderr`
-8. Stop requests with `racg request cancel <id>` when the user asks to interrupt, cancel, kill, or stop a pending/running request.
-9. For binary, archive, or large file transfer, use:
+8. Recover lost request IDs or review the fate of past operations with the session history:
+   - `racg request list` — newest first, any status, scoped to the calling token's session
+   - `racg request list --status FAILED --limit 5`
+9. Stop requests with `racg request cancel <id>` when the user asks to interrupt, cancel, kill, or stop a pending/running request.
+10. For binary, archive, or large file transfer, use:
    - `racg file upload <local> <remote> [--mode 0600]`
    - `racg file download <remote> <local> [--force]`
    - Do not encode file content into shell commands, JSON, or base64. RACG streams bytes and verifies SHA-256.
@@ -95,3 +98,4 @@ Manual approval and denial are local to the server TUI, or performed by an enrol
 - If a request is pending approval, do not repeatedly resubmit the same command; use `racg request wait <id>`, tail live output, or cancel if requested.
 - When reporting results, summarize `status`, `exit_code`, and relevant stdout/stderr sections. Do not paste huge logs unless asked; use live/final log commands to retrieve focused snippets.
 - If RACG returns `PAIRING_CODE_USED`, reuse the existing saved client config if available, or ask for a fresh pairing code.
+- If RACG returns `PAIRING_CODE_LOCKED`, the code burned after five wrong attempts; ask for a new pairing code.

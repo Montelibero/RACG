@@ -48,6 +48,12 @@ kubectl apply
 
 If a command includes these words, state the risk and keep the operation narrow.
 
+Environment assignment prefixes in shell scripts (`VAR=val cmd`, e.g.
+`LD_PRELOAD=... ls`) are never auto-approved: they drop out of the rule
+engine's segment analysis and always require manual confirmation. Do not use
+them in scripts meant to be auto-approved; export needed variables in a
+separate statement or pass them as plain arguments.
+
 ## Config Edits
 
 For `env`, `json`, and `yaml` key updates, prefer:

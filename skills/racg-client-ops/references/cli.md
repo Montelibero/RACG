@@ -242,6 +242,21 @@ racg request logs <id> --stderr
 
 `--stdout` and `--stderr` require a finished request. If the server returns `REQUEST_NOT_FINISHED`, use `--live` or `tail`.
 
+List the recent requests of the current session (newest first, any status;
+`--status` and `--limit` refine it):
+
+```bash
+racg request list
+racg request list --status FAILED --limit 5
+```
+
+The listing is scoped server-side to the calling token's session, so it never
+shows other agents' requests.
+
+Token visibility: tokens from the pairing flow carry the `agent` role — lists,
+details, logs, files, events, and kill are limited server-side to the calling
+token's own session. `racg session status` prints the role.
+
 ## Cancel
 
 Cancel pending approval or stop a running command:

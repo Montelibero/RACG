@@ -284,6 +284,21 @@ Terminal statuses:
 - `DENIED`
 - `CANCELED`
 
+List the recent requests of the current session (newest first, any status):
+
+```bash
+racg request list
+racg request list --status FAILED --limit 5
+```
+
+Use it to recover a lost request ID or check the fate of a submitted operation. The list is scoped server-side to the calling token's session.
+
+Tokens from the pairing flow carry the `agent` role: request lists, details,
+logs, files, events, and kill always stay inside the calling token's own
+session — other agents' requests answer `404`. Operator tokens (issued before
+roles existed) keep the full audit view; `racg session status` prints the
+current role.
+
 ## 7. Live And Final Output
 
 Wait for an existing request, follow its live output, and receive its final exit code:
@@ -436,7 +451,7 @@ Useful endpoints:
 
 ## 12. Troubleshooting
 
-- `PAIRING_CODE_USED`: reuse the existing saved client config if available, otherwise ask for a new pairing code.
+- `PAIRING_CODE_USED` / `PAIRING_CODE_LOCKED`: reuse the existing saved client config if available, otherwise ask for a new pairing code (five wrong attempts burn the code).
 - `REQUEST_NOT_PENDING`: request was already decided or finished.
 - `REQUEST_NOT_FINISHED`: use `logs --live` or `tail`; final stdout/stderr are not available yet.
 - `ALLOW_ALWAYS_NOT_PERMITTED`: request is dangerous by policy.

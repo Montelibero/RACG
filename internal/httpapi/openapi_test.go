@@ -55,6 +55,8 @@ func TestOpenAPIDocumentCoversCoreEndpoints(t *testing.T) {
 		"/v1/approver/devices",
 		"/v1/approver/devices/revoke",
 		"/v1/approver/pairing-code",
+		"/v1/approver/enrollment",
+		"/v1/approver/request/kill",
 		"/v1/approver/events",
 		"/v1/admin/approver/enrollment",
 		"/v1/admin/pairing-code",
