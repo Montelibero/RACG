@@ -273,6 +273,10 @@ func TestApproverPairingPollDecisionFlow(t *testing.T) {
 	if rw := serveApprover(t, api, device.decisionRequest(t, api, api.serverName, pending.ID, pending.OpSHA256, "ALLOW_ONCE")); rw.Code != http.StatusOK {
 		t.Fatalf("decision: %d %s", rw.Code, rw.Body.String())
 	}
+	// The decision dispatches async execution that keeps writing to the
+	// store after the handler returns; wait for it so TempDir cleanup
+	// cannot race the executor goroutine.
+	waitRequestTerminalForTest(t, api, agentToken, pending.ID)
 	if left := api.PendingForApprover(); len(left) != 0 {
 		t.Fatalf("request still pending after decision")
 	}
@@ -305,6 +309,7 @@ func TestApproverPollKeyDevicePollsAndDecides(t *testing.T) {
 	if rw := serveApprover(t, api, device.decisionRequest(t, api, api.serverName, pending.ID, pending.OpSHA256, "ALLOW_ONCE")); rw.Code != http.StatusOK {
 		t.Fatalf("decision: %d %s", rw.Code, rw.Body.String())
 	}
+	waitRequestTerminalForTest(t, api, agentToken, pending.ID)
 	if left := api.PendingForApprover(); len(left) != 0 {
 		t.Fatalf("request still pending after decision")
 	}
@@ -609,6 +614,7 @@ func TestApproverSecondDecisionAfterApprovalRejected(t *testing.T) {
 	if rw := serveApprover(t, api, device.decisionRequest(t, api, api.serverName, pending.ID, pending.OpSHA256, "ALLOW_ONCE")); rw.Code != http.StatusOK {
 		t.Fatalf("first decision: %d %s", rw.Code, rw.Body.String())
 	}
+	waitRequestTerminalForTest(t, api, agentToken, pending.ID)
 	rw := serveApprover(t, api, device.decisionRequest(t, api, api.serverName, pending.ID, pending.OpSHA256, "DENY"))
 	if rw.Code != http.StatusNotFound || !strings.Contains(rw.Body.String(), "REQUEST_NOT_FOUND") {
 		t.Fatalf("conflicting decision: %d %s", rw.Code, rw.Body.String())
