@@ -24,10 +24,24 @@ if ! command -v systemctl >/dev/null 2>&1; then
   exit 1
 fi
 
-if [[ ! -x "${RACG_BIN}" ]]; then
-  echo "racg binary not found at ${RACG_BIN}" >&2
-  echo "Install it first: curl -fsSL https://raw.githubusercontent.com/Montelibero/RACG/main/scripts/install.sh | bash" >&2
+command -v curl >/dev/null 2>&1 || {
+  echo "curl is required: apt install -y curl" >&2
   exit 1
+}
+
+# Install or upgrade racg itself: the headless flags need v0.6.0+.
+latest_tag="$(curl -fsSL "https://api.github.com/repos/Montelibero/RACG/releases/latest" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+if [[ -z "${latest_tag}" ]]; then
+  echo "Cannot resolve the latest racg release from GitHub" >&2
+  exit 1
+fi
+current_version="$("${RACG_BIN}" --version 2>/dev/null || echo none)"
+if [[ "${current_version}" != "${latest_tag#v}" ]]; then
+  echo "Installing racg ${latest_tag} (current: ${current_version})..."
+  curl -fsSL https://raw.githubusercontent.com/Montelibero/RACG/main/scripts/install.sh | RACG_VERSION="${latest_tag}" bash
+  [[ -x "${RACG_BIN}" ]] || { echo "racg install failed" >&2; exit 1; }
+else
+  echo "racg ${current_version} is already up to date"
 fi
 
 id -u "${FACADE_USER}" >/dev/null 2>&1 || useradd -r -s /usr/sbin/nologin "${FACADE_USER}"
