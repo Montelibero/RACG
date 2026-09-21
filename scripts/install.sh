@@ -42,6 +42,7 @@ url="https://github.com/${REPO}/releases/download/${tag}/${asset}"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "${tmp_dir}"' EXIT
 
+curl -fL "${url}" -o "${tmp_dir}/${asset}"
 sum_url="https://github.com/${REPO}/releases/download/${tag}/checksums.txt"
 curl -fL "${sum_url}" -o "${tmp_dir}/checksums.txt"
 want="$(awk -v asset="${asset}" '$NF == asset {print $1}' "${tmp_dir}/checksums.txt")"
@@ -54,7 +55,6 @@ if [[ "${got}" != "${want}" ]]; then
   echo "SHA-256 mismatch for ${asset}: got ${got}, want ${want}" >&2
   exit 1
 fi
-curl -fL "${url}" -o "${tmp_dir}/${asset}"
 tar -xzf "${tmp_dir}/${asset}" -C "${tmp_dir}"
 
 if [[ ! -f "${tmp_dir}/racg" ]]; then
