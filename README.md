@@ -266,12 +266,22 @@ privileged pipeline owns SQLite, rules and execution and listens only on a
 unix socket; the unprivileged facade is the only public port and proxies to
 that socket. The facade validates traffic shape and holds no secrets.
 
-On Ubuntu deploy both services with one command:
+On Ubuntu deploy both services with one command (creates the `racg-remote`
+user, installs and enables both systemd units, waits for the health check):
 
 ```bash
-sudo bash scripts/headless-setup.sh
-# options: RACG_PORT=8777, RACG_SOCKET=/run/racg/pipeline.sock, RACG_STATE_DIR=/var/lib/racg
+curl -fsSL https://raw.githubusercontent.com/Montelibero/RACG/main/scripts/headless-setup.sh | sudo bash
 ```
+
+Options are passed through the environment before `bash`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Montelibero/RACG/main/scripts/headless-setup.sh | sudo RACG_PORT=9000 bash
+```
+
+- `RACG_PORT` (default: `8777`) — public facade port
+- `RACG_SOCKET` (default: `/run/racg/pipeline.sock`)
+- `RACG_STATE_DIR` (default: `/var/lib/racg`) — server state and SQLite database
 
 Manual equivalent:
 
