@@ -56,14 +56,6 @@ func (r *Root) Run(args []string) int {
 	switch rest[0] {
 	case "serve":
 		return NewServeCmd(r.stdout, r.stderr).Run(rest[1:])
-	case "service-authority":
-		return NewServiceAuthorityCmd(r.stdout, r.stderr).Run(rest[1:])
-	case "service-broker":
-		return NewServiceBrokerCmd(r.stdout, r.stderr).Run(rest[1:])
-	case "service-admin":
-		return NewServiceAdminCmd(r.stdout, r.stderr).Run(rest[1:])
-	case "service-agent":
-		return NewServiceAgentCmdWithInput(r.stdin, r.stdout, r.stderr).Run(rest[1:])
 	case "remote-approver":
 		return NewRemoteApproverCmd(r.stdout, r.stderr).Run(rest[1:])
 	case "approver-devices":
@@ -113,14 +105,6 @@ commands:
              mint a one-time approver enrollment QR and print it to this terminal
   pairing-code
              mint a fresh agent pairing code without restarting the server
-  service-authority
-             start the privileged service authority/executor
-  service-broker
-             start the unprivileged signed-protocol relay
-  service-admin
-             administer trusted service devices, agents and grants
-  service-agent
-             submit service operations and receive signed results
   login      save client auth from a pairing code
   logout     remove saved client auth
   session    inspect saved/current session
@@ -133,10 +117,6 @@ commands:
   update     update racg from GitHub Releases
 
 approval:
-  Separate Linux desktop preview: apps/approver (racg-approver --help).
-  Explicit --connect polls a signed service queue and sends local signed decisions.
-  The desktop cannot execute operations; broker service deployment is not packaged.
-  Use "racg service-authority --help" and "racg service-broker --help".
   Manual approval and denial are local to the server TUI.
   Agent tokens cannot approve or deny requests over HTTP (403 REMOTE_DECISION_DISABLED).
   Existing authorized rules may still auto-approve matching requests.

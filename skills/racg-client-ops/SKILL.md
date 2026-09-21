@@ -7,16 +7,6 @@ description: Use when an agent needs to run commands or transfer files through R
 
 Use RACG when command execution must go through a human-approved gateway instead of running directly on the host. Prefer RACG for remote/server diagnostics, long-running jobs, commands that need auditability, or workflows where the human operator approves requests in the RACG TUI.
 
-The experimental service mode uses separate privileged authority and
-unprivileged broker commands (`racg service-authority --help`,
-`racg service-broker --help`). It is not interchangeable with legacy
-interactive `racg serve`; do not mix their state or credentials.
-
-Experimental service agents use `racg service-agent --help` with their own
-passphrase-encrypted Ed25519 key. That key may submit operations and poll
-results; it cannot approve them. Verify the exported server profile and use the
-explicit relay `--connect` URI.
-
 For mobile approver enrollment, administrators run
 `racg approver-setup --public-url http://server:8777` on the server over SSH:
 it mints a single-use enrollment token (10 minute TTL, burns after the first
@@ -26,13 +16,6 @@ ECDSA P-256 keys; the QR never contains that private key. `racg pairing-code`
 mints a fresh agent pairing code without a server restart.
 
 ## Core Workflow
-
-The separate desktop development preview (`apps/approver/`,
-`racg-approver --help`) inspects offline signed request files, can create an
-offline Allow once/Deny envelope, and—with explicit `--connect` to an
-experimental service endpoint—can poll verified pending requests and send
-locally signed decisions. It cannot execute and cannot connect to legacy
-interactive `racg serve`.
 
 On HTTP 500 `DECISION_PERSISTENCE_FAILED`, retain `error.request_id`: automatic approval failed, but the request exists and remains pending. Ask the operator to fix server storage and review that request in TUI, then resume with `racg request wait <id>`; do not resubmit.
 

@@ -2,12 +2,6 @@
 
 This file is for an automation agent that works with a running `racg serve`.
 
-The separate `apps/approver/` desktop development preview can inspect offline
-requests, create an offline signed decision, or—with explicit `--connect` to an
-experimental service endpoint—verify and approve pending service requests
-(`racg-approver --help`). It cannot connect to legacy `racg serve`; continue
-using the server TUI for interactive-mode decisions.
-
 Manual approval and denial are local to the server TUI, or performed by an enrolled remote approver device (phone, desktop) through the signed `/v1/approver` API. Agent tokens cannot approve or deny requests over HTTP: `POST /v1/requests/{id}/decision` returns `403 REMOTE_DECISION_DISABLED`. Submit requests and wait for the operator; existing authorized rules may still auto-approve matching requests. Older server binaries must be updated and restarted to enforce this boundary; updating the client alone is insufficient.
 
 Prefer the `racg` client commands over raw HTTP. They handle saved auth, request creation, waiting, live output, final logs, and cancel/kill with compact human-readable output.
@@ -26,18 +20,6 @@ Install it by copying the directory into the agent's skills directory. For Codex
 mkdir -p ~/.codex/skills
 cp -R skills/racg-client-ops ~/.codex/skills/
 ```
-
-Interactive `racg serve` is unrelated to the experimental service mode. Server
-administrators can inspect the separate `racg service-authority` and
-`racg service-broker` commands; their systemd examples live under
-`deploy/systemd/`.
-
-Experimental service-mode agents use `racg service-agent --help` instead of the
-legacy HTTP pairing workflow. It can generate a passphrase-encrypted Ed25519
-agent key, submit service operations to a signed relay, verify authority
-responses against the pinned server key, wait for terminal results, and save
-verified `fs.download` artifacts. The desktop approver signs decisions; the
-agent key cannot approve anything.
 
 For the Android approver, the server administrator runs
 `racg approver-setup --public-url http://server:8777` over SSH: the single-use

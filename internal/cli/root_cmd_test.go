@@ -32,12 +32,6 @@ func TestRootHelpIncludesFileAndConfigExamples(t *testing.T) {
 
 	got := out.String()
 	for _, want := range []string{
-		"racg-approver --help",
-		"polls a signed service queue",
-		"service-authority",
-		"service-broker",
-		"service-admin",
-		"service-agent",
 		"racg file read /path/file.txt",
 		"racg file patch /path/file.txt --diff-file /tmp/change.patch",
 		"racg file upload ./local.bin /srv/remote.bin",
@@ -85,5 +79,10 @@ func TestRootHelpCoversRemoteApproverSurface(t *testing.T) {
 	}
 	if strings.Contains(got, "phone-service") || strings.Contains(got, "phone bridge") {
 		t.Fatalf("help output must not mention removed phone surface")
+	}
+	for _, banned := range []string{"service-authority", "service-broker", "service-admin", "service-agent", "apps/approver", "racg-approver"} {
+		if strings.Contains(got, banned) {
+			t.Fatalf("help output must not mention removed service-mode surface %q", banned)
+		}
 	}
 }
