@@ -128,18 +128,26 @@ func TestAdmissionRejectsInvalidAndUnstagedOperations(t *testing.T) {
 	}
 	validID := upload.UploadID
 	operations := map[string]string{
-		"unknown type":       `{"type":"rm.rf","payload":{}}`,
-		"unknown field":      `{"type":"cmd.run","payload":{"argv":["/bin/echo"],"evil":"yes"}}`,
-		"empty argv":         `{"type":"cmd.run","payload":{"argv":[]}}`,
-		"negative timeout":   `{"type":"cmd.run","payload":{"argv":["/bin/echo"],"timeout_sec":-1}}`,
-		"client metadata":    `{"type":"cmd.run","payload":{"argv":["/bin/cat"],"stdin_upload_id":"` + validID + `","stdin_size":4}}`,
-		"missing upload":     `{"type":"fs.upload","payload":{"path":"/tmp/target","upload_id":"` + strings.Repeat("0", 32) + `"}}`,
-		"missing patch":      `{"type":"fs.patch_unified","payload":{"path":"/tmp/target"}}`,
-		"bad config value":   `{"type":"conf.set","payload":{"path":"/tmp/app.conf","format":"env","key":"X","value_type":"command"}}`,
-		"unknown download":   `{"type":"fs.download","payload":{"path":""}}`,
-		"outer unknown":      `{"type":"fs.read","payload":{"path":"/tmp/x"},"broker_status":"approved"}`,
-		"unstaged stdin":     `{"type":"cmd.run","payload":{"argv":["/bin/cat"],"stdin_upload_id":"` + validID + `"}}`,
-		"fs upload unstaged": `{"type":"fs.upload","payload":{"path":"/tmp/target","upload_id":"` + validID + `"}}`,
+		"unknown type":     `{"type":"rm.rf","payload":{}}`,
+		"unknown field":    `{"type":"cmd.run","payload":{"argv":["/bin/echo"],"evil":"yes"}}`,
+		"empty argv":       `{"type":"cmd.run","payload":{"argv":[]}}`,
+		"negative timeout": `{"type":"cmd.run","payload":{"argv":["/bin/echo"],"timeout_sec":-1}}`,
+		"client metadata":  `{"type":"cmd.run","payload":{"argv":["/bin/cat"],"stdin_upload_id":"` + validID + `","stdin_size":4}}`,
+		"missing upload":   `{"type":"fs.upload","payload":{"path":"/tmp/target","upload_id":"` + strings.Repeat("0", 32) + `"}}`,
+		"missing patch":    `{"type":"fs.patch_unified","payload":{"path":"/tmp/target"}}`,
+		"bad config value": `{"type":"conf.set","payload":{"path":"/tmp/app.conf","format":"env","key":"X","value_type":"command"}}`,
+		"unknown download": `{"type":"fs.download","payload":{"path":""}}`,
+		"outer unknown":    `{"type":"fs.read","payload":{"path":"/tmp/x"},"broker_status":"approved"}`,
+		"unstaged stdin":   `{"type":"cmd.run","payload":{"argv":["/bin/cat"],"stdin_upload_id":"` + validID + `"}}`,
+		"relative path":    `{"type":"fs.read","payload":{"path":"etc/shadow"}}`,
+		"dotdot path":      `{"type":"fs.read","payload":{"path":"/var/log/../../etc/shadow"}}`,
+		"dot path":         `{"type":"fs.read","payload":{"path":"/var/log/./app.log"}}`,
+		"double slash":     `{"type":"fs.read","payload":{"path":"/var//log/app.log"}}`,
+		"trailing slash":   `{"type":"fs.read","payload":{"path":"/var/log/"}}`,
+		"patch dotdot":     `{"type":"fs.patch_unified","payload":{"path":"/srv/../etc/passwd","diff":"--- a\n+++ b\n"}}`,
+		"download dotdot":  `{"type":"fs.download","payload":{"path":"/home/../../root/.ssh/id_ed25519"}}`,
+		"conf relative":    `{"type":"conf.set","payload":{"path":"app.conf","format":"env","key":"X"}}`,
+		"conf bad backup":  `{"type":"conf.set","payload":{"path":"/etc/app.conf","format":"env","key":"X","backup_dir":"relative/backups"}}`,
 	}
 	for name, operation := range operations {
 		t.Run(name, func(t *testing.T) {

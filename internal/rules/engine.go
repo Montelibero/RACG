@@ -2,6 +2,7 @@ package rules
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -359,6 +360,14 @@ func argvHasPrefix(argv, prefix []string) bool {
 }
 
 func pathMatches(path string, r PathRule) bool {
+	// Defensive canonicalization: admission already rejects non-canonical
+	// paths, but rules are also matched from other paths (timed grants).
+	// Match the kernel-resolved location, never a literal "../" tail that
+	// escapes the rule scope. Rule patterns themselves are trusted
+	// operator input (a trailing slash is meaningful) and stay verbatim.
+	if cleaned := filepath.Clean(path); cleaned != path {
+		path = cleaned
+	}
 	if r.Exact != "" {
 		return path == r.Exact
 	}

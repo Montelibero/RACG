@@ -76,6 +76,26 @@ func TestAnalyzeCmdRunPlainArgvIsSingleSegment(t *testing.T) {
 	}
 }
 
+func TestAnalyzeCmdRunShellMarksEnvAssignmentsUnsupported(t *testing.T) {
+	op := Op{Type: "cmd.run", Payload: mustJSON(t, map[string]any{
+		"argv": []string{"sh", "-c", "LD_PRELOAD=/tmp/malicious.so ls"},
+	})}
+
+	analysis := AnalyzeCommandOp(op)
+	if analysis.Unsupported != "" {
+		t.Fatalf("unsupported=%q", analysis.Unsupported)
+	}
+	if len(analysis.Segments) != 1 {
+		t.Fatalf("segments=%d want 1: %#v", len(analysis.Segments), analysis.Segments)
+	}
+	if analysis.Segments[0].Unsupported != "env assignment prefix" {
+		t.Fatalf("segment unsupported=%q want env assignment prefix: %#v", analysis.Segments[0].Unsupported, analysis.Segments[0])
+	}
+	if len(analysis.Segments[0].Argv) != 0 {
+		t.Fatalf("env-prefixed segment must not carry matchable argv: %q", analysis.Segments[0].Argv)
+	}
+}
+
 func joinNUL(xs []string) string {
 	out := ""
 	for i, x := range xs {

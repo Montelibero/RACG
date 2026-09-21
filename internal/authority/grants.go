@@ -245,6 +245,7 @@ func (a *Authority) activeGrantForOperation(tx *sql.Tx, clientID string, operati
 	if err := json.Unmarshal(operation, &op); err != nil {
 		return storedGrant{}, err
 	}
+	op = rules.CanonicalizeOpPath(op)
 	for rows.Next() {
 		grant := storedGrant{ClientID: clientID}
 		var ruleBytes []byte

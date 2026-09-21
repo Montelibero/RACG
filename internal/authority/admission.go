@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"time"
 
 	"github.com/itolstov/racg/internal/approval"
@@ -185,8 +186,8 @@ func validateCmdRun(payload *cmdRunPayload) error {
 }
 
 func validateReadFile(payload *readFilePayload) error {
-	if payload.Path == "" {
-		return errors.New("path required")
+	if err := validateOperationPath(payload.Path); err != nil {
+		return err
 	}
 	if payload.MaxBytes < 0 {
 		return errors.New("max_bytes must not be negative")
@@ -195,14 +196,20 @@ func validateReadFile(payload *readFilePayload) error {
 }
 
 func validatePatchFile(payload *patchFilePayload) error {
-	if payload.Path == "" || payload.Diff == "" {
+	if err := validateOperationPath(payload.Path); err != nil {
+		return err
+	}
+	if payload.Diff == "" {
 		return errors.New("path and diff required")
 	}
 	return nil
 }
 
 func validateUploadFile(payload *uploadFilePayload) error {
-	if payload.Path == "" || payload.UploadID == "" {
+	if err := validateOperationPath(payload.Path); err != nil {
+		return err
+	}
+	if payload.UploadID == "" {
 		return errors.New("path and upload_id required")
 	}
 	if !validStagedUploadID(payload.UploadID) {
@@ -220,20 +227,46 @@ func validateUploadFile(payload *uploadFilePayload) error {
 }
 
 func validateDownloadFile(payload *downloadFilePayload) error {
-	if payload.Path == "" {
-		return errors.New("path required")
+	if err := validateOperationPath(payload.Path); err != nil {
+		return err
 	}
 	return nil
 }
 
 func validateConfigSet(payload *configSetPayload) error {
-	if payload.Path == "" || payload.Format == "" || payload.Key == "" {
+	if err := validateOperationPath(payload.Path); err != nil {
+		return err
+	}
+	if payload.BackupDir != "" {
+		if err := validateOperationPath(payload.BackupDir); err != nil {
+			return fmt.Errorf("backup_dir: %w", err)
+		}
+	}
+	if payload.Format == "" || payload.Key == "" {
 		return errors.New("path, format and key required")
 	}
 	switch payload.ValueType {
 	case "", "string", "bool", "int", "float", "null", "json":
 	default:
 		return fmt.Errorf("unsupported value_type %q", payload.ValueType)
+	}
+	return nil
+}
+
+// validateOperationPath enforces the path contract for fs.*/conf.*
+// operations: absolute and already canonical. Path rules match literal
+// prefixes, so a non-canonical path ("/var/log/../../etc/shadow", "./x",
+// "x/../y") could dodge the rule scope while the kernel resolves it
+// elsewhere. Reject before the operation is frozen.
+func validateOperationPath(path string) error {
+	if path == "" {
+		return errors.New("path required")
+	}
+	if !filepath.IsAbs(path) {
+		return errors.New("path must be absolute")
+	}
+	if filepath.Clean(path) != path {
+		return errors.New("path must be canonical (no . or .. segments, no trailing slash)")
 	}
 	return nil
 }

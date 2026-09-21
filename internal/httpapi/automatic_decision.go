@@ -31,6 +31,7 @@ func (a *API) approveByRule(ctx context.Context, id string) (string, error) {
 		a.reqsMu.Unlock()
 		return rec.Status, err
 	}
+	op = rules.CanonicalizeOpPath(op)
 	match, allowed := a.rules.Match(rec.SessionID, op)
 	if !allowed {
 		a.reqsMu.Unlock()

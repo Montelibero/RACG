@@ -76,7 +76,7 @@ func (c *ConfigCmd) runSet(args []string) int {
 	}
 
 	payload := map[string]any{
-		"path":       rest[0],
+		"path":       canonicalRemotePath(rest[0]),
 		"format":     strings.TrimSpace(*format),
 		"key":        rest[1],
 		"value":      rest[2],
@@ -85,7 +85,7 @@ func (c *ConfigCmd) runSet(args []string) int {
 		"create":     *create,
 	}
 	if strings.TrimSpace(*backupDir) != "" {
-		payload["backup_dir"] = strings.TrimSpace(*backupDir)
+		payload["backup_dir"] = canonicalRemotePath(strings.TrimSpace(*backupDir))
 	}
 	created, err := client.createRequest(map[string]any{
 		"op": map[string]any{

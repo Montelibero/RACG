@@ -16,6 +16,19 @@ import (
 	"time"
 )
 
+// canonicalRemotePath resolves a user-supplied remote path the way the
+// server admission requires: absolute and canonical. Relative paths are
+// resolved against the local working directory before submission so the
+// operator and the rule engine see the exact target location.
+func canonicalRemotePath(path string) string {
+	if !filepath.IsAbs(path) {
+		if abs, err := filepath.Abs(path); err == nil {
+			path = abs
+		}
+	}
+	return filepath.Clean(path)
+}
+
 type FileCmd struct {
 	stdout io.Writer
 	stderr io.Writer
@@ -97,7 +110,7 @@ func (c *FileCmd) runUpload(args []string) int {
 		return 1
 	}
 	payload := map[string]any{
-		"path": rest[1], "upload_id": staged.UploadID,
+		"path": canonicalRemotePath(rest[1]), "upload_id": staged.UploadID,
 		"size": staged.Size, "sha256": staged.SHA256,
 	}
 	if *mode != "" {
@@ -160,7 +173,7 @@ func (c *FileCmd) runDownload(args []string) int {
 		return 2
 	}
 	created, err := client.createRequest(map[string]any{
-		"op": map[string]any{"type": "fs.download", "payload": map[string]any{"path": rest[0]}},
+		"op": map[string]any{"type": "fs.download", "payload": map[string]any{"path": canonicalRemotePath(rest[0])}},
 	})
 	if err != nil {
 		fmt.Fprintf(c.stderr, "file download request failed: %v\n", err)
@@ -323,7 +336,7 @@ func (c *FileCmd) runRead(args []string) int {
 		return 2
 	}
 
-	payload := map[string]any{"path": rest[0]}
+	payload := map[string]any{"path": canonicalRemotePath(rest[0])}
 	if *maxBytes > 0 {
 		payload["max_bytes"] = *maxBytes
 	}
@@ -363,7 +376,7 @@ func (c *FileCmd) runPatch(args []string) int {
 		return 2
 	}
 
-	payload := map[string]any{"path": rest[0], "diff": diffText}
+	payload := map[string]any{"path": canonicalRemotePath(rest[0]), "diff": diffText}
 	return c.submitFileRequest(*host, *token, *name, *noWait, *pollInterval, *waitTimeout, "fs.patch_unified", payload, false, false)
 }
 

@@ -151,7 +151,7 @@ func (c *ServiceAgentCmd) runUpload(args []string) int {
 	operation, err := json.Marshal(map[string]any{
 		"type": "fs.upload",
 		"payload": map[string]any{
-			"path":      *remote,
+			"path":      canonicalRemotePath(*remote),
 			"upload_id": staged.UploadID,
 			"mode":      *mode,
 		},
@@ -365,7 +365,7 @@ func (c *ServiceAgentCmd) downloadPayload(argv []string) ([]byte, error) {
 	if len(argv) != 1 || argv[0] == "" {
 		return nil, errors.New("download requires one remote PATH")
 	}
-	return json.Marshal(map[string]any{"type": "fs.download", "payload": map[string]any{"path": argv[0]}})
+	return json.Marshal(map[string]any{"type": "fs.download", "payload": map[string]any{"path": canonicalRemotePath(argv[0])}})
 }
 
 func (c *ServiceAgentCmd) runPayload(argv []string, stdinFile string) ([]byte, []byte, error) {

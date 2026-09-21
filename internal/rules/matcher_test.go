@@ -1,9 +1,9 @@
 package rules
 
 import (
-	"time"
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 func TestMatchCmdRunArgvPrefix(t *testing.T) {
@@ -122,6 +122,35 @@ func TestMatchCmdRunShellRequiresEverySegmentAllowed(t *testing.T) {
 	}
 }
 
+func TestMatchCmdRunShellEnvAssignmentNeverAutoAllowed(t *testing.T) {
+	e := NewEngine()
+	e.AddAlways(Rule{ID: "ls", OpType: "cmd.run", Cmd: &CmdRule{ArgvPrefix: []string{"ls"}}})
+
+	envPrefixed := Op{Type: "cmd.run", Payload: mustJSON(t, map[string]any{
+		"argv": []string{"sh", "-c", "LD_PRELOAD=/tmp/malicious.so ls"},
+	})}
+	if _, ok := e.Match("sess1", envPrefixed); ok {
+		t.Fatal("env assignment prefix must not be auto-allowed by an inner-command rule")
+	}
+	explain := e.Explain("sess1", envPrefixed)
+	found := false
+	for _, seg := range explain.Segments {
+		if seg.Unsupported == "env assignment prefix" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("explain should mark the env assignment segment unsupported: %+v", explain.Segments)
+	}
+
+	plain := Op{Type: "cmd.run", Payload: mustJSON(t, map[string]any{
+		"argv": []string{"sh", "-c", "ls"},
+	})}
+	if _, ok := e.Match("sess1", plain); !ok {
+		t.Fatal("plain script without assignments should still be allowed by the ls rule")
+	}
+}
+
 func TestMatchCmdRunShellDoesNotAllowByShellBinaryRule(t *testing.T) {
 	e := NewEngine()
 	e.AddAlways(Rule{ID: "bash", OpType: "cmd.run", Cmd: &CmdRule{ArgvPrefix: []string{"bash"}}})
@@ -170,6 +199,25 @@ func TestExplainCmdRunShellMarksAllowedAndBlockedSegments(t *testing.T) {
 	}
 	if explain.Segments[2].Allowed || explain.Segments[2].Reason != "no matching rule" {
 		t.Fatalf("segment 2=%#v", explain.Segments[2])
+	}
+}
+
+func TestPathTraversalDoesNotMatchPrefixRule(t *testing.T) {
+	e := NewEngine()
+	e.AddAlways(Rule{ID: "logs", OpType: "fs.read", Path: &PathRule{Prefix: "/var/log/"}})
+
+	traversal := Op{Type: "fs.read", Payload: mustJSON(t, map[string]any{
+		"path": "/var/log/../../etc/shadow",
+	})}
+	if _, ok := e.Match("sess1", traversal); ok {
+		t.Fatal("traversal path must not match the /var/log/ prefix rule")
+	}
+
+	honest := Op{Type: "fs.read", Payload: mustJSON(t, map[string]any{
+		"path": "/var/log/app.log",
+	})}
+	if _, ok := e.Match("sess1", honest); !ok {
+		t.Fatal("honest path under the prefix must still match")
 	}
 }
 

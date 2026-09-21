@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -57,7 +58,7 @@ func TestCLIConfigSetCreatesConfSetRequestAndWaits(t *testing.T) {
 		t.Fatalf("op.type=%q", posted.Op.Type)
 	}
 	p := posted.Op.Payload
-	if p.Path != "config.yaml" || p.Format != "yaml" || p.Key != "image.tag" || p.Value != "v1.2.3" || p.ValueType != "string" || !p.Backup || !p.Create {
+	if !filepath.IsAbs(p.Path) || filepath.Base(p.Path) != "config.yaml" || p.Format != "yaml" || p.Key != "image.tag" || p.Value != "v1.2.3" || p.ValueType != "string" || !p.Backup || !p.Create {
 		t.Fatalf("payload=%+v", p)
 	}
 	for _, want := range []string{"request_id: req1", "status: SUCCEEDED", "stdout:", "path: config.yaml"} {

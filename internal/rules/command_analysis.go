@@ -155,6 +155,13 @@ func segmentsFromCommand(cmd syntax.Command) []CommandSegment {
 }
 
 func segmentFromCall(c *syntax.CallExpr) CommandSegment {
+	// Prefix assignments (VAR=val cmd) are dropped from argv by this
+	// analyzer, which would let LD_PRELOAD-style overrides ride an
+	// otherwise-allowed command. Never auto-allow them: route to the
+	// operator instead (same policy as dynamic words and redirects).
+	if len(c.Assigns) > 0 {
+		return CommandSegment{Source: nodeSource(c), Unsupported: "env assignment prefix"}
+	}
 	argv := make([]string, 0, len(c.Args))
 	for _, word := range c.Args {
 		arg, ok := staticWord(word)
