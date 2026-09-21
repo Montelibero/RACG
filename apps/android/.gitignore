@@ -4,3 +4,4 @@
 /local.properties
 /docker/release.keystore
 /docker/release.properties
+/app/build/
