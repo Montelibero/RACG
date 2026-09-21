@@ -108,12 +108,12 @@ cat <<NEXT
 Headless deployment is up.
 
 Next steps:
-  1) Phone enrollment (QR prints right here; pick a tailscale address if asked):
-       sudo ${RACG_BIN} approver-setup --public-url http://SERVER:${RACG_PORT}
-     (run it again for every additional phone)
-  2) Agent login:
-       sudo ${RACG_BIN} pairing-code
-       racg login --host http://SERVER:${RACG_PORT} --pairing-code ABC123
-
-Detected server address: ${public_ip:-unknown}
+  1) Phone enrollment (QR prints right here):
+       sudo racg approver-setup
+     Omitting --public-url opens an interactive address menu (tailscale
+     first) or press the last item to type your own. Run it again for every
+     additional phone.
+  2) Agent login on the agent machine:
+       sudo racg pairing-code
+       racg login --host http://${public_ip:-SERVER}:${RACG_PORT} --pairing-code ABC123
 NEXT
