@@ -1,107 +1,24 @@
 # RACG
 
-RACG is a local Approval Gateway for privileged operations. A client sends requests such as `cmd.run`, `fs.read`, `fs.patch_unified`, `fs.upload`, or `fs.download`; a human approves or denies them in the terminal UI or from an enrolled remote approver (phone, desktop), and execution is audited in SQLite.
+RACG is a local Approval Gateway for privileged operations. A client sends requests such as `cmd.run`, `fs.read`, `fs.patch_unified`, `fs.upload`, or `fs.download`; a human approves or denies them in the terminal UI, and execution is audited in SQLite.
 
 ## Features
-
-An experimental two-process service mode exists in this branch: the privileged
-`racg service-authority` owns execution state, while unprivileged
-`racg service-broker` relays signed protocol traffic. Example systemd units are
-in `deploy/systemd/`; broker deployment packaging is not complete.
-
-Experimental service agents use `racg service-agent --help` for encrypted key
-generation, signed operation submission, authenticated terminal results, and
-verified `fs.download` artifact delivery.
-
-An isolated Linux desktop development preview lives in `apps/approver/`.
-Build it separately and run `racg-approver --help`. It inspects offline signed
-request files against a trusted server profile and can create an offline
-Allow once/Deny envelope with a passphrase-encrypted local key. With explicit
-`--connect`, it can also poll a broker/service endpoint, verify signed pending
-requests, and send locally signed decisions. It cannot execute operations, and
-the standalone server has no GUI build dependency. See
-[preview instructions](apps/approver/README.md).
-
-An experimental native Android approver shell lives in `apps/android/`. Its
-Docker build needs no Android Studio. The phone scans a one-time setup QR,
-generates its own ECDSA P-256 approver key in Android Keystore, enrolls through
-the signed `/v1/approver` API, and submits device-signed one-shot decisions
-bound to the exact operation digest. The app talks plain HTTP by design:
-transport encryption is provided by the tailnet (Tailscale/WireGuard), and the
-manifest allows cleartext for exactly that reason. TLS to arbitrary tailnet
-IPs is out of scope until a certificate story exists.
-
-Manual approval and denial are local to the server TUI. Agent bearer tokens cannot approve or deny requests: the legacy `POST /v1/requests/{id}/decision` endpoint returns `403 REMOTE_DECISION_DISABLED`. Existing authorized rules may still auto-approve matching requests. Standalone `racg serve` needs no installed service or desktop approver.
-
-Security upgrade: older server builds accepted decisions from agent tokens. Updating only the agent client does not fix those servers; install the corrected server binary and restart it. Legacy HTTP agent self-approval remains disabled.
 
 - HTTP API + WebSocket events
 - Built-in TUI approvals dashboard (mouse + hotkeys)
 - Session pairing with bearer tokens
-- Client helpers for login, submit-and-wait command runs, live logs, tail, and cancel
+- Client helpers for login, approve-and-wait command runs, live logs, tail, and cancel
 - Approved binary file upload/download with SHA-256 verification and atomic writes
 - Rule engine (`ALLOW_SESSION` / `ALLOW_ALWAYS`)
 - Read-only diagnostics rule presets
 - SQLite audit trail: sessions, requests, decisions, executions, rules
 - Command execution with timeout/kill/output limits
-
-## Remote approver mode (phone over HTTP)
-
-The default interactive `racg serve` already works with the phone: run it on
-the server, let it through the firewall, and enroll the phone with the
-one-time QR — no extra services required.
-
-```bash
-racg serve -listen-addr 0.0.0.0 -port 8777
-racg approver-setup          # interactive: picks the public address with you (tailscale first)
-```
-
-For SSH-only servers there is also a headless split: the privileged pipeline
-never touches the network and the unprivileged facade is the only public
-listener. On Ubuntu one script installs and enables both systemd units:
-
-```bash
-sudo bash scripts/headless-setup.sh
-# manual equivalent:
-sudo racg serve --headless --socket /run/racg/pipeline.sock
-racg remote-approver --listen 0.0.0.0:8777 --socket /run/racg/pipeline.sock
-```
-
-Remote approver devices (phone, desktop) enroll once through a single-use
-enrollment QR (10 minute TTL, burns after the first successful pairing) and
-submit signed decisions; the server verifies every device signature and binds
-it to the exact approved operation. Enrollment and revocation:
-
-```bash
-racg approver-setup --public-url http://server:8777   # explicit address for scripts
-racg serve --approver-setup-out /tmp/approver-qr.png --public-url http://server:8777  # manual test mode
-racg approver-devices list
-racg approver-devices revoke <device_id>
-```
-
-Each `racg approver-setup` run pairs exactly one phone; run it again for every
-additional phone — devices work in parallel. Pending-list reads are signed with
-a dedicated non-biometric poll key (the watcher and the approvals screen never
-ask for biometrics); decisions use the biometry-bound approval key with a
-KeePass-style window: one unlock per five minutes. Decisions support
-`ALLOW_ONCE`, `ALLOW_SESSION`, `ALLOW_ALWAYS` and `DENY`; timed grants take an
-editable scope (one line per script segment, like the TUI) and 1h/24h/session
-durations — the rule dies with the agent session. The phone also gets a
-decision history view (phone, TUI and auto-rule decisions alike), an instant
-wake-up channel (`/v1/approver/events` WebSocket) with a 60 second polling
-fallback, and can manage the server: extend/revoke agent sessions, revoke
-devices, and issue fresh pairing codes (`racg pairing-code` mints one
-on the server over SSH).
-
-The facade validates traffic shape only and holds no secrets; the privileged
-pipeline verifies every session token and approver signature itself. See
-`docs/plans/2026-09-05-service-linux-approver.md` for the architecture.
+- Phone approver (Android): signed enrollment, biometric decisions, instant
+  push, decision history, remote session/device management
+- Headless split: privileged pipeline on a unix socket + unprivileged public
+  facade, one-command Ubuntu setup
 
 ## Local run
-
-Automatic rule approval also requires a committed audit decision. If it cannot be saved, request creation returns HTTP 500 `DECISION_PERSISTENCE_FAILED` with the existing request ID. The request remains pending: resolve the server storage problem and review that ID in TUI; do not resubmit the operation.
-
-Manual TUI decisions are applied only after the status, decision audit and any permanent rules are saved in one transaction. A storage error is shown in TUI and leaves the request pending, without execution or new active rules. Resolve the storage problem before retrying the decision.
 
 ```bash
 racg serve -listen-addr 127.0.0.1 -port 8777
@@ -150,10 +67,6 @@ sudo racg update --target /usr/local/bin/racg
 
 `racg update` verifies the release checksum before replacing the binary. If the target path is not writable, rerun with privileges or pass `--sudo`. A running `racg serve` process keeps using the old in-memory binary until it is restarted.
 
-`racg serve` checks for a newer release once in the background with a three-second deadline. Server startup, the API, and the TUI never wait for this check; an offline server continues normally. When an update is available, the Server tab shows `↑` and the Server page offers an Update button. Installation does not restart the server or interrupt running jobs. After installation, the tab shows `↻` until the server is restarted.
-
-During `racg login`, the client compares its embedded version with `server_version` returned by the server. A mismatch prints a recommendation only; it never blocks pairing. This comparison uses the RACG connection and does not require internet access.
-
 Release process for maintainers is documented in `docs/developer-run.md`.
 
 ## API quick check
@@ -198,7 +111,6 @@ racg request tail <request_id>
 racg request logs <request_id> --stdout
 racg request logs <request_id> --stderr
 racg file read /apps/haproxy/haproxy.cfg
-racg file read /apps/haproxy/haproxy.cfg --plain --unredacted
 racg file patch /apps/haproxy/haproxy.cfg --diff-file /tmp/haproxy.patch
 racg file upload ./bundle.tar.gz /srv/releases/bundle.tar.gz
 racg file download /var/log/app/archive.gz ./archive.gz
@@ -214,14 +126,13 @@ You can still override saved config with `--host`, `--token`, `RACG_HOST`, and `
 `racg run` creates a `cmd.run` request and waits until it reaches a terminal status. While waiting, status transitions and periodic heartbeats are written to stderr; live combined output and the final timing/exit-code report are written to stdout. Use `--status-interval 0` to disable heartbeats.
 `racg request wait <id>` resumes observation of an existing request without creating or repeating it. It follows live output, survives temporary connection failures for `--reconnect-timeout` (default `5m`), and returns the remote process exit code. A local `--wait-timeout` only stops the client: it never cancels the remote request. Run the same `request wait` command again to resume.
 Use `--execution-timeout 2m` to limit the remote process. The legacy `--timeout <seconds>` form remains supported. This execution timeout is independent from local `--wait-timeout`.
-Use `racg run --script <local-file>` or `--script-stdin` for multiline shell code without command-line quoting. Use `--stdin-file <local-file> -- <argv...>` or `--stdin -- <argv...>` to pass SQL or other exact bytes to any command. RACG stages the bytes, shows their content and SHA-256 in the approval TUI, sends them directly to process stdin, and removes the staged copy after denial, cancellation, or execution. No persistent remote file is created. The SHA-256 verifies and audits the staged bytes; reusable session/always rules match the approved argv scope regardless of stdin content.
-`racg request logs` reads dedicated stream endpoints (`/v1/requests/<id>/logs/stdout` and `/v1/requests/<id>/logs/stderr`) so large output can be consumed without parsing the full request JSON.
+Use `racg run --script <local-file>` or `--script-stdin` for multiline shell code without command-line quoting. Use `--stdin-file <local-file> -- <argv...>` or `--stdin -- <argv...>` to pass SQL or other exact bytes to any command. RACG stages the bytes, shows their content and SHA-256 in the approval TUI, sends them directly to process stdin, and removes the staged copy after denial, cancellation, or execution. No persistent remote file is created. Session/always rules for stdin requests are bound to both argv and the exact stdin SHA-256; an argv-only rule cannot approve changed stdin.
+`racg request logs` reads raw stream endpoints (`/v1/requests/<id>/logs/stdout` and `/v1/requests/<id>/logs/stderr`) so large output can be consumed without parsing the full request JSON.
 Use `racg request logs <id> --live` for the current in-memory live output snapshot while a request is still running, or `racg request tail <id>` to follow live output until the request reaches a terminal status.
 Use `racg request cancel <id>` to cancel a pending approval or stop a running command.
 Use `racg config set` to request a format-aware config edit without shell scripts. It supports `env`, `json`, and `yaml`; writes a backup next to an existing file by default; validates the result before replacing the file; and uses dotted keys for `json`/`yaml`. Pass `--create` to atomically create a missing file with mode `0600`; its parent directory must already exist.
 Use `racg file read` and `racg file patch` for plain text files such as HAProxy, nginx, systemd unit files, or other non-JSON/YAML configs. `file patch` submits an `fs.patch_unified` request and expects a unified diff.
-`racg file read` numbers lines by default so unified-diff hunk coordinates are visible; pass `--plain` for the original text. RACG masks common password, token, authorization, credential-URL, and private-key forms in command and file output by default. Pass `--unredacted` to `run`, `request wait/logs/tail`, or `file read` when the exact raw output is required. Redaction is best-effort presentation filtering; stored audit output and hashes remain unchanged.
-Use `racg file upload <local> <remote>` and `racg file download <remote> <local>` for binary or large files. Both create approval requests. File bytes are streamed outside JSON, checked with SHA-256, and written atomically. Upload preserves an existing target's permissions or uses `0644` for a new file; pass `--mode 0600` when needed. Download refuses to replace a local file unless `--force` is passed. There is no server-imposed transfer size limit; the approval request shows the size before you authorize it.
+Use `racg file upload <local> <remote>` and `racg file download <remote> <local>` for binary or large files. Both create approval requests. File bytes are streamed outside JSON, checked with SHA-256, and written atomically. Upload preserves an existing target's permissions or uses `0644` for a new file; pass `--mode 0600` when needed. Download refuses to replace a local file unless `--force` is passed. The server default transfer limit is 100 MiB and can be changed with `racg serve --max-transfer-bytes N`.
 
 ## Agent skill
 
@@ -303,3 +214,76 @@ The page shows persisted `ALLOW_ALWAYS` rules and in-memory `ALLOW_SESSION` rule
 Use `Add Session` (`s`, also works on a Russian keyboard layout) to create an in-memory rule for a selected session. Use `Add Always` (`a`) to create a persisted rule. The form supports command scopes and exact, prefix, or glob path scopes for existing file/config operations. Command scopes use the same parser as approval scopes, so shell separators must be represented by separate rules.
 Manual persisted rules obey `allow_always_for_dangerous`; dangerous `Add Always` rules are rejected unless that server option is explicitly enabled. Session rules remain available for temporary authorization.
 Session rules expire when the server/session ends and can be deleted from the Rules page. Persisted rules can be enabled, disabled, or deleted; changes take effect in the live rule engine immediately.
+
+## Phone approver (Android)
+
+The phone pairs with a server through a single-use enrollment QR (10 minute
+TTL, burns after the first successful pairing) and signs every API call with
+non-exportable ECDSA P-256 keys in Android Keystore:
+
+- approval key — requires biometric unlock; opens a five-minute signing
+  window, so one unlock covers several decisions;
+- poll key — no user authentication; authorizes pending-list reads,
+  the watcher, the history screen and WebSocket wake-ups only, and can never
+  submit a decision.
+
+Approvals (`ALLOW_ONCE`, `DENY`) and reusable grants (`ALLOW_SESSION`,
+`ALLOW_ALWAYS`) open the same scope editor as the TUI: one checked, editable
+line per shell segment (per path for `fs.*`/`conf.*` ops). Timed grants add
+durations — `1 hour`, `24 hours`, `session`, `always`; `1h`/`24h` rules live
+inside the agent session and die with it.
+
+The app shows a live pending list with pull-to-refresh, human-readable
+operation details, raw operation on demand, decision history from every
+source (phone, TUI, auto-rules), and a server management screen: extend or
+revoke agent sessions, revoke devices, mint pairing codes.
+
+Background watcher starts on its own, receives instant WebSocket wake-ups
+(`/v1/approver/events`) with a 60-second polling fallback, and survives
+reboots. Server-side decisions from the phone carry the device identity and
+are audited like TUI decisions.
+
+Server commands:
+
+```bash
+racg approver-setup          # single-use enrollment QR; interactive address picker
+racg approver-setup --public-url http://server:8777   # explicit address for scripts
+racg approver-setup --out /tmp/qr.png                 # additionally save a PNG
+racg pairing-code            # fresh agent pairing code without a restart
+racg approver-devices list
+racg approver-devices revoke <device_id>
+```
+
+Sessions persist across server restarts (hashed tokens in SQLite), extend on
+activity (sliding expiry) and can be extended or revoked from the phone. Set
+`session_ttl_hours` in the config to change the default 8-hour lifetime
+(`0` = no expiry).
+
+## Headless mode (SSH-only servers)
+
+For servers without a desktop the same binary splits into two processes: the
+privileged pipeline owns SQLite, rules and execution and listens only on a
+unix socket; the unprivileged facade is the only public port and proxies to
+that socket. The facade validates traffic shape and holds no secrets.
+
+On Ubuntu deploy both services with one command:
+
+```bash
+sudo bash scripts/headless-setup.sh
+# options: RACG_PORT=8777, RACG_SOCKET=/run/racg/pipeline.sock, RACG_STATE_DIR=/var/lib/racg
+```
+
+Manual equivalent:
+
+```bash
+sudo useradd -r -s /usr/sbin/nologin racg-remote
+sudo racg serve --headless --socket /run/racg/pipeline.sock
+racg remote-approver --listen 0.0.0.0:8777 --socket /run/racg/pipeline.sock
+```
+
+The pipeline must run as root (it executes approved commands); the facade runs
+as the unprivileged `racg-remote` user. Database migrations apply on first
+start; auth tokens persist across restarts, so agents re-login only on the
+first upgrade from v0.5. Phone enrollment: `sudo racg approver-setup` over
+SSH — the QR prints in the terminal, and `--public-url` is picked
+interactively from detected addresses (tailscale first) when omitted.
