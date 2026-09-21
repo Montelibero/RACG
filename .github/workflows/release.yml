@@ -157,8 +157,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cp release/android-apk/racg-approver-release.apk release/
-          cp release/android-apk/SHA256SUMS release/racg-approver-apk.sha256
+          tag="${{ steps.tag.outputs.tag }}"
+          cp release/android-apk/racg-approver-release.apk "release/racg-approver-${tag}.apk"
+          # Regenerate the checksum for the versioned name; the generic
+          # SHA256SUMS from the build refers to the unversioned filename.
+          rm release/android-apk/SHA256SUMS
+          (cd release && sha256sum "racg-approver-${tag}.apk" > "racg-approver-${tag}.apk.sha256")
+
+      - name: Remove stale unversioned assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${{ steps.tag.outputs.tag }}"
+          for name in racg-approver-release.apk racg-approver-apk.sha256; do
+            gh release delete-asset "$tag" "$name" --repo "$GITHUB_REPOSITORY" -y 2>/dev/null || true
+          done
 
       - name: Collect checksums
         shell: bash
@@ -173,6 +188,6 @@ jobs:
           generate_release_notes: true
           files: |
             release/**/*.tar.gz
-            release/racg-approver-release.apk
-            release/racg-approver-apk.sha256
+            release/racg-approver-${{ steps.tag.outputs.tag }}.apk
+            release/racg-approver-${{ steps.tag.outputs.tag }}.apk.sha256
             release/checksums.txt
