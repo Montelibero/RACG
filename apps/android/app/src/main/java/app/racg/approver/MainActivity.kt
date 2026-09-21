@@ -37,6 +37,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.app.ActivityCompat
 import kotlinx.coroutines.launch
 import androidx.fragment.app.FragmentActivity
 import kotlinx.coroutines.Dispatchers
@@ -61,6 +62,25 @@ private enum class Screen {
 }
 
 class MainActivity : FragmentActivity() {
+    private val permissionCallbacks = mutableMapOf<Int, (Boolean) -> Unit>()
+    private var nextPermissionCode = 7001
+
+    /** Direct permission request with a 16-bit-safe request code: the
+     * rememberLauncherForActivityResult generator produced request codes
+     * beyond the lower 16 bits and crashed on this device. */
+    fun requestPermission(permission: String, onResult: (Boolean) -> Unit) {
+        val code = nextPermissionCode++
+        permissionCallbacks[code] = onResult
+        ActivityCompat.requestPermissions(this, arrayOf(permission), code)
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        permissionCallbacks.remove(requestCode)?.invoke(
+            grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED,
+        )
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AppLog.init(filesDir)
@@ -87,11 +107,6 @@ private fun AppContent() {
     var transferServerId by remember { mutableStateOf<String?>(null) }
     var selectedRequest by remember { mutableStateOf<PendingRequestItem?>(null) }
     val pendingCount by ApproverPollService.pendingCount.collectAsState()
-    val notificationPermission = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        if (granted) ApproverPollService.start(context) else status = "Notifications are disabled"
-    }
 
     fun startWatching() {
         val granted = ContextCompat.checkSelfPermission(
@@ -102,7 +117,14 @@ private fun AppContent() {
             ApproverPollService.start(context)
             status = "Background watching started"
         } else {
-            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            val act = context as? MainActivity
+            if (act == null) {
+                status = "Notification permission is unavailable"
+            } else {
+                act.requestPermission(Manifest.permission.POST_NOTIFICATIONS) { granted ->
+                    if (granted) ApproverPollService.start(context) else status = "Notifications are disabled"
+                }
+            }
         }
     }
 
@@ -361,6 +383,7 @@ private fun AppContent() {
 
         Screen.Servers -> ServersScreen(
             setups = setups,
+            statusText = status,
             onBack = { screen = Screen.Home },
             onAddServer = { screen = Screen.ScanSetup },
             onTransfer = { target -> transferServer(target) },

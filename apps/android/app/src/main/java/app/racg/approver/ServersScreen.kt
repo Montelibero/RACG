@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun ServersScreen(
     setups: List<StoredSetup>,
+    statusText: String? = null,
     onBack: () -> Unit,
     onAddServer: () -> Unit,
     onTransfer: (StoredSetup) -> Unit,
@@ -34,6 +35,9 @@ fun ServersScreen(
     var pendingForget by remember { mutableStateOf<StoredSetup?>(null) }
 
     AppFrame(title = "My servers", onBack = onBack) {
+        statusText?.let {
+            Text(it, style = MaterialTheme.typography.bodyMedium)
+        }
         Text(
             "These profiles stay on this phone. Removing one does not revoke access on the server.",
             style = MaterialTheme.typography.bodyMedium,
