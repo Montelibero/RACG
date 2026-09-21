@@ -45,17 +45,23 @@ Security upgrade: older server builds accepted decisions from agent tokens. Upda
 - SQLite audit trail: sessions, requests, decisions, executions, rules
 - Command execution with timeout/kill/output limits
 
-## Remote approver mode (single public port)
+## Remote approver mode (phone over HTTP)
 
-For headless servers the same binary splits into two processes: the privileged
-pipeline never touches the network, and the unprivileged facade is the only
-public listener. Existing v0.4.x/v0.5.x clients keep working through the
-facade unchanged.
+The default interactive `racg serve` already works with the phone: run it on
+the server, let it through the firewall, and enroll the phone with the
+one-time QR — no extra services required.
 
 ```bash
-# one-command deployment on Ubuntu (installs and enables both systemd units):
-sudo bash scripts/headless-setup.sh
+racg serve -listen-addr 0.0.0.0 -port 8777
+racg approver-setup          # interactive: picks the public address with you (tailscale first)
+```
 
+For SSH-only servers there is also a headless split: the privileged pipeline
+never touches the network and the unprivileged facade is the only public
+listener. On Ubuntu one script installs and enables both systemd units:
+
+```bash
+sudo bash scripts/headless-setup.sh
 # manual equivalent:
 sudo racg serve --headless --socket /run/racg/pipeline.sock
 racg remote-approver --listen 0.0.0.0:8777 --socket /run/racg/pipeline.sock
@@ -67,7 +73,6 @@ submit signed decisions; the server verifies every device signature and binds
 it to the exact approved operation. Enrollment and revocation:
 
 ```bash
-racg approver-setup          # interactive: picks the public address with you (tailscale first)
 racg approver-setup --public-url http://server:8777   # explicit address for scripts
 racg serve --approver-setup-out /tmp/approver-qr.png --public-url http://server:8777  # manual test mode
 racg approver-devices list
