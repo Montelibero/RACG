@@ -413,35 +413,6 @@ type ApproverRequest struct {
 	CreatedAt string          `json:"created_at,omitempty"`
 }
 
-func (r ApproverRequest) Summary() string {
-	var op rules.Op
-	_ = json.Unmarshal(r.Op, &op)
-	switch op.Type {
-	case "cmd.run":
-		var payload struct {
-			Argv []string `json:"argv"`
-		}
-		_ = json.Unmarshal(op.Payload, &payload)
-		if len(payload.Argv) > 0 {
-			return "cmd.run " + strings.Join(payload.Argv, " ")
-		}
-	case "fs.read", "fs.download":
-		var payload struct {
-			Path string `json:"path"`
-		}
-		_ = json.Unmarshal(op.Payload, &payload)
-		return op.Type + " " + payload.Path
-	case "fs.upload":
-		var payload struct {
-			Path string `json:"path"`
-		}
-		_ = json.Unmarshal(op.Payload, &payload)
-		return "fs.upload " + payload.Path
-	case "conf.set", "conf.set_kv":
-		return op.Type
-	}
-	return op.Type
-}
 
 func approverRequestFromRecord(rec requestRecord) ApproverRequest {
 	copy := rec

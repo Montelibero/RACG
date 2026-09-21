@@ -656,11 +656,20 @@ internal fun humanOperation(operation: String): String {
             "fs.upload" -> "Upload file to: ${payload.optString("path")}"
             "fs.append_block" -> "Append to file: ${payload.optString("path")}"
             "fs.replace_literal" -> "Replace in file: ${payload.optString("path")}"
-            "conf.set" -> "Set config: ${payload.optString("path")}"
-            "conf.set_kv" -> "Set config key: ${payload.optString("path")}"
+            "conf.set" -> "Set config: ${payload.optString("path")}\nkey: ${payload.optString("key")}\n${configValuePreview(payload)}"
+            "conf.set_kv" -> "Set config key: ${payload.optString("path")}\nkey: ${payload.optString("key")}\n${configValuePreview(payload)}"
             else -> operation.take(2000)
         }
     }.getOrElse { operation.take(2000) }
+}
+
+/** Value preview for conf.set details: the approve decision must see what
+ * is being written, not just where. Long values are truncated; the raw
+ * request screen always shows the full JSON. */
+internal fun configValuePreview(payload: JSONObject): String {
+    val value = payload.optString("value", "")
+    if (value.isEmpty()) return "value: (empty)"
+    return if (value.length <= 400) "value: $value" else "value: ${value.take(400)}\n… (show raw for the full value)"
 }
 
 /** Default grant scope: the exact command with arguments (item 13). */
