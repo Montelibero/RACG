@@ -113,12 +113,14 @@ jobs:
           fi
 
       - name: Build APK (tests + debug + release)
+        working-directory: apps/android
         env:
           SOURCE_REVISION: ${{ steps.rev.outputs.revision }}
-        run: bash apps/android/build-docker.sh apps/android/dist
+        run: bash build-docker.sh dist
 
       - name: Verify release signature
-        run: bash apps/android/verify-release.sh apps/android/dist/racg-approver-release.apk
+        working-directory: apps/android
+        run: bash verify-release.sh dist/racg-approver-release.apk
 
       - name: Upload android artifacts
         uses: actions/upload-artifact@v4
