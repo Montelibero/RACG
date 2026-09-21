@@ -4,6 +4,20 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// versionCode derives from versionName: major*10000 + minor*100 + patch, two
+// decimal digits per component, so it tracks release tags (0.6.2 -> 602,
+// 0.6.12 -> 612). Text after '-' (git describe suffixes, pre-release markers)
+// is ignored. A component of 100 or more would collide with the next higher
+// component, so the build fails fast instead of shipping a broken code.
+fun apkVersionCode(version: String): Int {
+    val parts = version.substringBefore('-').split('.')
+    val numbers = List(3) { parts.getOrNull(it)?.toIntOrNull() ?: 0 }
+    require(numbers.all { it in 0..99 }) {
+        "version components must stay below 100 for the versionCode scheme: $version"
+    }
+    return numbers[0] * 10000 + numbers[1] * 100 + numbers[2]
+}
+
 android {
     namespace = "app.racg.approver"
     compileSdk = 35
@@ -21,8 +35,9 @@ android {
         applicationId = "app.racg.approver"
         minSdk = 29
         targetSdk = 35
-        versionCode = System.getenv("RACG_ANDROID_VERSION_CODE")?.toIntOrNull() ?: 2
-        versionName = System.getenv("RACG_ANDROID_VERSION_NAME") ?: "0.1.0-alpha.1"
+        val racgVersionName = System.getenv("RACG_ANDROID_VERSION_NAME") ?: "0.1.0-alpha.1"
+        versionCode = apkVersionCode(racgVersionName)
+        versionName = racgVersionName
 
         val sourceRevision = System.getenv("RACG_SOURCE_REVISION") ?: "unknown"
         buildConfigField("String", "SOURCE_REVISION", "\"$sourceRevision\"")

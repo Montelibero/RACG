@@ -88,10 +88,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-        with:
-          # Full history: build-docker.sh derives the APK versionCode from the
-          # commit count; a shallow clone would produce versionCode=1.
-          fetch-depth: 0
       - uses: docker/setup-buildx-action@v3
 
       - name: Resolve source revision
@@ -125,14 +121,12 @@ jobs:
           else
             echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
           fi
-          echo "count=$(git rev-list --count HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Build APK (tests + debug + release)
         working-directory: apps/android
         env:
           SOURCE_REVISION: ${{ steps.rev.outputs.revision }}
           RACG_VERSION_TAG: ${{ steps.ver.outputs.tag }}
-          RACG_ANDROID_VERSION_CODE: ${{ steps.ver.outputs.count }}
         run: bash build-docker.sh dist
 
       - name: Verify release signature
