@@ -306,15 +306,22 @@ fun RequestDetailsScreen(
             OutlinedButton(onClick = onBack) { Text("Back") }
             OutlinedButton(onClick = onShowRaw) { Text("Show raw") }
         }
-        Text(
-            humanOperation(request.operation),
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-        )
-        Text("Agent: ${request.clientId}", style = MaterialTheme.typography.bodyMedium)
-        Text("Server: ${request.setup.payload.serverId}", style = MaterialTheme.typography.bodyMedium)
-        status.let { Text(status, style = MaterialTheme.typography.bodyMedium) }
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.weight(1f))
+        // Decision actions stay pinned to the bottom; long scripts scroll.
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                humanOperation(request.operation),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+            )
+            Text("Agent: ${request.clientId}", style = MaterialTheme.typography.bodyMedium)
+            Text("Server: ${request.setup.payload.serverId}", style = MaterialTheme.typography.bodyMedium)
+            status.let { Text(status, style = MaterialTheme.typography.bodyMedium) }
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             androidx.compose.material3.Button(
                 onClick = { decide("ALLOW_ONCE") },
