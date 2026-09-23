@@ -272,6 +272,9 @@ fun RequestDetailsScreen(
                 }
             }.onSuccess {
                 status = "$action accepted by ${target.setup.payload.serverId}"
+                // Decision accepted: leave the detail screen so the resolved
+                // request cannot be decided a second time.
+                onBack()
             }.onFailure { error ->
                 // Item 11: the approval key is valid for five minutes after a
                 // single unlock. Try silently first; ask for biometrics only
