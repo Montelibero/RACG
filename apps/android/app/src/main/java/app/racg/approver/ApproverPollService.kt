@@ -215,6 +215,7 @@ class ApproverPollService : Service() {
             .setContentTitle("RACG approver watching")
             .setContentText("Connected servers are checked for approvals.")
             .setOngoing(true)
+            .setContentIntent(mainIntent())
             .build()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(FOREGROUND_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
@@ -229,6 +230,7 @@ class ApproverPollService : Service() {
             .setContentTitle("RACG approver watching")
             .setContentText(text)
             .setOngoing(true)
+            .setContentIntent(mainIntent())
             .build()
         val manager = NotificationManagerCompat.from(this)
         manager.notify(FOREGROUND_ID, notification)
