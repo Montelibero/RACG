@@ -236,6 +236,26 @@ fun RequestDetailsScreen(
     var deciding by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("") }
     var grantDialog by remember { mutableStateOf(false) }
+    // Staged stdin of a cmd.run request: the hash in the raw JSON is useless
+    // to a human, the actual script is what gets approved (item 18).
+    var stdinText by remember { mutableStateOf<String?>(null) }
+    var stdinProblem by remember { mutableStateOf<String?>(null) }
+    val wantsStdin = usesCompatibilityApi(request.setup.payload.endpoint) &&
+        operationHasStagedStdin(request.operation)
+    LaunchedEffect(request.requestId) {
+        if (!wantsStdin) return@LaunchedEffect
+        try {
+            val (content, problem) = withContext(Dispatchers.IO) {
+                stagedStdinForRequest(request.setup, request.requestId)
+            }
+            stdinText = content
+            stdinProblem = problem
+        } catch (error: Exception) {
+            // Older servers (no /stdin route) and offline servers must not
+            // block the decision UI; the raw screen still shows the hash.
+            stdinProblem = "stdin unavailable: ${error.message ?: "unknown error"}"
+        }
+    }
 
     fun decide(action: String, rulePatterns: List<String>? = null, ruleDuration: String? = null, allowAuthRetry: Boolean = true) {
         val target = request
@@ -324,6 +344,29 @@ fun RequestDetailsScreen(
             Text("Agent: ${request.clientId}", style = MaterialTheme.typography.bodyMedium)
             Text("Server: ${request.setup.payload.serverId}", style = MaterialTheme.typography.bodyMedium)
             status.let { Text(status, style = MaterialTheme.typography.bodyMedium) }
+            if (wantsStdin) {
+                Text(
+                    "Command input (stdin):",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                val stdinValue = stdinText
+                if (stdinValue != null) {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            stdinValue,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.padding(12.dp),
+                        )
+                    }
+                } else {
+                    Text(
+                        stdinProblem ?: "Loading…",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             androidx.compose.material3.Button(
@@ -577,6 +620,36 @@ fun HistoryScreen(
                         Text(historyVerdict(entry), style = MaterialTheme.typography.bodyMedium)
                         entry.clientId?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                         Text(formatHistoryTime(entry.decidedAt), style = MaterialTheme.typography.bodySmall)
+                        // Execution result (stdout/stderr/exit code): the
+                        // approver sees what the command actually did, not
+                        // only that it was allowed.
+                        if (entry.execStatus != null || entry.exitCode != null || entry.stdout != null || entry.stderr != null) {
+                            Text(
+                                resultSummary(entry),
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (entry.execStatus == "FAILED" || (entry.exitCode ?: 0) != 0) {
+                                    MaterialTheme.colorScheme.error
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                },
+                            )
+                            entry.stdout?.let {
+                                Text(
+                                    it,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                )
+                            }
+                            entry.stderr?.let {
+                                Text(
+                                    it,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
+                        }
                         if (isActiveRequestStatus(entry.status)) {
                             OutlinedButton(
                                 onClick = { killRequest(entry) },
@@ -609,6 +682,16 @@ internal fun historyVerdict(entry: PhoneHistoryEntry): String {
     val status = entry.status?.let { " — $it" } ?: ""
     return "$action $by$status".replace("  ", " ")
 }
+
+/** One-line execution summary for a history card; streams render below it. */
+internal fun resultSummary(entry: PhoneHistoryEntry): String {
+    val parts = mutableListOf<String>()
+    entry.execStatus?.let { parts.add(it) }
+    entry.exitCode?.let { parts.add("exit $it") }
+    entry.durationMs?.let { ms -> parts.add("${ms / 1000.0}s") }
+    return parts.joinToString(" · ")
+}
+
 internal fun isActiveRequestStatus(status: String?): Boolean = when (status) {
     "PENDING_APPROVAL", "APPROVED", "QUEUED", "RUNNING" -> true
     else -> false
@@ -638,6 +721,18 @@ internal fun operationSummary(operation: String): String {
         }
         if (detail.isBlank()) type else "$type: $detail"
     }.getOrElse { operation.take(120) }
+}
+
+/** True when the request JSON carries a staged stdin reference: only those
+ * cmd.run requests need the stdin review block. */
+internal fun operationHasStagedStdin(operation: String): Boolean {
+    return runCatching {
+        val value = JSONTokener(operation).nextValue()
+        if (value !is JSONObject) return@runCatching false
+        val payload = value.optJSONObject("payload") ?: return@runCatching false
+        payload.optString("stdin_upload_id", "").isNotEmpty() ||
+            payload.optLong("stdin_size", 0L) > 0L
+    }.getOrDefault(false)
 }
 
 /** Multi-line human description for the details screen (item 12): scripts

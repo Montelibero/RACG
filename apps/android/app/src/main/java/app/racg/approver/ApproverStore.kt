@@ -17,6 +17,9 @@ data class StoredSetup(
     val payload: SetupPayload,
     val approvalKeyMaterial: DeviceKeyMaterial,
     val pollKeyMaterial: DeviceKeyMaterial,
+    /** Server version reported at pairing time; null when unknown (broker
+     * setups or profiles stored before this field existed). */
+    val serverVersion: String? = null,
 )
 
 interface ApproverStore {
@@ -132,6 +135,7 @@ class DataStoreApproverStore(private val context: Context) : ApproverStore {
                 put("approval_key_type", setup.approvalKeyMaterial.keyType)
                 put("poll_public_key", encode(setup.pollKeyMaterial.publicKey))
                 put("poll_key_type", setup.pollKeyMaterial.keyType)
+                setup.serverVersion?.let { put("server_version", it) }
             })
         }
         return array.toString()
@@ -158,6 +162,7 @@ class DataStoreApproverStore(private val context: Context) : ApproverStore {
                     decode(value.getString("poll_public_key")),
                     value.getString("poll_key_type"),
                 ),
+                serverVersion = value.optString("server_version", "").takeIf { it.isNotEmpty() },
             )
         }
     }

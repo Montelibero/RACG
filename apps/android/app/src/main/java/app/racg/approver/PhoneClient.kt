@@ -25,6 +25,8 @@ class PhoneClient(private val endpoint: String, private val timeoutMillis: Int =
         return response.getString("challenge")
     }
 
+    /** Pairs the device and returns the raw server response, which carries
+     * `server_version` (missing on servers older than the field). */
     fun pair(
         deviceId: String,
         publicKey: ByteArray,
@@ -32,7 +34,7 @@ class PhoneClient(private val endpoint: String, private val timeoutMillis: Int =
         tokenSha256Hex: String,
         challenge: String,
         signature: String,
-    ) {
+    ): JSONObject {
         val input = JSONObject()
             .put("device_id", deviceId)
             .put("public_key", Base64.encodeToString(publicKey, Base64.NO_WRAP))
@@ -40,8 +42,11 @@ class PhoneClient(private val endpoint: String, private val timeoutMillis: Int =
             .put("token_sha256", tokenSha256Hex)
             .put("challenge", challenge)
             .put("signature", signature)
-        call("POST", "/v1/approver/pairing", input)
+        return call("POST", "/v1/approver/pairing", input)
     }
+
+    /** Unauthenticated server version probe (GET /v1/info). */
+    fun info(): JSONObject = call("GET", "/v1/info")
 
     fun pending(
         serverId: String,
@@ -107,6 +112,24 @@ class PhoneClient(private val endpoint: String, private val timeoutMillis: Int =
         return List(array.length()) { i -> array.getJSONObject(i).optString("pattern") }
     }
 
+    /** Staged stdin content of a pending cmd.run request (poll-key signed):
+     * the approver reviews the actual script, not just its hash. Server
+     * returns stdin=null with a problem note when there is nothing staged. */
+    fun stagedStdin(
+        serverId: String,
+        deviceId: String,
+        signer: AndroidKeystoreDeviceSigner,
+        requestId: String,
+    ): Pair<String?, String?> {
+        val response = signedCall(
+            serverId, deviceId, signer, "GET",
+            "/v1/approver/requests/$requestId/stdin",
+        )
+        val content: String? = response.optString("stdin", "").takeIf { it.isNotEmpty() }
+        val problem: String? = response.optString("problem", "").takeIf { it.isNotEmpty() }
+        return content to problem
+    }
+
     /** Recent decisions from every source — phone, TUI, auto-rules (item 16).
      * Poll-key signed read, no biometrics. */
     fun history(
@@ -118,6 +141,7 @@ class PhoneClient(private val endpoint: String, private val timeoutMillis: Int =
         val array = response.getJSONArray("history")
         return List(array.length()) { i ->
             val value = array.getJSONObject(i)
+            val result = value.optJSONObject("result")
             PhoneHistoryEntry(
                 requestId = value.getString("request_id"),
                 decision = value.getString("decision"),
@@ -127,6 +151,11 @@ class PhoneClient(private val endpoint: String, private val timeoutMillis: Int =
                 clientId = value.optString("client_id", null as String?),
                 status = value.optString("status", null as String?),
                 operation = value.optJSONObject("op")?.toString() ?: value.optString("op"),
+                execStatus = result?.optString("status", "")?.takeIf { it.isNotEmpty() },
+                exitCode = if (result?.has("exit_code") == true) result.getInt("exit_code") else null,
+                stdout = result?.optString("stdout", "")?.takeIf { it.isNotEmpty() },
+                stderr = result?.optString("stderr", "")?.takeIf { it.isNotEmpty() },
+                durationMs = if (result?.has("duration_ms") == true) result.getLong("duration_ms") else null,
             )
         }
     }
@@ -262,6 +291,14 @@ fun scopeCandidatesForRequest(setup: StoredSetup, requestId: String): List<Strin
         .scopeCandidates(setup.payload.serverId, setup.payload.approverId, signer, requestId)
 }
 
+/** Poll-key signed stdin read for the details screen: no biometrics, the
+ * approver reviews the actual script before deciding. */
+fun stagedStdinForRequest(setup: StoredSetup, requestId: String): Pair<String?, String?> {
+    val signer = DeviceKeyManager.pollSigner(setup.pollKeyMaterial.publicKey)
+    return PhoneClient(setup.payload.endpoint)
+        .stagedStdin(setup.payload.serverId, setup.payload.approverId, signer, requestId)
+}
+
 fun decisionHistory(setup: StoredSetup): List<PhoneHistoryEntry> {
     val signer = DeviceKeyManager.pollSigner(setup.pollKeyMaterial.publicKey)
     return PhoneClient(setup.payload.endpoint)
@@ -277,6 +314,11 @@ data class PhoneHistoryEntry(
     val clientId: String?,
     val status: String?,
     val operation: String,
+    val execStatus: String? = null,
+    val exitCode: Int? = null,
+    val stdout: String? = null,
+    val stderr: String? = null,
+    val durationMs: Long? = null,
 )
 
 data class PhoneSessionInfo(val sessionId: String, val clientId: String, val expiresAt: String?)

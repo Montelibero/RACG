@@ -11,10 +11,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -22,6 +22,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun ServersScreen(
@@ -33,6 +35,27 @@ fun ServersScreen(
     onForget: (StoredSetup) -> Unit,
 ) {
     var pendingForget by remember { mutableStateOf<StoredSetup?>(null) }
+    // Freshly probed versions (GET /v1/info); falls back to the stored
+    // pairing-time version. Keyed by serverId because setups is immutable
+    // here — MainActivity owns the persisted copy.
+    var probedVersions by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+
+    LaunchedEffect(setups) {
+        withContext(Dispatchers.IO) {
+            setups.forEach { setup ->
+                if (!usesCompatibilityApi(setup.payload.endpoint)) return@forEach
+                val probed = try {
+                    PhoneClient(setup.payload.endpoint, timeoutMillis = 5_000)
+                        .info()
+                        .optString("server_version", "")
+                        .takeIf { it.isNotEmpty() }
+                } catch (_: Exception) {
+                    null
+                }
+                probed?.let { probedVersions = probedVersions + (setup.payload.serverId to it) }
+            }
+        }
+    }
 
     AppFrame(title = "My servers", onBack = onBack) {
         statusText?.let {
@@ -55,6 +78,21 @@ fun ServersScreen(
                             setup.payload.serverId,
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
+                        )
+                        val version = probedVersions[setup.payload.serverId] ?: setup.serverVersion
+                        Text(
+                            when {
+                                version == null -> "Server version unknown"
+                                AppVersions.compare(version, BuildConfig.VERSION_NAME) < 0 ->
+                                    "Server racg $version is older than this app (${BuildConfig.VERSION_NAME}); update RACG on the server"
+                                else -> "Server racg $version"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (version != null && AppVersions.compare(version, BuildConfig.VERSION_NAME) < 0) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
                         )
                         Text(
                             "Profile stored on this phone",
