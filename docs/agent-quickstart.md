@@ -125,6 +125,8 @@ printf 'select 1;\n' | racg run --stdin -- isql -database main.fdb
 The input is staged outside request JSON, verified with SHA-256, displayed in the approval TUI, and supplied directly to process stdin. It is removed after denial, cancellation, or execution. The SHA-256 verifies and audits the staged bytes; saved session/always rules match the approved argv scope regardless of stdin content.
 Script/stdin modes are not secret transport because their content is intentionally visible during approval.
 
+The staged content and the execution result are visible to enrolled approvers: the pending stdin is read through `GET /v1/approver/requests/{id}/stdin` (shown on the approval screen), and `GET /v1/approver/history` includes the execution result (status, exit code, stdout, stderr) for each decided request.
+
 Expected output is compact, not a full JSON document:
 
 ```text

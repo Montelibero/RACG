@@ -246,9 +246,11 @@ source (phone, TUI, auto-rules), and a server management screen: extend or
 revoke agent sessions, revoke devices, mint pairing codes.
 
 Request details show the full substance of the operation before approval:
-command scripts verbatim, staged stdin content, and for `conf.set` the config
-key and the value being written (long values preview with the full text in the
-raw request view). The path alone is never the whole story.
+command scripts verbatim, staged stdin content (fetched from the server — the
+raw view's hash is for verification, not for humans), and for `conf.set` the
+config key and the value being written (long values preview with the full text
+in the raw request view). The path alone is never the whole story. History
+entries carry the execution result: status, exit code, stdout and stderr.
 
 Transferring to a new phone is a remote enrollment: an enrolled device
 mints a fresh single-use enrollment token through the signed admin action

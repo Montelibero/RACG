@@ -69,7 +69,7 @@ Manual approval and denial are local to the server TUI, or performed by an enrol
 ## Operating Rules
 
 - Use narrow commands and explicit argv. Avoid large opaque shell strings unless the user specifically needs shell composition.
-- Use script/stdin modes for multiline code, SQL, templates, quotes, or literal `$VARIABLE` content. RACG stages exact bytes and uses their SHA-256 for integrity verification and audit. Saved rules match the approved argv scope, not the stdin hash.
+- Use script/stdin modes for multiline code, SQL, templates, quotes, or literal `$VARIABLE` content. RACG stages exact bytes and uses their SHA-256 for integrity verification and audit. Saved rules match the approved argv scope, not the stdin hash. Approvers see the staged content itself: the phone fetches it during review (`GET /v1/approver/requests/{id}/stdin`), and the approver history includes the execution result (status, exit code, stdout, stderr).
 - For simple `env`/`json`/`yaml` config key updates, use `racg config set` instead of generating scripts or raw patches.
 - A server checks for updates once in the background with a three-second deadline. This never blocks offline startup.
 - In the Server tab, `↑` means an update is available and `↻` means the binary was replaced but the running server still needs a deliberate restart.
