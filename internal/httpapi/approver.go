@@ -12,10 +12,12 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/itolstov/racg/internal/auth"
+	"github.com/itolstov/racg/internal/outputfilter"
 	"github.com/itolstov/racg/internal/rules"
 )
 
@@ -308,6 +310,17 @@ func (a *API) handleApproverRequest(w http.ResponseWriter, r *http.Request) {
 		a.writeApproverScopeCandidates(w, requestID)
 		return
 	}
+	// Staged stdin content for the approve dialog: the approver must see the
+	// script bytes, not just their hash.
+	if strings.HasSuffix(requestID, "/stdin") {
+		requestID = strings.TrimSuffix(requestID, "/stdin")
+		if requestID == "" {
+			writeError(w, http.StatusNotFound, "REQUEST_NOT_FOUND", "request not found or not pending", requestID)
+			return
+		}
+		a.writeApproverStdin(w, requestID)
+		return
+	}
 	request, ok := a.RequestForApprover(requestID)
 	if !ok {
 		writeError(w, http.StatusNotFound, "REQUEST_NOT_FOUND", "request not found or not pending", requestID)
@@ -331,6 +344,54 @@ func (a *API) writeApproverScopeCandidates(w http.ResponseWriter, requestID stri
 		out = append(out, map[string]any{"op_type": c.OpType, "segment": c.Segment, "pattern": c.Pattern})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"candidates": out})
+}
+
+// writeApproverStdin returns the staged stdin content of a pending cmd.run
+// request so the approver sees the actual script before deciding.
+// Authentication already happened in handleApproverRequest — burning the
+// challenge again here would fail. The staged upload is deleted once the
+// request leaves PENDING_APPROVAL, so a decided request reports 404.
+func (a *API) writeApproverStdin(w http.ResponseWriter, requestID string) {
+	rec, ok := a.RequestForApprover(requestID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "REQUEST_NOT_FOUND", "request not found or not pending", requestID)
+		return
+	}
+	var op rules.Op
+	if err := json.Unmarshal(rec.Op, &op); err != nil || op.Type != "cmd.run" {
+		writeJSON(w, http.StatusOK, map[string]any{"stdin": nil, "problem": "request has no staged stdin"})
+		return
+	}
+	var payload struct {
+		UploadID  string `json:"stdin_upload_id"`
+		StdinSize int64  `json:"stdin_size"`
+		StdinSHA  string `json:"stdin_sha256"`
+	}
+	if err := json.Unmarshal(op.Payload, &payload); err != nil || !validTransferID(payload.UploadID) {
+		writeJSON(w, http.StatusOK, map[string]any{"stdin": nil, "problem": "request has no staged stdin"})
+		return
+	}
+	content, err := os.ReadFile(a.uploadDataPath(payload.UploadID))
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"stdin": nil, "problem": "staged stdin unavailable"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"stdin":  string(content),
+		"size":   payload.StdinSize,
+		"sha256": payload.StdinSHA,
+	})
+}
+
+// approverOutputLimit caps per-stream output in history entries: the phone
+// screen is a review surface, not a log viewer (the TUI keeps the full text).
+const approverOutputLimit = 16 * 1024
+
+func truncateApproverOutput(text string) string {
+	if len(text) <= approverOutputLimit {
+		return text
+	}
+	return text[:approverOutputLimit] + "\n… truncated (see the server TUI for full output)"
 }
 
 // handleApproverHistory returns recent decisions from every source (phone,
@@ -372,6 +433,20 @@ func (a *API) handleApproverHistory(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(row.OpJSON) > 0 {
 			entry["op"] = json.RawMessage(row.OpJSON)
+		}
+		if row.HasExitCode || row.ExecStatus != "" {
+			result := map[string]any{
+				"status":      row.ExecStatus,
+				"duration_ms": row.DurationMs,
+			}
+			if row.HasExitCode {
+				result["exit_code"] = row.ExitCode
+			}
+			// Redact secrets and cap payload size for the phone screen;
+			// the full text stays available in the TUI.
+			result["stdout"] = truncateApproverOutput(outputfilter.Redact(row.Stdout))
+			result["stderr"] = truncateApproverOutput(outputfilter.Redact(row.Stderr))
+			entry["result"] = result
 		}
 		out = append(out, entry)
 	}

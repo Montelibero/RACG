@@ -231,10 +231,17 @@ type DecisionHistoryRow struct {
 	ClientID       string
 	Status         string
 	OpJSON         string
+	ExecStatus     string
+	ExitCode       int
+	HasExitCode    bool
+	Stdout         string
+	Stderr         string
+	DurationMs     int64
 }
 
 // ListRecentDecisions returns the latest decisions (any source) joined with
-// their requests: the phone history screen (item 16) mirrors the TUI history.
+// their requests and executions: the phone history screen (item 16) mirrors
+// the TUI history, including what the command actually did.
 func (s *Store) ListRecentDecisions(ctx context.Context, limit int) ([]DecisionHistoryRow, error) {
 	if limit <= 0 {
 		limit = 50
@@ -242,9 +249,13 @@ func (s *Store) ListRecentDecisions(ctx context.Context, limit int) ([]DecisionH
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT d.request_id, d.decision, d.decision_source, d.decided_at,
 		       COALESCE(d.rule_id, ''), COALESCE(r.client_id, ''),
-		       COALESCE(r.status, ''), COALESCE(r.op_json, '')
+		       COALESCE(r.status, ''), COALESCE(r.op_json, ''),
+		       COALESCE(e.status, ''), COALESCE(e.exit_code, 0),
+		       e.exit_code IS NOT NULL, COALESCE(e.stdout, ''),
+		       COALESCE(e.stderr, ''), COALESCE(e.duration_ms, 0)
 		  FROM decisions d
 		  LEFT JOIN requests r ON r.request_id = d.request_id
+		  LEFT JOIN executions e ON e.request_id = d.request_id
 		 ORDER BY d.decided_at DESC
 		 LIMIT ?`, limit)
 	if err != nil {
@@ -256,8 +267,10 @@ func (s *Store) ListRecentDecisions(ctx context.Context, limit int) ([]DecisionH
 	for rows.Next() {
 		var row DecisionHistoryRow
 		var decided string
-		var ruleID, clientID, status, opJSON sql.NullString
-		if err := rows.Scan(&row.RequestID, &row.Decision, &row.DecisionSource, &decided, &ruleID, &clientID, &status, &opJSON); err != nil {
+		var ruleID, clientID, status, opJSON, execStatus, stdout, stderr sql.NullString
+		var exitCode sql.NullInt64
+		var durationMs sql.NullInt64
+		if err := rows.Scan(&row.RequestID, &row.Decision, &row.DecisionSource, &decided, &ruleID, &clientID, &status, &opJSON, &execStatus, &exitCode, &row.HasExitCode, &stdout, &stderr, &durationMs); err != nil {
 			return nil, err
 		}
 		row.DecidedAt, err = time.Parse(time.RFC3339Nano, decided)
@@ -268,6 +281,12 @@ func (s *Store) ListRecentDecisions(ctx context.Context, limit int) ([]DecisionH
 		row.ClientID = clientID.String
 		row.Status = status.String
 		row.OpJSON = opJSON.String
+		row.ExecStatus = execStatus.String
+		row.HasExitCode = exitCode.Valid
+		row.ExitCode = int(exitCode.Int64)
+		row.Stdout = stdout.String
+		row.Stderr = stderr.String
+		row.DurationMs = durationMs.Int64
 		out = append(out, row)
 	}
 	return out, rows.Err()

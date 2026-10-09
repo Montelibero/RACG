@@ -1038,7 +1038,9 @@
             "required": false,
             "schema": {
               "type": "string",
-              "enum": ["session"]
+              "enum": [
+                "session"
+              ]
             },
             "description": "scope=session returns the recent history of the calling token's own session (server-side session claim, newest first, default limit 10). Without it the legacy behavior stays: pending approvals across all sessions."
           },
@@ -2512,6 +2514,61 @@
           },
           "401": {
             "description": "invalid poll credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/approver/requests/{request_id}/stdin": {
+      "get": {
+        "summary": "Show staged stdin content of a pending request",
+        "description": "Same signed poll headers as the pending list. Returns the staged stdin bytes (the actual script) for a pending cmd.run request so the approver can review them before deciding. The staged upload is consumed when the request leaves PENDING_APPROVAL, so decided requests return stdin: null.",
+        "responses": {
+          "200": {
+            "description": "staged stdin content, or null with a problem note",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "stdin": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "size": {
+                      "type": "integer"
+                    },
+                    "sha256": {
+                      "type": "string"
+                    },
+                    "problem": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid poll credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "request not found or not pending",
             "content": {
               "application/json": {
                 "schema": {

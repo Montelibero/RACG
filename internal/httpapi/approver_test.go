@@ -10,8 +10,10 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,6 +21,7 @@ import (
 
 	"github.com/itolstov/racg/internal/auth"
 	"github.com/itolstov/racg/internal/config"
+	"github.com/itolstov/racg/internal/rules"
 	"github.com/itolstov/racg/internal/store"
 )
 
@@ -619,4 +622,153 @@ func TestApproverSecondDecisionAfterApprovalRejected(t *testing.T) {
 	if rw.Code != http.StatusNotFound || !strings.Contains(rw.Body.String(), "REQUEST_NOT_FOUND") {
 		t.Fatalf("conflicting decision: %d %s", rw.Code, rw.Body.String())
 	}
+}
+
+// stageStdinUpload writes a staged stdin upload directly into the transfer
+// dir, mirroring what /v1/uploads produces for an agent session.
+func stageStdinUpload(t *testing.T, api *API, id, sessionID, content string) {
+	t.Helper()
+	if err := os.MkdirAll(api.transferDir(), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	meta, err := json.Marshal(stagedUpload{UploadID: id, SessionID: sessionID, Size: int64(len(content)), SHA256: strings.Repeat("a", 64)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for path, data := range map[string][]byte{
+		api.uploadDataPath(id): []byte(content),
+		api.uploadMetaPath(id): meta,
+	} {
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			t.Fatalf("write staged file: %v", err)
+		}
+	}
+}
+
+func TestApproverStdinEndpointShowsScriptWhilePending(t *testing.T) {
+	api, st, agentToken := newApproverTestAPI(t)
+	device := newApproverTestDevice(t, "dev1")
+	if rw := serveApprover(t, api, device.pairRequest(t, api, api.serverName, approverTokenHex(api))); rw.Code != http.StatusOK {
+		t.Fatalf("pairing: %d %s", rw.Code, rw.Body.String())
+	}
+
+	const uploadID = "11111111-1111-4111-8111-111111111111"
+	const script = "echo hello\nrm -rf /tmp/old\n"
+	stageStdinUpload(t, api, uploadID, "session", script)
+
+	op, err := json.Marshal(rules.Op{Type: "cmd.run", Payload: json.RawMessage(`{"argv":["/bin/bash","-s"],"stdin_upload_id":"` + uploadID + `","stdin_size":` + fmt.Sprintf("%d", len(script)) + `}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api.reqs["req-stdin"] = requestRecord{ID: "req-stdin", Status: "PENDING_APPROVAL", SessionID: "session", ClientID: "client", Op: op}
+	if err := st.InsertRequest(context.Background(), store.Request{
+		ID: "req-stdin", SessionID: "session", ClientID: "client",
+		Status: "PENDING_APPROVAL", OpJSON: string(op), RiskFlagsJSON: "[]", CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("insert request: %v", err)
+	}
+	sum := sha256.Sum256(op)
+	pending := ApproverRequest{ID: "req-stdin", Status: "PENDING_APPROVAL", Op: op, OpSHA256: hex.EncodeToString(sum[:])}
+
+	rw := serveApprover(t, api, device.pollRequest(t, api, "/v1/approver/requests/req-stdin/stdin"))
+	if rw.Code != http.StatusOK {
+		t.Fatalf("stdin: %d %s", rw.Code, rw.Body.String())
+	}
+	var body struct {
+		Stdin   string `json:"stdin"`
+		Size    int64  `json:"size"`
+		SHA256  string `json:"sha256"`
+		Problem string `json:"problem"`
+	}
+	if err := json.Unmarshal(rw.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Stdin != script || body.Size != int64(len(script)) || body.Problem != "" {
+		t.Fatalf("stdin body: %+v", body)
+	}
+
+	// Unauthenticated reads stay rejected.
+	raw := serveApprover(t, api, httptest.NewRequest(http.MethodGet, "/v1/approver/requests/req-stdin/stdin", nil))
+	if raw.Code != http.StatusUnauthorized {
+		t.Fatalf("unsigned stdin read: %d", raw.Code)
+	}
+
+	// After the decision the request leaves PENDING_APPROVAL and the staged
+	// upload is consumed: the endpoint reports the request as gone.
+	if rw := serveApprover(t, api, device.decisionRequest(t, api, api.serverName, pending.ID, pending.OpSHA256, "ALLOW_ONCE")); rw.Code != http.StatusOK {
+		t.Fatalf("decision: %d %s", rw.Code, rw.Body.String())
+	}
+	waitRequestTerminalForTest(t, api, agentToken, pending.ID)
+	rw = serveApprover(t, api, device.pollRequest(t, api, "/v1/approver/requests/req-stdin/stdin"))
+	if rw.Code != http.StatusNotFound {
+		t.Fatalf("stdin after decision: %d %s", rw.Code, rw.Body.String())
+	}
+}
+
+func TestApproverStdinEndpointWithoutStagedStdin(t *testing.T) {
+	api, _, agentToken := newApproverTestAPI(t)
+	device := newApproverTestDevice(t, "dev1")
+	if rw := serveApprover(t, api, device.pairRequest(t, api, api.serverName, approverTokenHex(api))); rw.Code != http.StatusOK {
+		t.Fatalf("pairing: %d %s", rw.Code, rw.Body.String())
+	}
+	pending := createPendingApproverRequest(t, api, agentToken)
+
+	rw := serveApprover(t, api, device.pollRequest(t, api, "/v1/approver/requests/"+pending.ID+"/stdin"))
+	if rw.Code != http.StatusOK || !strings.Contains(rw.Body.String(), "no staged stdin") {
+		t.Fatalf("plain request stdin: %d %s", rw.Code, rw.Body.String())
+	}
+}
+
+func TestApproverHistoryIncludesExecutionResult(t *testing.T) {
+	api, st, agentToken := newApproverTestAPI(t)
+	pending := createPendingApproverRequest(t, api, agentToken)
+	device := newApproverTestDevice(t, "dev1")
+	if rw := serveApprover(t, api, device.pairRequest(t, api, api.serverName, approverTokenHex(api))); rw.Code != http.StatusOK {
+		t.Fatalf("pairing: %d %s", rw.Code, rw.Body.String())
+	}
+	if rw := serveApprover(t, api, device.decisionRequest(t, api, api.serverName, pending.ID, pending.OpSHA256, "ALLOW_ONCE")); rw.Code != http.StatusOK {
+		t.Fatalf("decision: %d %s", rw.Code, rw.Body.String())
+	}
+	waitRequestTerminalForTest(t, api, agentToken, pending.ID)
+
+	if err := st.InsertExecution(context.Background(), store.Execution{
+		RequestID: pending.ID, StartedAt: time.Now(), FinishedAt: time.Now(),
+		DurationMs: 120, ExitCode: 2, Status: "FAILED",
+		Stdout: "partial output\n", Stderr: "boom: permission denied\n",
+		StdoutSHA256: strings.Repeat("b", 64), StderrSHA256: strings.Repeat("c", 64),
+	}); err != nil {
+		t.Fatalf("insert execution: %v", err)
+	}
+
+	rw := serveApprover(t, api, device.pollRequest(t, api, "/v1/approver/history"))
+	if rw.Code != http.StatusOK {
+		t.Fatalf("history: %d %s", rw.Code, rw.Body.String())
+	}
+	var body struct {
+		History []struct {
+			RequestID string `json:"request_id"`
+			Result    *struct {
+				Status   string `json:"status"`
+				ExitCode *int   `json:"exit_code"`
+				Stdout   string `json:"stdout"`
+				Stderr   string `json:"stderr"`
+			} `json:"result"`
+		} `json:"history"`
+	}
+	if err := json.Unmarshal(rw.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range body.History {
+		if entry.RequestID != pending.ID || entry.Result == nil {
+			continue
+		}
+		if entry.Result.Status != "FAILED" || entry.Result.ExitCode == nil || *entry.Result.ExitCode != 2 {
+			t.Fatalf("result status/exit: %+v", entry.Result)
+		}
+		if entry.Result.Stdout != "partial output\n" || entry.Result.Stderr != "boom: permission denied\n" {
+			t.Fatalf("result streams: %+v", entry.Result)
+		}
+		return
+	}
+	t.Fatalf("history has no result for %s: %s", pending.ID, rw.Body.String())
 }
