@@ -47,6 +47,7 @@ import java.time.Instant
 import java.util.Base64
 import java.security.SecureRandom
 import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
+import org.json.JSONObject
 
 private enum class Screen {
     Home,
@@ -211,8 +212,12 @@ private fun AppContent() {
                     transferQr = qr
                     transferServerId = target.payload.serverId
                     screen = Screen.TransferQr
-                } catch (_: Exception) {
-                    status = "Transfer could not be created"
+                } catch (e: Exception) {
+                    status = if (e is IllegalArgumentException && e.message?.contains("returned 404") == true) {
+                        "Server is too old for transfer (racg 0.6.1+ required); update RACG on the server"
+                    } else {
+                        "Transfer could not be created: ${e.message}"
+                    }
                 }
             }
         }
@@ -277,7 +282,7 @@ private fun AppContent() {
                                 try {
                                     val completed = withContext(Dispatchers.IO) {
                                         val endpoint = URI(payload.endpoint)
-                                        if (endpoint.scheme == "http" || endpoint.scheme == "https") {
+                                        val pairResponse: JSONObject? = if (endpoint.scheme == "http" || endpoint.scheme == "https") {
                                             val token = payload.enrollmentToken
                                                 ?: throw IllegalArgumentException("Enrollment token is missing")
                                             val client = PhoneClient(payload.endpoint)
@@ -308,6 +313,9 @@ private fun AppContent() {
                                                 signature = signature,
                                             )
                                         } else {
+                                            null
+                                        }
+                                        if (endpoint.scheme != "http" && endpoint.scheme != "https") {
                                             payload.transferToken?.let { transferToken ->
                                                 val serverKey = Ed25519PublicKeyParameters(payload.serverPublicKey, 0)
                                                 val enrollment = ApprovalProtocol.newDeviceTransferEnrollment(
@@ -340,12 +348,15 @@ private fun AppContent() {
                                                 )
                                             }
                                         }
+                                        val serverVersion: String? =
+                                            pairResponse?.optString("server_version", "")?.takeIf { v: String -> v.isNotEmpty() }
                                         newSetup.copy(
                                             payload = payload.copy(
                                                 enrollmentToken = null,
                                                 transferToken = null,
                                                 transferGrantChallenge = null,
                                             ),
+                                            serverVersion = serverVersion,
                                         )
                                     }
                                     setups = store.save(completed)
@@ -446,6 +457,15 @@ private fun HomeScreen(
     onOpenLogs: () -> Unit,
     onOpenAdmin: () -> Unit,
 ) {
+    // Self-update: check GitHub releases, download the verified APK, hand
+    // it to the system installer. Global app concern, so it lives on the
+    // home screen next to the version line.
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    var updateStatus by remember { mutableStateOf<String?>(null) }
+    var updateBusy by remember { mutableStateOf(false) }
+    var updateApk by remember { mutableStateOf<java.io.File?>(null) }
+
     AppFrame(title = "RACG Approver", onBack = null) {
         Text(
             "v${BuildConfig.VERSION_NAME} build ${BuildConfig.SOURCE_REVISION.take(12)}",
@@ -477,6 +497,43 @@ private fun HomeScreen(
         AppButton(text = "Scan setup QR", onClick = onScanSetup, outlined = true)
         AppButton(text = "Start watching", onClick = onStartWatching, outlined = true)
         AppButton(text = "Stop watching", onClick = onStopWatching, outlined = true)
+        AppButton(
+            text = when {
+                updateBusy -> "Checking…"
+                updateApk != null -> "Install downloaded update"
+                else -> "Check for updates"
+            },
+            onClick = {
+                val ready = updateApk
+                when {
+                    ready != null -> AppUpdater.installApk(context, ready)
+                    updateBusy -> Unit
+                    else -> {
+                        updateBusy = true
+                        updateStatus = "Checking GitHub releases…"
+                        scope.launch {
+                            val check = AppUpdater.checkUpdate()
+                            if (check.error != null) {
+                                updateStatus = "Update check failed: ${check.error}"
+                            } else if (!check.updateAvailable) {
+                                updateStatus = "Up to date (app ${check.currentVersion}, latest release ${check.latestVersion})"
+                            } else {
+                                updateStatus = "Downloading racg ${check.latestVersion}…"
+                                try {
+                                    val apk = AppUpdater.downloadVerified(context, check.apkUrl!!, check.checksumUrl)
+                                    updateApk = apk
+                                    updateStatus = "racg ${check.latestVersion} downloaded and verified. Tap install."
+                                } catch (e: Exception) {
+                                    updateStatus = "Download failed: ${e.message ?: "unknown error"}"
+                                }
+                            }
+                            updateBusy = false
+                        }
+                    }
+                }
+            },
+            outlined = true,
+        )
         AppButton(text = "Diagnostics log", onClick = onOpenLogs, outlined = true)
         if (setups.isNotEmpty()) {
             AppButton(text = "Manage sessions & devices", onClick = onOpenAdmin, outlined = true)
