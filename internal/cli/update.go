@@ -92,8 +92,37 @@ func (c *UpdateCmd) Run(args []string) int {
 		return 1
 	}
 	fmt.Fprintf(c.stdout, "updated=true\nversion: %s\ntarget: %s\n", strings.TrimPrefix(info.Tag, "v"), info.Target)
-	fmt.Fprintln(c.stdout, "restart racg serve to use the new version")
+	restartHeadlessServices(c)
 	return 0
+}
+
+// updateServiceUnits lists the systemd units the headless setup script
+// installs. Restarting them makes the freshly installed binary effective
+// immediately; absence of the units (or of systemd) means there is nothing
+// to restart and the message stays advisory.
+var updateServiceUnits = []string{"racg-pipeline", "racg-facade"}
+
+// restartHeadlessServices restarts known racg systemd units after a
+// successful install and reports what happened. When the units are not
+// running under systemd, or the restart is not permitted, it falls back to
+// the manual restart hint. Failures never fail the update itself.
+func restartHeadlessServices(c *UpdateCmd) {
+	restartable := make([]string, 0, len(updateServiceUnits))
+	for _, unit := range updateServiceUnits {
+		if err := updateExecCommandContext(context.Background(), "systemctl", "is-active", "--quiet", unit).Run(); err == nil {
+			restartable = append(restartable, unit)
+		}
+	}
+	if len(restartable) == 0 {
+		fmt.Fprintln(c.stdout, "restart racg serve to use the new version")
+		return
+	}
+	args := append([]string{"systemctl", "restart"}, restartable...)
+	if err := updateExecCommandContext(context.Background(), args[0], args[1:]...).Run(); err != nil {
+		fmt.Fprintf(c.stdout, "updated binary installed; restart failed (%v): sudo systemctl restart %s\n", err, strings.Join(restartable, " "))
+		return
+	}
+	fmt.Fprintf(c.stdout, "restarted services: %s\n", strings.Join(restartable, " "))
 }
 
 func updateUsage() string {
@@ -116,8 +145,10 @@ examples:
   sudo racg update --target /usr/local/bin/racg
   racg update --version v0.5.0
 
-Updating a running racg serve process does not restart it or interrupt jobs.
-Restart the server deliberately to run the new binary. The Server page performs
+Updating a running racg serve process does not interrupt jobs. When the
+headless systemd units (racg-pipeline, racg-facade) are active, racg update
+restarts them so the new version takes effect immediately; otherwise restart
+the server deliberately to run the new binary. The Server page performs
 one non-blocking background check with a 3-second deadline.
 ↑ means an update is available.
 ↻ means the installed binary is waiting for a server restart.

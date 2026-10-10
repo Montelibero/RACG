@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -27,7 +28,10 @@ func TestCLIUpdateHelpExplainsServerUpdateLifecycle(t *testing.T) {
 		"--check",
 		"--version TAG",
 		"--target PATH",
-		"does not restart it or interrupt jobs",
+		"does not interrupt jobs",
+		"racg-pipeline",
+		"racg-facade",
+		"takes effect immediately",
 		"3-second deadline",
 		"↑ means an update is available",
 		"↻ means the installed binary",
@@ -89,11 +93,57 @@ func TestCLIUpdateDownloadsVerifiesAndInstallsTarget(t *testing.T) {
 			"updated=true",
 			"version: 9.8.7",
 			"target: " + target,
+			// Test hosts have no active racg systemd units, so the CLI
+			// falls back to the manual restart hint.
 			"restart racg serve",
 		} {
 			if !strings.Contains(out.String(), want) {
 				t.Fatalf("stdout missing %q:\n%s", want, out.String())
 			}
+		}
+	})
+}
+
+func TestCLIUpdateRestartsActiveHeadlessServices(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "racg")
+	if err := os.WriteFile(target, []byte("old-binary"), 0o755); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+
+	withUpdateTestServer(t, "v9.8.7", []byte("new-binary"), func(ts *httptest.Server, _ string) {
+		binDir := t.TempDir()
+		logPath := filepath.Join(binDir, "restart.log")
+		// Stub systemctl: racg-pipeline is active, racg-facade is not.
+		// A successful `systemctl restart` records the unit it got.
+		stub := "#!/bin/sh\n" +
+			"if [ \"$1\" = is-active ]; then [ \"$3\" = racg-pipeline ] && exit 0; exit 3; fi\n" +
+			"if [ \"$1\" = restart ]; then echo \"$2\" >> " + strconv.Quote(logPath) + "; exit 0; fi\n" +
+			"exit 0\n"
+		stubPath := filepath.Join(binDir, "systemctl")
+		if err := os.WriteFile(stubPath, []byte(stub), 0o755); err != nil {
+			t.Fatalf("write stub: %v", err)
+		}
+
+		t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+		var out, errOut bytes.Buffer
+		root := NewRoot(&out, &errOut)
+		code := root.Run([]string{"update", "--repo", "owner/repo", "--target", target})
+		if code != 0 {
+			t.Fatalf("code=%d stderr=%s stdout=%s", code, errOut.String(), out.String())
+		}
+		if !strings.Contains(out.String(), "restarted services: racg-pipeline") {
+			t.Fatalf("stdout missing restart report:\n%s", out.String())
+		}
+		if strings.Contains(out.String(), "restart racg serve") {
+			t.Fatalf("manual hint printed despite restarted services:\n%s", out.String())
+		}
+		log, err := os.ReadFile(logPath)
+		if err != nil {
+			t.Fatalf("read restart log: %v", err)
+		}
+		if strings.TrimSpace(string(log)) != "racg-pipeline" {
+			t.Fatalf("restart log=%q, want only racg-pipeline", string(log))
 		}
 	})
 }
