@@ -65,7 +65,7 @@ racg update
 sudo racg update --target /usr/local/bin/racg
 ```
 
-`racg update` verifies the release checksum before replacing the binary. If the target path is not writable, rerun with privileges or pass `--sudo`. A running `racg serve` process keeps using the old in-memory binary until it is restarted.
+`racg update` verifies the release checksum before replacing the binary. If the target path is not writable, rerun with privileges or pass `--sudo`. A running `racg serve` process keeps using the old in-memory binary until it is restarted. After installing, `racg update` detects active `racg-pipeline`/`racg-facade` systemd units and restarts them so the new version takes effect immediately; without systemd units it prints the manual restart hint.
 
 Release process for maintainers is documented in `docs/developer-run.md`.
 
