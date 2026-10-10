@@ -88,7 +88,7 @@ If RACG is installed under `/usr/local/bin` and the current user cannot write th
 sudo racg update --target /usr/local/bin/racg
 ```
 
-The updater verifies release checksums. If `racg serve` is running, restart it after update so the server process uses the new binary.
+The updater verifies release checksums. After installing, `racg update` restarts active `racg-pipeline`/`racg-facade` systemd units automatically; if no units are active (for example, `racg serve` runs manually), restart it yourself so the server process uses the new binary.
 
 The server performs one non-blocking update check in the background with a three-second deadline. Offline operation is unaffected. When a release is available, open the Server tab, focus the Update button with `Tab`, and press `Enter` (or click it). The installed binary changes immediately, but the running server remains on its current version until a deliberate restart.
 
